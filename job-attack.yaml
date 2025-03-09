@@ -40,7 +40,7 @@ spec:
           - name: NCCL_IB_DISABLE
             value: "1"
           - name: NUM_RUNS
-            value: "1"
+            value: "10"
           command: ["/bin/bash", "-c"]
           args:
             - |
@@ -92,7 +92,8 @@ spec:
                           --train_size 100000 \
                           --key_type "csprng" \
                           --seed_key 2024 \
-                          --image_attack_size 100 
+                          --image_attack_size 100 \
+                          --surrogate_training_only
                   exit_status=$?
                   echo "Run $run finished with exit status $exit_status"
                   

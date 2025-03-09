@@ -17,7 +17,7 @@ def parse_log_file(filename):
                     losses.append(float(match.group(1)))
     return np.array(losses)
 
-def smooth_losses(losses, window_size=100):
+def smooth_losses(losses, window_size=1000):
     # If we have fewer points than window_size, adjust window_size
     if len(losses) < window_size:
         window_size = max(1, len(losses) // 10)
@@ -80,10 +80,10 @@ def plot_loss(filename, output_path='loss_plot.pdf'):
     x = np.linspace(0, 1, len(losses))
     
     # Plot raw data with low opacity and much smaller points
-    plt.plot(x, losses, '.', color='#4292c6', alpha=0.08, markersize=0.5, label='Raw Loss')
+    plt.plot(x, losses, '.', color='#4292c6', alpha=0.08, markersize=0.1, label='Raw Loss')
     
     # Compute smoothed losses with adaptive window size
-    window_size = min(100, max(5, len(losses) // 20))  # Adaptive window size
+    window_size = min(1000, max(5, len(losses) // 20))  # Adaptive window size
     smoothed_losses = []
     
     # Moving average for smoothing
@@ -93,7 +93,7 @@ def plot_loss(filename, output_path='loss_plot.pdf'):
         smoothed_losses.append(np.mean(losses[start:end]))
     
     # Plot smoothed line with thinner linewidth
-    plt.plot(x, smoothed_losses, '-', color='#08519c', linewidth=0.8, label='Smoothed Loss')
+    plt.plot(x, smoothed_losses, '-', color='#08519c', linewidth=0.4, label='Smoothed Loss')
     
     # Set labels with proper formatting - use normal weight with sans-serif fonts
     plt.xlabel('Training Progress', fontweight='normal')

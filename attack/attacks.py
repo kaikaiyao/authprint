@@ -671,6 +671,7 @@ def attack_label_based(
     world_size: int = 1,
     momentum: float = 0.9,
     key_type: str = "csprng",
+    surrogate_training_only: bool = False,
 ) -> tuple:
     """
     Performs a label-based attack on a watermarked GAN model with optional surrogate fine-tuning.
@@ -698,19 +699,29 @@ def attack_label_based(
         world_size (int): Number of processes for distributed training
         momentum (float): Momentum for PGD attack
         key_type (str): Type of key to use for masking
+        surrogate_training_only (bool): If True, only perform surrogate training and skip all other steps
     """
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     if alpha_values is None:
         alpha_values = [0.001]
 
     if rank == 0:
-        logging.info("="*80)
-        logging.info("Starting comprehensive attack evaluation on multiple test cases")
-        logging.info("="*80)
-        logging.info(f"Attack type: {attack_type}")
-        logging.info(f"Key type: {key_type}")
-        logging.info(f"Number of surrogate decoders: {len(surrogate_decoders)}")
-        logging.info("-"*80)
+        if surrogate_training_only:
+            logging.info("="*80)
+            logging.info("Starting surrogate decoder training only mode")
+            logging.info("="*80)
+            logging.info(f"Attack type: {attack_type}")
+            logging.info(f"Key type: {key_type}")
+            logging.info(f"Number of surrogate decoders: {len(surrogate_decoders)}")
+            logging.info("-"*80)
+        else:
+            logging.info("="*80)
+            logging.info("Starting comprehensive attack evaluation on multiple test cases")
+            logging.info("="*80)
+            logging.info(f"Attack type: {attack_type}")
+            logging.info(f"Key type: {key_type}")
+            logging.info(f"Number of surrogate decoders: {len(surrogate_decoders)}")
+            logging.info("-"*80)
 
     # Set models to evaluation mode
     gan_model.eval()
@@ -720,6 +731,41 @@ def attack_label_based(
     for param in watermarked_model.parameters():
         param.requires_grad = False
 
+    # If surrogate_training_only mode is enabled, skip to Step 4 (surrogate training)
+    if surrogate_training_only:
+        if rank == 0:
+            logging.info("Surrogate training only mode: skipping to Step 4 (surrogate training)")
+            logging.info("Step 4: Training surrogate decoders...")
+        
+        if train_surrogate:
+            for i, surrogate_decoder in enumerate(surrogate_decoders):
+                train_surrogate_decoder(
+                    attack_type=attack_type,
+                    surrogate_decoder=surrogate_decoder,
+                    gan_model=gan_model,
+                    watermarked_model=watermarked_model,
+                    max_delta=max_delta,
+                    latent_dim=latent_dim,
+                    device=device,
+                    train_size=train_size,
+                    epochs=epochs,
+                    batch_size=batch_size,
+                    rank=rank,
+                    world_size=world_size,
+                )
+                if rank == 0:
+                    logging.info(f"  Surrogate decoder {i + 1} training completed")
+        else:
+            if rank == 0:
+                logging.info("  Using pre-trained surrogate decoders")
+        
+        if rank == 0:
+            logging.info("="*80)
+            logging.info("Surrogate training completed. Skipping remaining attack steps.")
+            logging.info("="*80)
+        
+        return None, None, None, None
+    
     # Generate original watermarked images for reference
     with torch.no_grad():
         if rank == 0:

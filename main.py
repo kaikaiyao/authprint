@@ -72,6 +72,7 @@ def main():
     parser.add_argument("--attack_batch_size_pgd", type=int, default=10, help="Batch size for the attack")
     parser.add_argument("--momentum_pgd", type=float, default=0.9, help="Momentum factor for PGD attack")
     parser.add_argument("--finetune_surrogate", action="store_true", help="Fine-tune surrogate with real decoder outputs")
+    parser.add_argument("--surrogate_training_only", action="store_true", help="Only perform surrogate training (Step 4) and skip all other attack steps")
 
     # DDP arguments
     parser.add_argument("--local_rank", type=int, default=0, help="Local rank for distributed training")
@@ -412,6 +413,7 @@ def main():
             world_size=args.world_size if train_surrogate else 1,
             momentum=args.momentum_pgd,
             key_type=args.key_type,
+            surrogate_training_only=args.surrogate_training_only,
         )
         
         if args.rank == 0 and attack_auc is not None:

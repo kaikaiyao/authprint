@@ -1,0 +1,111 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${USER}-job-train-ablation-${INDEX}
+  labels:
+    eidf/user: ${USER}
+    kueue.x-k8s.io/queue-name: ${QUEUE-NAME}
+    kueue.x-k8s.io/priority-class: batch-workload-priority
+spec:
+  completions: 1
+  parallelism: 1
+  completionMode: Indexed
+  backoffLimit: 2147483647
+  activeDeadlineSeconds: 864000
+  template:
+    metadata:
+      labels:
+        eidf/user: ${USER}
+    spec:
+      restartPolicy: OnFailure
+      # Replace nodeSelector with affinity to allow multiple GPU types.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-H100-80GB-HBM3
+                      - NVIDIA-A100-SXM4-40GB
+                      - NVIDIA-A100-SXM4-80GB
+      # Add tolerations to allow scheduling on nodes with specific taints.
+      tolerations:
+        - key: "eidf098"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+        - key: "eidf107"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+      containers:
+        - name: my-app
+          image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
+          workingDir: "/workspace/kubernets"
+          env:
+            - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+              value: "1"
+            - name: NCCL_DEBUG
+              value: "INFO"
+            - name: NCCL_IB_DISABLE
+              value: "1"
+            - name: MAX_DELTA
+              value: "${MAX_DELTA}"
+            - name: NCCL_IB_HCA
+              value: "^mlx5"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "Running experiment with max_delta=$MAX_DELTA"
+              mkdir -p /workspace/kubernets/results
+              curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
+              torchrun --nproc_per_node=4 \
+                      --nnodes=1 \
+                      --node_rank=0 \
+                      --master_addr=127.0.0.1 \
+                      --master_port=12345 \
+                      main.py train \
+                      --stylegan2_url="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" \
+                      --batch_size=8 \
+                      --n_iterations=200000 \
+                      --num_eval_samples=1000 \
+                      --num_conv_layers=7 \
+                      --num_pool_layers=7 \
+                      --initial_channels=64 \
+                      --lr_M_hat=2e-4 \
+                      --lr_D=2e-4 \
+                      --seed_key=2024 \
+                      --key_type "csprng" \
+                      --max_delta=$MAX_DELTA \
+                      --mask_switch_on \
+                      --resume_checkpoint='/nfs-user/data/csprng/decoder_model_final_20250301122140388952.pth' \
+                      --saving_path=results
+              exit_status=$?
+              echo "Python script finished with exit status $exit_status, sleeping indefinitely"
+              sleep infinity
+          resources:
+            limits:
+              nvidia.com/gpu: "4"
+              cpu: "32"
+              memory: "128Gi"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace/kubernets/results
+            - name: nfs-user
+              mountPath: /nfs-user
+            - name: dshm  # For shared memory
+              mountPath: /dev/shm
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: ${USER}-ws-${INDEX}
+        - name: nfs-user
+          nfs:
+            server: 10.24.1.255 # This is $INFK8S_NFS_SERVER_IP
+            path: /user/s2470447-infk8s
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi  # Adjust based on needs

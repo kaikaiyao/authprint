@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${USER}-ws-${INDEX}
+  labels:
+    eidf/user: ${USER}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: ${STORAGE}
+  storageClassName: csi-rbd-sc

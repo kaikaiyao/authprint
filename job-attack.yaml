@@ -81,7 +81,7 @@ spec:
               {
                 for run in $(seq 1 $total_runs); do
                   echo "Starting run $run of $total_runs"
-                  torchrun --nproc_per_node=4 \
+                  torchrun --nproc_per_node=1 \
                           --nnodes=1 \
                           --node_rank=0 \
                           --master_addr=127.0.0.1 \
@@ -98,11 +98,10 @@ spec:
                           --num_pool_layers_surr 7 \
                           --initial_channels_surr 64 \
                           --max_delta 0.05 \
-                          --train_size 100000 \
+                          --train_size 16 \
                           --key_type "csprng" \
                           --seed_key 2024 \
                           --image_attack_size 100 \
-                          --surrogate_training_only
                   exit_status=$?
                   echo "Run $run finished with exit status $exit_status"
                   
@@ -126,7 +125,7 @@ spec:
               sleep infinity
           resources:
             limits:
-              nvidia.com/gpu: "4"
+              nvidia.com/gpu: "1"
               cpu: "16"
               memory: "64Gi"
           volumeMounts:

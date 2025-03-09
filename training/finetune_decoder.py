@@ -33,8 +33,8 @@ def finetune_decoder(
 ):
     """
     Finetune an existing decoder to be more robust against PGD attacks by training it on:
-    1. Original images (label 1)
-    2. Watermarked images (post-constrained) (label 0)
+    1. Original images (label 0)
+    2. Watermarked images (post-constrained) (label 1)
     3. Adversarial samples from PGD attack (label 0)
     
     Args:
@@ -69,10 +69,42 @@ def finetune_decoder(
 
     gan_model.eval()
     watermarked_model.eval()
+    
+    # Get the actual decoder model (handle DDP case)
+    decoder_module = decoder.module if isinstance(decoder, nn.parallel.DistributedDataParallel) else decoder
+
+    # Freeze most of the decoder layers - only train the final layers
+    # This helps prevent catastrophic forgetting and model collapse
+    frozen_count = 0
+    trainable_count = 0
+    for name, param in decoder_module.named_parameters():
+        # Only train the final convolutional layer and any layers after it
+        # This assumes the final conv layer has "final" or "last" in its name
+        # or is one of the last 2 layers in the model
+        if "final" in name or "last" in name or "fc" in name or "linear" in name or "out" in name:
+            param.requires_grad = True
+            trainable_count += param.numel()
+        else:
+            param.requires_grad = False
+            frozen_count += param.numel()
+    
+    if rank == 0:
+        logging.info(f"Frozen parameters: {frozen_count}, Trainable parameters: {trainable_count}")
+    
     decoder.train()
     
-    # Create optimizer for decoder only
-    optimizer_D = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
+    # Create optimizer for decoder only - add momentum and weight decay (L2 regularization)
+    optimizer_D = torch.optim.SGD(
+        filter(lambda p: p.requires_grad, decoder.parameters()),
+        lr=learning_rate,
+        momentum=0.9,
+        weight_decay=1e-4
+    )
+    
+    # Add learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer_D, mode='min', factor=0.5, patience=2, verbose=True if rank == 0 else False
+    )
     
     # Track metrics
     avg_losses = []
@@ -80,8 +112,11 @@ def finetune_decoder(
     # Training loop
     total_batches = math.ceil(num_epochs * 1000 / batch_size)  # Assuming 1000 images per epoch
     
-    # Use standard BCE loss but with sample weighting
-    criterion = nn.BCEWithLogitsLoss(reduction='none')
+    # Use standard BCE loss
+    criterion = nn.BCELoss()
+    
+    # Save the initial model state for reset if needed
+    initial_state = {k: v.clone() for k, v in decoder_module.state_dict().items()}
     
     # Generate a mask for the entire training if using masking
     if mask_switch_on and key_type != "none":
@@ -110,14 +145,14 @@ def finetune_decoder(
             torch.manual_seed(seed_key + epoch * 1000 + i * world_size + rank)
             z = torch.randn((batch_size_actual, latent_dim), device=device)
             
-            # Step 1: Generate original images (label 1)
+            # Step 1: Generate original images (label 0)
             with torch.no_grad():
                 if is_stylegan2(gan_model):
                     original_images = gan_model(z, None, truncation_psi=1.0, noise_mode="const")
                 else:
                     original_images = gan_model(z)
             
-            # Step 2: Generate watermarked images (label 0)
+            # Step 2: Generate watermarked images (label 1)
             with torch.no_grad():
                 if is_stylegan2(watermarked_model):
                     watermarked_images = watermarked_model(z, None, truncation_psi=1.0, noise_mode="const")
@@ -155,29 +190,50 @@ def finetune_decoder(
             labels = torch.zeros(train_images.size(0), 1, device=device)
             labels[batch_size_actual:2*batch_size_actual] = 1.0  # Watermarked images have label 1
             
-            # Create sample weights to handle class imbalance
-            # Give more weight to watermarked samples (positive class)
-            weights = torch.ones_like(labels)
-            weights[batch_size_actual:2*batch_size_actual] = 2.0  # More weight to watermarked
-            
             # Train the decoder
             optimizer_D.zero_grad()
             
             # Forward pass
-            raw_outputs = decoder(train_images)
+            outputs = decoder(train_images)
             
-            # Calculate weighted loss
-            batch_losses = criterion(raw_outputs, labels)
-            weighted_losses = batch_losses * weights
-            loss = weighted_losses.mean()
+            # Apply sigmoid if using BCELoss
+            if isinstance(criterion, nn.BCELoss):
+                outputs = torch.sigmoid(outputs)
             
-            # Add regularization to prevent collapse - encourage diversity in predictions
-            with torch.no_grad():
-                probs = torch.sigmoid(raw_outputs)
-                entropy = -(probs * torch.log(probs + 1e-8) + (1-probs) * torch.log(1-probs + 1e-8)).mean()
+            # Binary cross entropy loss
+            classification_loss = criterion(outputs, labels)
             
-            # Add small entropy bonus to loss (negative because we want to maximize entropy)
-            loss = loss - 0.01 * entropy
+            # Diversity loss - cosine similarity between predictions within the same class
+            # This encourages the network to make diverse predictions even within a class
+            original_preds = outputs[:batch_size_actual]
+            watermarked_preds = outputs[batch_size_actual:2*batch_size_actual]
+            adversarial_preds = outputs[2*batch_size_actual:]
+            
+            # Calculate pair-wise cosine similarities (if batch_size > 1)
+            diversity_loss = 0.0
+            if batch_size_actual > 1:
+                orig_flat = original_preds.view(-1, 1)
+                water_flat = watermarked_preds.view(-1, 1)
+                adv_flat = adversarial_preds.view(-1, 1)
+                
+                # Compute cosine similarity (dot product for normalized vectors)
+                orig_sim = torch.mm(orig_flat, orig_flat.t()).mean()
+                water_sim = torch.mm(water_flat, water_flat.t()).mean()
+                adv_sim = torch.mm(adv_flat, adv_flat.t()).mean()
+                
+                # Penalize high similarity (encourage diversity)
+                diversity_loss = (orig_sim + adv_sim + water_sim) / 3.0
+            
+            # Combined loss
+            loss = classification_loss + 0.01 * diversity_loss
+            
+            # Add L2 regularization to prevent extreme weights
+            l2_reg = 0.0
+            for param in decoder.parameters():
+                if param.requires_grad:
+                    l2_reg += torch.norm(param)
+            
+            loss += 0.001 * l2_reg
             
             loss.backward()
             
@@ -190,13 +246,27 @@ def finetune_decoder(
             # Track metrics
             epoch_losses.append(loss.item())
             
-            # Log more frequently - every 10 batches or at beginning/end
-            if rank == 0 and (i == 0 or (i + batch_size) >= 1000 or i % 10 == 0):
+            # Check if model is collapsing and reset if necessary
+            with torch.no_grad():
+                pred_std = outputs.std().item()
+                if pred_std < 0.01:  # If predictions have very small std deviation
+                    if rank == 0:
+                        logging.warning(f"Model collapse detected (std={pred_std:.6f})! Resetting model weights.")
+                    
+                    # Reset model weights to initial state with small random perturbation
+                    for name, param in decoder_module.named_parameters():
+                        if param.requires_grad:
+                            init_weight = initial_state[name]
+                            # Add small random noise to break symmetry
+                            param.data = init_weight + 0.01 * torch.randn_like(init_weight)
+            
+            # Log more frequently - every 5 batches or at beginning/end
+            if rank == 0 and (i == 0 or (i + batch_size) >= 1000 or i % 5 == 0):
                 # Calculate and log scores
                 with torch.no_grad():
-                    original_scores = torch.sigmoid(raw_outputs[:batch_size_actual])
-                    watermarked_scores = torch.sigmoid(raw_outputs[batch_size_actual:2*batch_size_actual])
-                    adversarial_scores = torch.sigmoid(raw_outputs[2*batch_size_actual:])
+                    original_scores = outputs[:batch_size_actual]
+                    watermarked_scores = outputs[batch_size_actual:2*batch_size_actual]
+                    adversarial_scores = outputs[2*batch_size_actual:]
                     
                     # Calculate mean and std of confidence scores
                     orig_mean = original_scores.mean().item()
@@ -205,13 +275,15 @@ def finetune_decoder(
                     water_std = watermarked_scores.std().item()
                     adv_mean = adversarial_scores.mean().item()
                     adv_std = adversarial_scores.std().item()
+                    all_std = outputs.std().item()
                     
                     logging.info(
                         f"Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}/{1000//batch_size}, "
-                        f"Loss: {loss.item():.4f}, Entropy: {entropy.item():.4f}"
+                        f"Loss: {loss.item():.4f}, Class Loss: {classification_loss.item():.4f}, "
+                        f"Div Loss: {diversity_loss:.4f}, L2: {l2_reg.item():.4f}, All StdDev: {all_std:.4f}"
                     )
                     logging.info(
-                        f"Scores (sigmoid): Original {orig_mean:.4f}±{orig_std:.4f}, "
+                        f"Scores: Original {orig_mean:.4f}±{orig_std:.4f}, "
                         f"Watermarked {water_mean:.4f}±{water_std:.4f}, "
                         f"Adversarial {adv_mean:.4f}±{adv_std:.4f}"
                     )
@@ -219,6 +291,9 @@ def finetune_decoder(
         # Average loss for the epoch
         avg_loss = sum(epoch_losses) / len(epoch_losses)
         avg_losses.append(avg_loss)
+        
+        # Update learning rate based on validation loss
+        scheduler.step(avg_loss)
         
         if rank == 0:
             logging.info(f"Epoch {epoch+1}/{num_epochs} - Average Loss: {avg_loss:.4f}")
@@ -346,6 +421,7 @@ def generate_adversarial_examples(
         Adversarial examples
     """
     # Ensure decoder is in eval mode during attack generation
+    was_training = decoder.training
     decoder.eval()
     
     # Clone the original images to avoid modifying them
@@ -360,6 +436,9 @@ def generate_adversarial_examples(
     
     # Simple binary cross entropy loss
     criterion = nn.BCELoss()
+    
+    # Target is 1.0 (watermarked) to fool the decoder
+    target = torch.ones(images.size(0), 1, device=device)
     
     # Perform PGD attack
     for step in range(num_steps):
@@ -378,12 +457,13 @@ def generate_adversarial_examples(
         else:
             decoder_input = adv_images
         
-        # Forward pass through decoder - get logits and convert to probabilities
-        logits = decoder(decoder_input)
-        probs = torch.sigmoid(logits)
+        # Forward pass through decoder
+        outputs = decoder(decoder_input)
         
-        # Target is 1 to fool the detector into classifying adversarial examples as watermarked
-        target = torch.ones_like(probs)
+        # Apply sigmoid for BCELoss
+        probs = torch.sigmoid(outputs)
+        
+        # Compute loss - we want to maximize the probability that this is classified as watermarked
         loss = criterion(probs, target)
         
         # Compute gradients
@@ -396,9 +476,9 @@ def generate_adversarial_examples(
         else:
             update = alpha * grad.sign()
         
-        # Update perturbation (gradient descent to minimize BCE loss)
+        # Update perturbation - gradient descent to minimize loss
         with torch.no_grad():
-            perturbation -= update  # Use gradient descent to minimize BCE loss
+            perturbation -= update
             
             # Project perturbation to ensure max_delta constraint
             perturbation.data = torch.clamp(perturbation.data, -max_delta, max_delta)
@@ -408,6 +488,9 @@ def generate_adversarial_examples(
             
             # Recompute perturbation based on clamped images
             perturbation.data = adv_images - images
+    
+    # Restore original training state
+    decoder.train(was_training)
     
     # Return final adversarial examples
     return torch.clamp(images + perturbation.detach(), -1, 1) 

@@ -71,9 +71,9 @@ spec:
                         --master_addr=127.0.0.1 \
                         --master_port=12345 \
                         main.py finetune \
-                        --finetune_epochs 10 \
-                        --finetune_lr 1e-5 \
-                        --finetune_batch_size 16 \
+                        --finetune_epochs 20 \
+                        --finetune_lr 5e-4 \
+                        --finetune_batch_size 32 \
                         --finetune_pgd_steps 100 \
                         --finetune_pgd_alpha 0.01 \
                         --num_eval_samples 100 \

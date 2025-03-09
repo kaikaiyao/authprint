@@ -537,7 +537,7 @@ def generate_adversarial_examples(
     target = torch.ones(images.size(0), 1, device=device)
     
     best_adv_images = None
-    best_loss = float('-inf')
+    best_loss = float('inf')  # Initialize to infinity as we want to MINIMIZE loss
     initial_score = None
     best_score = None
     log_steps = [0, num_steps//4, num_steps//2, 3*num_steps//4, num_steps-1]  # Log at these steps
@@ -578,20 +578,28 @@ def generate_adversarial_examples(
             # Record initial score
             if step == 0:
                 initial_score = current_score
+                best_score = current_score
+                best_adv_images = adv_images.clone()
             
-            # Track best examples
-            if loss.item() > best_loss:
+            # Track best examples - LOWER loss is better for fooling the model
+            if loss.item() < best_loss:
                 best_loss = loss.item()
                 best_score = current_score
                 best_adv_images = adv_images.clone()
             
+            # Also track by direct score comparison - higher score is better
+            if current_score > best_score:
+                best_score = current_score
+                best_adv_images = adv_images.clone()
+                
             # Log progress at specific intervals
             if step in log_steps:
                 perturbation_norm = torch.norm(perturbation, p=float('inf')).item()
                 logging.info(
                     f"PGD Attack Step {step+1}/{num_steps}: "
-                    f"Loss={loss.item():.4f}, Score={current_score:.4f}, "
-                    f"Best Score={best_score:.4f}, Max Perturbation={perturbation_norm:.4f}"
+                    f"Loss={loss.item():.6f} (lower is better), "
+                    f"Current Score={current_score:.4f}, Best Score Found={best_score:.4f}, "
+                    f"Max Perturbation={perturbation_norm:.4f}"
                 )
         
         # Compute gradients
@@ -626,8 +634,8 @@ def generate_adversarial_examples(
     if initial_score is not None and best_score is not None:
         logging.info(
             f"PGD Attack Complete: "
-            f"Initial Score={initial_score:.4f}, Final Best Score={best_score:.4f}, "
-            f"Improvement={best_score-initial_score:.4f} ({(best_score-initial_score)/initial_score*100:.1f}%)"
+            f"Initial Score={initial_score:.4f}, Best Score Found={best_score:.4f}, "
+            f"Improvement={best_score-initial_score:.4f} ({(best_score-initial_score)/max(initial_score, 0.0001)*100:.1f}%)"
         )
     
     # Restore original training state

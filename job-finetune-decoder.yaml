@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ${USER}-job-eval-${JOB_SUFFIX}
+  name: ${USER}-job-finetune-decoder-${JOB_SUFFIX}
   labels:
     eidf/user: ${USER}
     kueue.x-k8s.io/queue-name: ${QUEUE_NAME}
@@ -72,7 +72,7 @@ spec:
                         --master_port=12345 \
                         main.py finetune \
                         --finetune_epochs 10 \
-                        --finetune_lr 5e-5 \
+                        --finetune_lr 1e-5 \
                         --finetune_batch_size 16 \
                         --finetune_pgd_steps 100 \
                         --finetune_pgd_alpha 0.01 \

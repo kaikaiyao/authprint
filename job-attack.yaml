@@ -49,7 +49,7 @@ spec:
           - name: NCCL_IB_DISABLE
             value: "1"
           - name: NUM_RUNS
-            value: "10"
+            value: "1"
           command: ["/bin/bash", "-c"]
           args:
             - |
@@ -101,7 +101,8 @@ spec:
                           --train_size 16 \
                           --key_type "csprng" \
                           --seed_key 2024 \
-                          --image_attack_size 100 
+                          --image_attack_size 100 \
+                          --surrogate_decoder_folder '/nfs-user-029/data/csprng/surr-base-secure-0305-checkpoint/'
                   exit_status=$?
                   echo "Run $run finished with exit status $exit_status"
                   

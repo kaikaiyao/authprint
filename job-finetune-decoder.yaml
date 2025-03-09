@@ -71,7 +71,7 @@ spec:
                         --master_addr=127.0.0.1 \
                         --master_port=12345 \
                         main.py eval \
-                        --finetune_decoder \ 
+                        --finetune_decoder \
                         --finetune_epochs 10 \
                         --finetune_lr 1e-4 \
                         --finetune_batch_size 16 \

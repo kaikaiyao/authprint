@@ -101,7 +101,7 @@ spec:
                           --train_size 16 \
                           --key_type "csprng" \
                           --seed_key 2024 \
-                          --image_attack_size 100 \
+                          --image_attack_size 100 
                   exit_status=$?
                   echo "Run $run finished with exit status $exit_status"
                   

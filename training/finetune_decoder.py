@@ -1,17 +1,14 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import logging
 import os
 import gc
 import math
-from tqdm import tqdm
-import time
-import random
 
 from key.key import generate_mask_secret_key, mask_image_with_key
-from utils.utils import constrain_image, is_stylegan2
-from evaluation.evaluate import evaluate_model
+from utils.image_utils import constrain_image
+from models.stylegan2 import is_stylegan2
+from evaluation.evaluate_model import evaluate_model
 
 def finetune_decoder(
     time_string,

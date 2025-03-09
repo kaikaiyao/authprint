@@ -198,16 +198,25 @@ def finetune_decoder(
             # Step 3: Generate adversarial samples using PGD attack (label 0)
             # Gradually increase PGD strength during training
             current_progress = (epoch * 1000 + i) / (num_epochs * 1000)
-            current_pgd_steps = max(10, int(pgd_steps * (0.5 + 0.5 * current_progress)))  # Start with fewer steps
-            current_alpha = pgd_alpha * (0.5 + 0.5 * current_progress)  # Start with smaller step size
+            
+            # Much more gradual progression - start with just 1 step and very small alpha
+            # Use a cubic function to have slower growth initially and faster growth later
+            progress_cubic = current_progress ** 3  # Cubic growth for very slow initial increase
+            
+            # Steps start at 1 and grow to full pgd_steps
+            current_pgd_steps = max(1, int(1 + (pgd_steps - 1) * progress_cubic))
+            
+            # Alpha starts at 1% of pgd_alpha and grows to full pgd_alpha
+            current_alpha = pgd_alpha * (0.01 + 0.99 * progress_cubic)
             
             # Log PGD difficulty adjustment at regular intervals
             if rank == 0 and (i == 0 or (i + batch_size) >= 1000 or i % 5 == 0):
                 pgd_progress_pct = current_progress * 100
+                progress_cubic_pct = progress_cubic * 100
                 steps_pct = (current_pgd_steps / pgd_steps) * 100
                 alpha_pct = (current_alpha / pgd_alpha) * 100
                 logging.info(
-                    f"PGD Difficulty: Training Progress {pgd_progress_pct:.1f}%, "
+                    f"PGD Difficulty: Training Progress {pgd_progress_pct:.1f}% (cubic: {progress_cubic_pct:.1f}%), "
                     f"Steps {current_pgd_steps}/{pgd_steps} ({steps_pct:.1f}%), "
                     f"Alpha {current_alpha:.5f}/{pgd_alpha:.5f} ({alpha_pct:.1f}%)"
                 )
@@ -359,6 +368,11 @@ def finetune_decoder(
                     adv_success_before = (adversarial_scores > 0.5).float().mean().item() * 100  # Was initially misclassified as 1
                     adv_success_after = (adversarial_scores < 0.5).float().mean().item() * 100  # Now correctly classified as 0
                     
+                    # Calculate strength of adversarial attack
+                    adv_score_high = (adversarial_scores > 0.9).float().mean().item() * 100  # Very high confidence wrong predictions
+                    adv_score_medium = (adversarial_scores > 0.7).float().mean().item() * 100  # Medium confidence wrong predictions
+                    adv_score_low = (adversarial_scores > 0.5).float().mean().item() * 100  # Low confidence wrong predictions
+                    
                     logging.info(
                         f"Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}/{1000//batch_size}, "
                         f"Loss: {loss.item():.4f}, Class Loss: {classification_loss.item():.4f}, "
@@ -376,8 +390,9 @@ def finetune_decoder(
                     )
                     logging.info(
                         f"Success Rates: Original {orig_success:.1f}%, Watermarked {water_success:.1f}%, "
-                        f"Adversarial (misclassified as watermarked): {adv_success_before:.1f}%, "
-                        f"Adversarial (correctly classified as non-watermarked): {adv_success_after:.1f}%"
+                        f"Adversarial (misclassified as watermarked): {adv_success_before:.1f}% "
+                        f"(high: {adv_score_high:.1f}%, med: {adv_score_medium:.1f}%, low: {adv_score_low:.1f}%), "
+                        f"Adversarial (correctly classified): {adv_success_after:.1f}%"
                     )
         
         # Average loss for the epoch

@@ -71,11 +71,11 @@ spec:
                         --master_addr=127.0.0.1 \
                         --master_port=12345 \
                         main.py finetune \
-                        --finetune_epochs 20 \
-                        --finetune_lr 5e-4 \
+                        --finetune_epochs 40 \
+                        --finetune_lr 1e-3 \
                         --finetune_batch_size 32 \
-                        --finetune_pgd_steps 100 \
-                        --finetune_pgd_alpha 0.01 \
+                        --finetune_pgd_steps 200 \
+                        --finetune_pgd_alpha 0.02 \
                         --num_eval_samples 100 \
                         --batch_size 16 \
                         --stylegan2_url "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" \

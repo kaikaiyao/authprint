@@ -4,6 +4,7 @@ import logging
 import os
 import gc
 import math
+import torch.nn.functional as F
 
 from key.key import generate_mask_secret_key, mask_image_with_key
 from utils.image_utils import constrain_image
@@ -195,12 +196,17 @@ def finetune_decoder(
                 watermarked_images = constrain_image(watermarked_images, original_images, max_delta)
             
             # Step 3: Generate adversarial samples using PGD attack (label 0)
+            # Gradually increase PGD strength during training
+            current_progress = (epoch * 1000 + i) / (num_epochs * 1000)
+            current_pgd_steps = max(10, int(pgd_steps * (0.5 + 0.5 * current_progress)))  # Start with fewer steps
+            current_alpha = pgd_alpha * (0.5 + 0.5 * current_progress)  # Start with smaller step size
+            
             adversarial_images = generate_adversarial_examples(
                 decoder=decoder,
                 original_images=original_images.clone(),
                 device=device,
-                num_steps=pgd_steps,
-                alpha=pgd_alpha,
+                num_steps=current_pgd_steps,
+                alpha=current_alpha,
                 max_delta=max_delta,
                 key_type=key_type if mask_switch_on else "none",
                 k_mask=k_mask if mask_switch_on and key_type != "none" else None
@@ -233,8 +239,34 @@ def finetune_decoder(
             if not is_sigmoid_output:
                 probs = torch.sigmoid(outputs)
             
-            # Binary cross entropy loss
-            classification_loss = criterion(outputs, labels)
+            # Split the outputs for different types of images
+            original_outputs = outputs[:batch_size_actual]
+            watermarked_outputs = outputs[batch_size_actual:2*batch_size_actual]
+            adversarial_outputs = outputs[2*batch_size_actual:]
+            
+            # Binary cross entropy loss for each type separately
+            # This gives us more control over weighting
+            original_labels = torch.zeros_like(original_outputs)
+            watermarked_labels = torch.ones_like(watermarked_outputs)
+            adversarial_labels = torch.zeros_like(adversarial_outputs)  # Should be classified as 0 (non-watermarked)
+            
+            # Compute separate losses for each type
+            if isinstance(criterion, nn.BCELoss):
+                orig_loss = criterion(original_outputs, original_labels)
+                water_loss = criterion(watermarked_outputs, watermarked_labels)
+                adv_loss = criterion(adversarial_outputs, adversarial_labels)
+            else:
+                orig_loss = F.binary_cross_entropy_with_logits(original_outputs, original_labels)
+                water_loss = F.binary_cross_entropy_with_logits(watermarked_outputs, watermarked_labels)
+                adv_loss = F.binary_cross_entropy_with_logits(adversarial_outputs, adversarial_labels)
+            
+            # Weighted loss - gradually increase the weight of adversarial loss
+            # Start with equal weights and linearly increase adv_weight
+            progress = (epoch * 1000 + i) / (num_epochs * 1000)
+            adv_weight = 1.0 + 4.0 * progress  # Increase from 1.0 to 5.0 over training
+            
+            # Combined classification loss with weighting
+            classification_loss = orig_loss + water_loss + adv_weight * adv_loss
             
             # Diversity loss - cosine similarity between predictions within the same class
             # This encourages the network to make diverse predictions even within a class
@@ -314,6 +346,11 @@ def finetune_decoder(
                         f"Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}/{1000//batch_size}, "
                         f"Loss: {loss.item():.4f}, Class Loss: {classification_loss.item():.4f}, "
                         f"Div Loss: {diversity_loss:.4f}, L2: {l2_reg.item():.4f}, All StdDev: {all_std:.4f}"
+                    )
+                    logging.info(
+                        f"Separate Losses - Original: {orig_loss.item():.4f}, Watermarked: {water_loss.item():.4f}, "
+                        f"Adversarial: {adv_loss.item():.4f} (weight: {adv_weight:.2f}), "
+                        f"PGD Steps: {current_pgd_steps}, PGD Alpha: {current_alpha:.5f}"
                     )
                     logging.info(
                         f"Scores: Original {orig_mean:.4f}±{orig_std:.4f}, "
@@ -463,17 +500,12 @@ def generate_adversarial_examples(
         dummy_output = decoder(dummy_input)
         is_sigmoid_output = torch.all((dummy_output >= 0) & (dummy_output <= 1))
     
-    # Choose appropriate loss function
-    if is_sigmoid_output:
-        criterion = nn.BCELoss()
-    else:
-        criterion = nn.BCEWithLogitsLoss()
-    
     # Clone the original images to avoid modifying them
     images = original_images.clone().detach()
     
-    # Initialize perturbation
-    perturbation = torch.zeros_like(images, requires_grad=True)
+    # Initialize perturbation with small random noise to avoid bad local minima
+    perturbation = (torch.rand_like(images) * 2 - 1) * max_delta * 0.1
+    perturbation.requires_grad_(True)
     
     # Initialize momentum buffer if using momentum
     if momentum > 0:
@@ -481,6 +513,9 @@ def generate_adversarial_examples(
     
     # Target is 1.0 (watermarked) to fool the decoder
     target = torch.ones(images.size(0), 1, device=device)
+    
+    best_adv_images = None
+    best_loss = float('-inf')
     
     # Perform PGD attack
     for step in range(num_steps):
@@ -501,9 +536,21 @@ def generate_adversarial_examples(
         
         # Forward pass through decoder
         outputs = decoder(decoder_input)
+        probs = outputs
+        if not is_sigmoid_output:
+            probs = torch.sigmoid(outputs)
         
-        # Compute loss without applying sigmoid if using BCEWithLogitsLoss
-        loss = criterion(outputs, target)
+        # Compute loss - we want to maximize the probability that this is classified as watermarked
+        if is_sigmoid_output:
+            loss = F.binary_cross_entropy(probs, target)
+        else:
+            loss = F.binary_cross_entropy_with_logits(outputs, target)
+        
+        # Keep track of best adversarial examples so far
+        with torch.no_grad():
+            if loss.item() > best_loss:
+                best_loss = loss.item()
+                best_adv_images = adv_images.clone()
         
         # Compute gradients
         grad = torch.autograd.grad(loss, perturbation)[0]
@@ -519,6 +566,11 @@ def generate_adversarial_examples(
         with torch.no_grad():
             perturbation -= update
             
+            # Add small random noise occasionally to escape local minima
+            if step % 10 == 0:
+                noise = (torch.rand_like(perturbation) * 2 - 1) * alpha * 0.1
+                perturbation.data += noise
+            
             # Project perturbation to ensure max_delta constraint
             perturbation.data = torch.clamp(perturbation.data, -max_delta, max_delta)
             
@@ -531,5 +583,8 @@ def generate_adversarial_examples(
     # Restore original training state
     decoder.train(was_training)
     
-    # Return final adversarial examples
-    return torch.clamp(images + perturbation.detach(), -1, 1) 
+    # Return the best adversarial examples found
+    if best_adv_images is not None:
+        return best_adv_images
+    else:
+        return torch.clamp(images + perturbation.detach(), -1, 1) 

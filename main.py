@@ -23,7 +23,7 @@ from attack.attacks import attack_label_based
 
 def main():
     parser = argparse.ArgumentParser(description="Run training or evaluation for the model.")
-    parser.add_argument("mode", choices=["train", "eval", "attack"], help="Mode to run the script in")
+    parser.add_argument("mode", choices=["train", "eval", "attack", "finetune"], help="Mode to run the script in")
     
     # Common arguments
     parser.add_argument("--seed_key", type=int, default=2024, help="Seed for the random authentication key")
@@ -89,7 +89,7 @@ def main():
     args = parser.parse_args()
 
     # Distributed training setup
-    if args.mode == "train":
+    if args.mode == "train" or (args.mode == "finetune" and args.finetune_decoder):
         dist.init_process_group(backend='nccl', init_method='env://')
         args.local_rank = int(os.environ['LOCAL_RANK'])
         torch.cuda.set_device(args.local_rank)
@@ -242,54 +242,6 @@ def main():
             batch_size=args.batch_size
         )
 
-        # If finetune_decoder is enabled, run the finetuning process
-        if args.finetune_decoder:
-            logging.info("Starting decoder finetuning...")
-            
-            # Generate a time string for file naming
-            time_string = generate_time_based_string()
-            
-            # Set up distributed training for finetuning if not already in distributed mode
-            if not hasattr(args, 'world_size'):
-                dist.init_process_group(backend='nccl', init_method='env://')
-                args.local_rank = int(os.environ['LOCAL_RANK'])
-                torch.cuda.set_device(args.local_rank)
-                device = torch.device('cuda', args.local_rank)
-                args.world_size = dist.get_world_size()
-                args.rank = dist.get_rank()
-                
-                # Wrap decoder with DDP
-                decoder = torch.nn.parallel.DistributedDataParallel(
-                    decoder,
-                    device_ids=[args.local_rank],
-                    output_device=args.local_rank
-                )
-            
-            # Finetune the decoder
-            finetuned_decoder = finetune_decoder(
-                time_string=time_string,
-                gan_model=gan_model,
-                watermarked_model=watermarked_model,
-                decoder=decoder,
-                latent_dim=latent_dim,
-                batch_size=args.finetune_batch_size,
-                device=device,
-                num_epochs=args.finetune_epochs,
-                learning_rate=args.finetune_lr,
-                max_delta=args.max_delta,
-                saving_path=args.saving_path,
-                mask_switch_on=args.mask_switch_on,
-                seed_key=args.seed_key,
-                rank=args.rank,
-                world_size=args.world_size,
-                key_type=args.key_type,
-                pgd_steps=args.finetune_pgd_steps,
-                pgd_alpha=args.finetune_pgd_alpha
-            )
-            
-            if args.rank == 0:
-                logging.info("Decoder finetuning completed successfully.")
-
         # Only process results on rank 0
         if args.rank == 0:
             # Extract metrics from the results dictionary
@@ -313,6 +265,69 @@ def main():
                 if case_name not in ['auc', 'fid_score', 'watermarked']:
                     if 'tnr_at_1_fpr' in case_data:
                         logging.info(f"TNR@1%FPR ({case_name}): {case_data['tnr_at_1_fpr']:.4f}")
+
+    elif args.mode == "finetune":
+        logging.info("Starting decoder finetuning...")
+        
+        # Generate a time string for file naming
+        time_string = generate_time_based_string()
+        
+        # Load the GAN model
+        local_path = args.stylegan2_url.split('/')[-1]
+        
+        if args.self_trained:
+            latent_dim = args.self_trained_latent_dim
+            gan_model = load_gan_model(args.self_trained_model_path, latent_dim).to(device)
+        else:
+            gan_model = load_stylegan2_model(url=args.stylegan2_url, local_path=local_path, device=device)
+            latent_dim = gan_model.z_dim
+
+        # Load the watermarked model
+        watermarked_model = load_finetuned_model(args.watermarked_model_path)
+        watermarked_model.to(device)
+        watermarked_model.eval()
+
+        # Load the decoder
+        decoder = FlexibleDecoder(
+            args.num_conv_layers,
+            args.num_pool_layers,
+            args.initial_channels,
+        ).to(device)
+        decoder.load_state_dict(torch.load(args.decoder_model_path))
+        decoder = decoder.to(device)
+        
+        # Wrap decoder with DDP
+        if torch.distributed.is_initialized():
+            decoder = torch.nn.parallel.DistributedDataParallel(
+                decoder,
+                device_ids=[args.local_rank],
+                output_device=args.local_rank
+            )
+        
+        # Finetune the decoder
+        finetuned_decoder = finetune_decoder(
+            time_string=time_string,
+            gan_model=gan_model,
+            watermarked_model=watermarked_model,
+            decoder=decoder,
+            latent_dim=latent_dim,
+            batch_size=args.finetune_batch_size,
+            device=device,
+            num_epochs=args.finetune_epochs,
+            learning_rate=args.finetune_lr,
+            max_delta=args.max_delta,
+            saving_path=args.saving_path,
+            mask_switch_on=args.mask_switch_on,
+            seed_key=args.seed_key,
+            rank=args.rank,
+            world_size=args.world_size if torch.distributed.is_initialized() else 1,
+            key_type=args.key_type,
+            pgd_steps=args.finetune_pgd_steps,
+            pgd_alpha=args.finetune_pgd_alpha
+        )
+        
+        if args.rank == 0:
+            logging.info("Decoder finetuning completed successfully.")
 
     elif args.mode == "attack":
         local_path = args.stylegan2_url.split('/')[-1]

@@ -74,14 +74,15 @@ def finetune_decoder(
     # Create optimizer for decoder only
     optimizer_D = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
     
-    # BCE loss for binary classification
-    criterion = nn.BCELoss()
-    
     # Track metrics
     avg_losses = []
     
     # Training loop
     total_batches = math.ceil(num_epochs * 1000 / batch_size)  # Assuming 1000 images per epoch
+    
+    # BCE loss with class weights to handle imbalance
+    # Use BCEWithLogitsLoss with pos_weight instead of BCELoss
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([2.0], device=device))
     
     # Generate a mask for the entire training if using masking
     if mask_switch_on and key_type != "none":
@@ -159,10 +160,12 @@ def finetune_decoder(
             optimizer_D.zero_grad()
             
             # Forward pass
-            outputs = decoder(train_images)
+            # Note: If decoder has sigmoid activation internally, we need to modify it
+            # to remove the final sigmoid for BCEWithLogitsLoss
+            raw_outputs = decoder(train_images)
             
-            # Calculate loss
-            loss = criterion(outputs, labels)
+            # Calculate loss with class weights to handle imbalance
+            loss = criterion(raw_outputs, labels)
             loss.backward()
             
             # Update weights
@@ -174,9 +177,9 @@ def finetune_decoder(
             if rank == 0 and (i == 0 or (i + batch_size) >= 1000):
                 # Calculate and log accuracy for each type
                 with torch.no_grad():
-                    original_scores = outputs[:batch_size_actual]
-                    watermarked_scores = outputs[batch_size_actual:2*batch_size_actual]
-                    adversarial_scores = outputs[2*batch_size_actual:]
+                    original_scores = torch.sigmoid(raw_outputs[:batch_size_actual])
+                    watermarked_scores = torch.sigmoid(raw_outputs[batch_size_actual:2*batch_size_actual])
+                    adversarial_scores = torch.sigmoid(raw_outputs[2*batch_size_actual:])
                     
                     # Calculate accuracy
                     orig_acc = (original_scores < 0.5).float().mean().item()
@@ -199,7 +202,7 @@ def finetune_decoder(
                         f"Accuracy: Original {orig_acc:.4f}, Watermarked {water_acc:.4f}, Adversarial {adv_acc:.4f}"
                     )
                     logging.info(
-                        f"Scores: Original {orig_mean:.4f}±{orig_std:.4f}, "
+                        f"Scores (sigmoid): Original {orig_mean:.4f}±{orig_std:.4f}, "
                         f"Watermarked {water_mean:.4f}±{water_std:.4f}, "
                         f"Adversarial {adv_mean:.4f}±{adv_std:.4f}"
                     )
@@ -346,8 +349,8 @@ def generate_adversarial_examples(
     if momentum > 0:
         grad_momentum = torch.zeros_like(images)
     
-    # BCE loss with target 1 (making the decoder classify adversarial examples as watermarked)
-    criterion = nn.BCELoss()
+    # Use BCEWithLogitsLoss for logits
+    criterion = nn.BCEWithLogitsLoss()
     
     # Perform PGD attack
     for step in range(num_steps):
@@ -367,11 +370,11 @@ def generate_adversarial_examples(
             decoder_input = adv_images
         
         # Forward pass through decoder
-        scores = decoder(decoder_input)
+        logits = decoder(decoder_input)
         
         # Target is 1 to fool the detector into classifying adversarial examples as watermarked
-        target = torch.ones_like(scores)
-        loss = criterion(scores, target)
+        target = torch.ones_like(logits)
+        loss = criterion(logits, target)
         
         # Compute gradients
         grad = torch.autograd.grad(loss, perturbation)[0]

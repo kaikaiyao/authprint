@@ -77,11 +77,21 @@ def finetune_decoder(
     # This helps prevent catastrophic forgetting and model collapse
     frozen_count = 0
     trainable_count = 0
+    
+    # Get all parameter names
+    param_names = list(name for name, _ in decoder_module.named_parameters())
+    
+    # Determine the number of layers to keep trainable
+    num_trainable_layers = max(2, len(param_names) // 4)  # Keep at least the last 2 layers or 25% of all layers
+    trainable_layer_names = set(param_names[-num_trainable_layers:])
+    
+    if rank == 0:
+        logging.info(f"Total model layers: {len(param_names)}")
+        logging.info(f"Keeping the last {num_trainable_layers} layers trainable: {trainable_layer_names}")
+    
     for name, param in decoder_module.named_parameters():
-        # Only train the final convolutional layer and any layers after it
-        # This assumes the final conv layer has "final" or "last" in its name
-        # or is one of the last 2 layers in the model
-        if "final" in name or "last" in name or "fc" in name or "linear" in name or "out" in name:
+        # Keep the last few layers trainable
+        if name in trainable_layer_names:
             param.requires_grad = True
             trainable_count += param.numel()
         else:
@@ -90,6 +100,15 @@ def finetune_decoder(
     
     if rank == 0:
         logging.info(f"Frozen parameters: {frozen_count}, Trainable parameters: {trainable_count}")
+    
+    # Make sure we have at least some trainable parameters
+    if trainable_count == 0:
+        logging.warning("No trainable parameters found! Making all parameters trainable.")
+        for param in decoder_module.parameters():
+            param.requires_grad = True
+        trainable_count = sum(p.numel() for p in decoder_module.parameters())
+        frozen_count = 0
+        logging.info(f"Updated - Frozen parameters: {frozen_count}, Trainable parameters: {trainable_count}")
     
     decoder.train()
     
@@ -112,8 +131,21 @@ def finetune_decoder(
     # Training loop
     total_batches = math.ceil(num_epochs * 1000 / batch_size)  # Assuming 1000 images per epoch
     
-    # Use standard BCE loss
-    criterion = nn.BCELoss()
+    # For logits output, use BCEWithLogitsLoss; for sigmoid output, use BCELoss
+    # First, let's check what kind of output the model produces
+    with torch.no_grad():
+        dummy_input = torch.randn(1, 3, 256, 256, device=device)
+        dummy_output = decoder(dummy_input)
+        is_sigmoid_output = torch.all((dummy_output >= 0) & (dummy_output <= 1))
+    
+    if is_sigmoid_output:
+        criterion = nn.BCELoss()
+        if rank == 0:
+            logging.info("Using BCELoss for sigmoid output")
+    else:
+        criterion = nn.BCEWithLogitsLoss()
+        if rank == 0:
+            logging.info("Using BCEWithLogitsLoss for logit output")
     
     # Save the initial model state for reset if needed
     initial_state = {k: v.clone() for k, v in decoder_module.state_dict().items()}
@@ -196,18 +228,19 @@ def finetune_decoder(
             # Forward pass
             outputs = decoder(train_images)
             
-            # Apply sigmoid if using BCELoss
-            if isinstance(criterion, nn.BCELoss):
-                outputs = torch.sigmoid(outputs)
+            # Apply sigmoid if using BCELoss and outputs are logits
+            probs = outputs
+            if not is_sigmoid_output:
+                probs = torch.sigmoid(outputs)
             
             # Binary cross entropy loss
             classification_loss = criterion(outputs, labels)
             
             # Diversity loss - cosine similarity between predictions within the same class
             # This encourages the network to make diverse predictions even within a class
-            original_preds = outputs[:batch_size_actual]
-            watermarked_preds = outputs[batch_size_actual:2*batch_size_actual]
-            adversarial_preds = outputs[2*batch_size_actual:]
+            original_preds = probs[:batch_size_actual]
+            watermarked_preds = probs[batch_size_actual:2*batch_size_actual]
+            adversarial_preds = probs[2*batch_size_actual:]
             
             # Calculate pair-wise cosine similarities (if batch_size > 1)
             diversity_loss = 0.0
@@ -248,7 +281,7 @@ def finetune_decoder(
             
             # Check if model is collapsing and reset if necessary
             with torch.no_grad():
-                pred_std = outputs.std().item()
+                pred_std = probs.std().item()
                 if pred_std < 0.01:  # If predictions have very small std deviation
                     if rank == 0:
                         logging.warning(f"Model collapse detected (std={pred_std:.6f})! Resetting model weights.")
@@ -264,9 +297,9 @@ def finetune_decoder(
             if rank == 0 and (i == 0 or (i + batch_size) >= 1000 or i % 5 == 0):
                 # Calculate and log scores
                 with torch.no_grad():
-                    original_scores = outputs[:batch_size_actual]
-                    watermarked_scores = outputs[batch_size_actual:2*batch_size_actual]
-                    adversarial_scores = outputs[2*batch_size_actual:]
+                    original_scores = original_preds
+                    watermarked_scores = watermarked_preds
+                    adversarial_scores = adversarial_preds
                     
                     # Calculate mean and std of confidence scores
                     orig_mean = original_scores.mean().item()
@@ -275,7 +308,7 @@ def finetune_decoder(
                     water_std = watermarked_scores.std().item()
                     adv_mean = adversarial_scores.mean().item()
                     adv_std = adversarial_scores.std().item()
-                    all_std = outputs.std().item()
+                    all_std = probs.std().item()
                     
                     logging.info(
                         f"Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}/{1000//batch_size}, "
@@ -424,6 +457,18 @@ def generate_adversarial_examples(
     was_training = decoder.training
     decoder.eval()
     
+    # Check if the model outputs sigmoid or logits
+    with torch.no_grad():
+        dummy_input = torch.randn(1, 3, 256, 256, device=device)
+        dummy_output = decoder(dummy_input)
+        is_sigmoid_output = torch.all((dummy_output >= 0) & (dummy_output <= 1))
+    
+    # Choose appropriate loss function
+    if is_sigmoid_output:
+        criterion = nn.BCELoss()
+    else:
+        criterion = nn.BCEWithLogitsLoss()
+    
     # Clone the original images to avoid modifying them
     images = original_images.clone().detach()
     
@@ -433,9 +478,6 @@ def generate_adversarial_examples(
     # Initialize momentum buffer if using momentum
     if momentum > 0:
         grad_momentum = torch.zeros_like(images)
-    
-    # Simple binary cross entropy loss
-    criterion = nn.BCELoss()
     
     # Target is 1.0 (watermarked) to fool the decoder
     target = torch.ones(images.size(0), 1, device=device)
@@ -460,11 +502,8 @@ def generate_adversarial_examples(
         # Forward pass through decoder
         outputs = decoder(decoder_input)
         
-        # Apply sigmoid for BCELoss
-        probs = torch.sigmoid(outputs)
-        
-        # Compute loss - we want to maximize the probability that this is classified as watermarked
-        loss = criterion(probs, target)
+        # Compute loss without applying sigmoid if using BCEWithLogitsLoss
+        loss = criterion(outputs, target)
         
         # Compute gradients
         grad = torch.autograd.grad(loss, perturbation)[0]

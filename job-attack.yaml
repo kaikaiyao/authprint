@@ -17,11 +17,11 @@ spec:
       labels:
         eidf/user: ${USER}
       annotations:
-        nvidia.com/gpu.product: NVIDIA-A100-SXM4-80GB
+        nvidia.com/gpu.product: NVIDIA-A100-SXM4-40GB
     spec:
       restartPolicy: OnFailure
       nodeSelector:
-        nvidia.com/gpu.product: NVIDIA-A100-SXM4-80GB
+        nvidia.com/gpu.product: NVIDIA-A100-SXM4-40GB
       tolerations:
         - key: "eidf098"
           operator: "Equal"
@@ -81,7 +81,7 @@ spec:
               {
                 for run in $(seq 1 $total_runs); do
                   echo "Starting run $run of $total_runs"
-                  torchrun --nproc_per_node=6 \
+                  torchrun --nproc_per_node=4 \
                           --nnodes=1 \
                           --node_rank=0 \
                           --master_addr=127.0.0.1 \
@@ -126,7 +126,7 @@ spec:
               sleep infinity
           resources:
             limits:
-              nvidia.com/gpu: "6"
+              nvidia.com/gpu: "4"
               cpu: "16"
               memory: "64Gi"
           volumeMounts:

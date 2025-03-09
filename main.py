@@ -17,6 +17,7 @@ from utils.file_utils import generate_time_based_string
 from utils.logging import setup_logging
 
 from training.train_model import train_model
+from training.finetune_decoder import finetune_decoder
 from evaluation.evaluate_model import evaluate_model
 from attack.attacks import attack_label_based
 
@@ -60,6 +61,14 @@ def main():
     parser.add_argument("--compute_fid", action="store_true", help="Whether to compute FID score during evaluation")
     parser.add_argument("--flip_key_type", type=str, default="none", choices=["none", "1", "10", "random"], help="Whether and how to flip the encryption key")
     parser.add_argument("--key_type", type=str, default="csprng", choices=["none", "encryption", "csprng"], help="Type of key generation method (encryption or csprng, or none representing the baseline pipeline)")
+
+    # Decoder finetuning arguments
+    parser.add_argument("--finetune_decoder", action="store_true", help="Enable decoder finetuning with adversarial examples")
+    parser.add_argument("--finetune_epochs", type=int, default=10, help="Number of epochs for decoder finetuning")
+    parser.add_argument("--finetune_lr", type=float, default=1e-4, help="Learning rate for decoder finetuning")
+    parser.add_argument("--finetune_batch_size", type=int, default=16, help="Batch size for decoder finetuning")
+    parser.add_argument("--finetune_pgd_steps", type=int, default=200, help="Number of PGD steps for generating adversarial examples during finetuning")
+    parser.add_argument("--finetune_pgd_alpha", type=float, default=0.01, help="Step size for PGD attack during finetuning")
 
     # Attack arguments
     parser.add_argument("--attack_type", type=str, default="base_baseline", choices=["base_baseline", "base_secure", "combined_secure", "fixed_secure"], help="Attack type")
@@ -232,6 +241,54 @@ def main():
             rank=args.rank,
             batch_size=args.batch_size
         )
+
+        # If finetune_decoder is enabled, run the finetuning process
+        if args.finetune_decoder:
+            logging.info("Starting decoder finetuning...")
+            
+            # Generate a time string for file naming
+            time_string = generate_time_based_string()
+            
+            # Set up distributed training for finetuning if not already in distributed mode
+            if not hasattr(args, 'world_size'):
+                dist.init_process_group(backend='nccl', init_method='env://')
+                args.local_rank = int(os.environ['LOCAL_RANK'])
+                torch.cuda.set_device(args.local_rank)
+                device = torch.device('cuda', args.local_rank)
+                args.world_size = dist.get_world_size()
+                args.rank = dist.get_rank()
+                
+                # Wrap decoder with DDP
+                decoder = torch.nn.parallel.DistributedDataParallel(
+                    decoder,
+                    device_ids=[args.local_rank],
+                    output_device=args.local_rank
+                )
+            
+            # Finetune the decoder
+            finetuned_decoder = finetune_decoder(
+                time_string=time_string,
+                gan_model=gan_model,
+                watermarked_model=watermarked_model,
+                decoder=decoder,
+                latent_dim=latent_dim,
+                batch_size=args.finetune_batch_size,
+                device=device,
+                num_epochs=args.finetune_epochs,
+                learning_rate=args.finetune_lr,
+                max_delta=args.max_delta,
+                saving_path=args.saving_path,
+                mask_switch_on=args.mask_switch_on,
+                seed_key=args.seed_key,
+                rank=args.rank,
+                world_size=args.world_size,
+                key_type=args.key_type,
+                pgd_steps=args.finetune_pgd_steps,
+                pgd_alpha=args.finetune_pgd_alpha
+            )
+            
+            if args.rank == 0:
+                logging.info("Decoder finetuning completed successfully.")
 
         # Only process results on rank 0
         if args.rank == 0:

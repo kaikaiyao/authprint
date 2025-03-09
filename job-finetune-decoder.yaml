@@ -1,0 +1,120 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${USER}-job-eval-${JOB_SUFFIX}
+  labels:
+    eidf/user: ${USER}
+    kueue.x-k8s.io/queue-name: ${QUEUE_NAME}
+    kueue.x-k8s.io/priority-class: batch-workload-priority
+spec:
+  completions: 1
+  parallelism: 1
+  completionMode: Indexed
+  backoffLimit: 2147483647
+  activeDeadlineSeconds: 864000
+  template:
+    metadata:
+      labels:
+        eidf/user: ${USER}
+      annotations:
+        nvidia.com/gpu.product: NVIDIA-A100-SXM4-40GB
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-A100-SXM4-40GB
+      containers:
+        - name: my-app
+          image: kaiyaoed/my_app:latest
+          workingDir: "/workspace/kubernets"
+          env:
+          - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+            value: "1"
+          - name: NCCL_SOCKET_IFNAME
+            value: "lo"
+          - name: NCCL_NSOCKS_PERTHREAD
+            value: "4"
+          - name: NCCL_SOCKET_NTHREADS
+            value: "2"
+          - name: NCCL_DEBUG
+            value: "INFO"
+          - name: NCCL_IB_DISABLE
+            value: "1"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              # First create results directory for logs
+              mkdir -p /workspace/kubernets/results
+              
+              # Use hostname for log file name
+              HOSTNAME=$(hostname)
+              LOG_FILE="/workspace/kubernets/results/${HOSTNAME}.log"
+              echo "Logging execution to: $LOG_FILE"
+              
+              # Start logging basic info
+              {
+                echo "====== EXECUTION LOG - HOSTNAME: $HOSTNAME ======"
+                echo "Job started at: $(date)"
+                echo "Username: ${USER}"
+              } | tee -a "$LOG_FILE"
+              
+              echo "Running experiment" | tee -a "$LOG_FILE"
+              curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" | tee -a "$LOG_FILE"
+              
+              # Enable command printing and error checking for detailed logging
+              set -x
+              
+              # Main execution block - this will be logged due to set -x
+              {
+                torchrun --nproc_per_node=1 \
+                        --nnodes=1 \
+                        --node_rank=0 \
+                        --master_addr=127.0.0.1 \
+                        --master_port=12345 \
+                        main.py eval \
+                        --finetune_decoder \ 
+                        --finetune_epochs 10 \
+                        --finetune_lr 1e-4 \
+                        --finetune_batch_size 16 \
+                        --finetune_pgd_steps 200 \
+                        --num_eval_samples 100 \
+                        --batch_size 16 \
+                        --stylegan2_url "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" \
+                        --watermarked_model_path '/nfs-user-107/data/csprng/watermarked_model_final_20250306214547096906.pkl' \
+                        --decoder_model_path '/nfs-user-107/data/csprng/decoder_model_final_20250306214547096906.pth' \
+                        --num_conv_layers 7 \
+                        --num_pool_layers 7 \
+                        --initial_channels 64 \
+                        --seed_key 2024 \
+                        --max_delta 0.05 \
+                        --mask_switch_on \
+                        --key_type "csprng"
+                exit_status=$?
+                echo "Python script finished with exit status $exit_status"
+              } 2>&1 | tee -a "$LOG_FILE"
+              
+              # Disable command printing to avoid cluttering the rest of the output
+              set +x
+              
+              echo "Job completed at: $(date)" | tee -a "$LOG_FILE"
+              echo "Log file saved to: $LOG_FILE" | tee -a "$LOG_FILE"
+              
+              sleep infinity
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              cpu: "8"
+              memory: "32Gi"
+          volumeMounts:
+            - name: nfs-user-107
+              mountPath: /nfs-user-107
+            - name: nfs-user-029
+              mountPath: /nfs-user-029
+      volumes:
+        - name: nfs-user-107
+          nfs:
+            server: 10.24.6.77
+            path: /user/s2470447-eidf107
+        - name: nfs-user-029
+          nfs:
+            server: 10.24.1.255
+            path: /user/s2470447-infk8s

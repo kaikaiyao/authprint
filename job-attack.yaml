@@ -102,7 +102,7 @@ spec:
                           --key_type "csprng" \
                           --seed_key 2024 \
                           --image_attack_size 100 \
-                          --surrogate_decoder_folder '/nfs-user-029/data/csprng/surr-base-secure-0305-checkpoint/'
+                          --surrogate_decoder_folder '/nfs/user/s2470447-infk8s/data/csprng/surr-base-secure/'
                   exit_status=$?
                   echo "Run $run finished with exit status $exit_status"
                   

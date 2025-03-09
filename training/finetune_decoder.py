@@ -201,6 +201,17 @@ def finetune_decoder(
             current_pgd_steps = max(10, int(pgd_steps * (0.5 + 0.5 * current_progress)))  # Start with fewer steps
             current_alpha = pgd_alpha * (0.5 + 0.5 * current_progress)  # Start with smaller step size
             
+            # Log PGD difficulty adjustment at regular intervals
+            if rank == 0 and (i == 0 or (i + batch_size) >= 1000 or i % 5 == 0):
+                pgd_progress_pct = current_progress * 100
+                steps_pct = (current_pgd_steps / pgd_steps) * 100
+                alpha_pct = (current_alpha / pgd_alpha) * 100
+                logging.info(
+                    f"PGD Difficulty: Training Progress {pgd_progress_pct:.1f}%, "
+                    f"Steps {current_pgd_steps}/{pgd_steps} ({steps_pct:.1f}%), "
+                    f"Alpha {current_alpha:.5f}/{pgd_alpha:.5f} ({alpha_pct:.1f}%)"
+                )
+            
             adversarial_images = generate_adversarial_examples(
                 decoder=decoder,
                 original_images=original_images.clone(),
@@ -342,6 +353,12 @@ def finetune_decoder(
                     adv_std = adversarial_scores.std().item()
                     all_std = probs.std().item()
                     
+                    # Calculate success rates
+                    orig_success = (original_scores < 0.5).float().mean().item() * 100  # Should be classified as 0
+                    water_success = (watermarked_scores > 0.5).float().mean().item() * 100  # Should be classified as 1
+                    adv_success_before = (adversarial_scores > 0.5).float().mean().item() * 100  # Was initially misclassified as 1
+                    adv_success_after = (adversarial_scores < 0.5).float().mean().item() * 100  # Now correctly classified as 0
+                    
                     logging.info(
                         f"Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}/{1000//batch_size}, "
                         f"Loss: {loss.item():.4f}, Class Loss: {classification_loss.item():.4f}, "
@@ -356,6 +373,11 @@ def finetune_decoder(
                         f"Scores: Original {orig_mean:.4f}±{orig_std:.4f}, "
                         f"Watermarked {water_mean:.4f}±{water_std:.4f}, "
                         f"Adversarial {adv_mean:.4f}±{adv_std:.4f}"
+                    )
+                    logging.info(
+                        f"Success Rates: Original {orig_success:.1f}%, Watermarked {water_success:.1f}%, "
+                        f"Adversarial (misclassified as watermarked): {adv_success_before:.1f}%, "
+                        f"Adversarial (correctly classified as non-watermarked): {adv_success_after:.1f}%"
                     )
         
         # Average loss for the epoch
@@ -516,6 +538,9 @@ def generate_adversarial_examples(
     
     best_adv_images = None
     best_loss = float('-inf')
+    initial_score = None
+    best_score = None
+    log_steps = [0, num_steps//4, num_steps//2, 3*num_steps//4, num_steps-1]  # Log at these steps
     
     # Perform PGD attack
     for step in range(num_steps):
@@ -548,9 +573,26 @@ def generate_adversarial_examples(
         
         # Keep track of best adversarial examples so far
         with torch.no_grad():
+            current_score = probs.mean().item()
+            
+            # Record initial score
+            if step == 0:
+                initial_score = current_score
+            
+            # Track best examples
             if loss.item() > best_loss:
                 best_loss = loss.item()
+                best_score = current_score
                 best_adv_images = adv_images.clone()
+            
+            # Log progress at specific intervals
+            if step in log_steps:
+                perturbation_norm = torch.norm(perturbation, p=float('inf')).item()
+                logging.info(
+                    f"PGD Attack Step {step+1}/{num_steps}: "
+                    f"Loss={loss.item():.4f}, Score={current_score:.4f}, "
+                    f"Best Score={best_score:.4f}, Max Perturbation={perturbation_norm:.4f}"
+                )
         
         # Compute gradients
         grad = torch.autograd.grad(loss, perturbation)[0]
@@ -579,6 +621,14 @@ def generate_adversarial_examples(
             
             # Recompute perturbation based on clamped images
             perturbation.data = adv_images - images
+    
+    # Log final attack results
+    if initial_score is not None and best_score is not None:
+        logging.info(
+            f"PGD Attack Complete: "
+            f"Initial Score={initial_score:.4f}, Final Best Score={best_score:.4f}, "
+            f"Improvement={best_score-initial_score:.4f} ({(best_score-initial_score)/initial_score*100:.1f}%)"
+        )
     
     # Restore original training state
     decoder.train(was_training)

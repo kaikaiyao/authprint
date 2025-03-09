@@ -17,11 +17,11 @@ spec:
       labels:
         eidf/user: ${USER}
       annotations:
-        nvidia.com/gpu.product: NVIDIA-A100-SXM4-40GB
+        nvidia.com/gpu.product: NVIDIA-A100-SXM4-80GB
     spec:
       restartPolicy: OnFailure
       nodeSelector:
-        nvidia.com/gpu.product: NVIDIA-A100-SXM4-40GB
+        nvidia.com/gpu.product: NVIDIA-A100-SXM4-80GB
       tolerations:
         - key: "eidf098"
           operator: "Equal"

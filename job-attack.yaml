@@ -22,6 +22,15 @@ spec:
       restartPolicy: OnFailure
       nodeSelector:
         nvidia.com/gpu.product: NVIDIA-A100-SXM4-40GB
+      tolerations:
+        - key: "eidf098"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+        - key: "eidf107"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
       containers:
         - name: my-app
           image: kaiyaoed/my_app:latest

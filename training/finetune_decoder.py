@@ -12,7 +12,7 @@ from key.key import generate_mask_secret_key, mask_image_with_key
 from utils.image_utils import constrain_image
 from models.stylegan2 import is_stylegan2
 from evaluation.evaluate_model import evaluate_model
-from utils.logging import LogRankFilter
+from utils.logging import LogRankFilter, setup_logging
 
 def process_in_subbatches(func, tensor, sub_batch_size=8, **kwargs):
     """
@@ -78,6 +78,18 @@ def finetune_decoder(
         
         # Add our rank filter to each handler
         handler.addFilter(LogRankFilter(rank))
+    
+    # Extra check - completely disable logging for non-rank-0 processes
+    # This ensures even if new handlers are added later, they'll respect the rank
+    if rank != 0:
+        root_logger.setLevel(logging.CRITICAL)  # Only allow CRITICAL messages for non-zero ranks
+    else:
+        # Ensure rank 0 has INFO level enabled
+        root_logger.setLevel(logging.INFO)
+    
+    # Reinforce the setup_logging configuration for this process
+    log_file = os.path.join(saving_path, f'finetune_log_{time_string}_{rank}.txt')
+    setup_logging(log_file, rank)
     
     if rank == 0:
         logging.info(f"Starting decoder finetuning for {num_epochs} epochs")
@@ -499,6 +511,7 @@ def finetune_decoder(
                         score_probs = None
                         torch.cuda.empty_cache()
                     else:
+                        # No scores available, provide limited information
                         logging.info(f"Skipping detailed logging for batch {i//effective_batch_size + 1} - scores not available")
         
         # Average loss for the epoch

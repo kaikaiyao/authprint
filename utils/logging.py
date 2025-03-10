@@ -26,16 +26,19 @@ def setup_logging(log_file, rank=0):
         
     # Create a logger
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
     
     # Only rank 0 should log anything
     if rank != 0:
+        # Set level to CRITICAL to completely disable normal logging for non-zero ranks
+        logger.setLevel(logging.CRITICAL)
         # Set up a null handler that discards all messages for non-zero ranks
         null_handler = logging.NullHandler()
         logger.addHandler(null_handler)
         return
     
     # For rank 0, set up normal logging
+    logger.setLevel(logging.INFO)
+    
     # Create a file handler for writing logs to a file
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)

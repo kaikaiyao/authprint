@@ -430,8 +430,16 @@ def finetune_decoder(
             loss = loss / accumulation_steps
             
             # Backward pass with memory optimization
-            with torch.cuda.amp.autocast(enabled=False):
+            with torch.amp.autocast('cuda', enabled=False):
                 loss.backward()
+            
+            # Store scores for logging before freeing memory
+            # Make copies of the scores to preserve them for logging
+            with torch.no_grad():
+                score_original = original_preds.detach().clone() if i % 5 == 0 or i == 0 or (i + effective_batch_size) >= 1000 else None
+                score_watermarked = watermarked_preds.detach().clone() if i % 5 == 0 or i == 0 or (i + effective_batch_size) >= 1000 else None
+                score_adversarial = adversarial_preds.detach().clone() if i % 5 == 0 or i == 0 or (i + effective_batch_size) >= 1000 else None
+                score_probs = probs.detach().clone() if i % 5 == 0 or i == 0 or (i + effective_batch_size) >= 1000 else None
             
             # Free up memory
             original_outputs = None
@@ -467,52 +475,67 @@ def finetune_decoder(
             
             # Log more frequently - every 5 batches or at beginning/end
             if rank == 0 and (i == 0 or (i + effective_batch_size) >= 1000 or i % 5 == 0):
-                # Calculate and log scores
+                # Calculate and log scores - use stored scores from earlier
                 with torch.no_grad():
-                    original_scores = original_preds
-                    watermarked_scores = watermarked_preds
-                    adversarial_scores = adversarial_preds
-                    
-                    # Calculate mean and std of confidence scores
-                    orig_mean = original_scores.mean().item()
-                    orig_std = original_scores.std().item()
-                    water_mean = watermarked_scores.mean().item()
-                    water_std = watermarked_scores.std().item()
-                    adv_mean = adversarial_scores.mean().item()
-                    adv_std = adversarial_scores.std().item()
-                    all_std = probs.std().item()
-                    
-                    # Calculate success rates
-                    orig_success = (original_scores < 0.5).float().mean().item() * 100  # Should be classified as 0
-                    water_success = (watermarked_scores > 0.5).float().mean().item() * 100  # Should be classified as 1
-                    adv_success = (adversarial_scores < 0.5).float().mean().item() * 100  # Correctly classified as 0
-                    
-                    # Log training progress in a cleaner format
-                    logging.info(
-                        f"\nEpoch {epoch+1}/{num_epochs} | Batch {i//effective_batch_size + 1}/{1000//effective_batch_size}"
-                        f"\n{'='*50}"
-                        f"\nLosses:"
-                        f"\n  Total: {running_loss:.4f}"
-                        f"\n  Classification: {running_classification_loss:.4f}"
-                        f"\n  Diversity: {running_diversity_loss:.4f}"
-                        f"\n  L2: {running_l2_reg:.4f}"
-                        f"\n"
-                        f"\nScores:"
-                        f"\n  Original: {orig_mean:.4f}±{orig_std:.4f}"
-                        f"\n  Watermarked: {water_mean:.4f}±{water_std:.4f}"
-                        f"\n  Adversarial: {adv_mean:.4f}±{adv_std:.4f}"
-                        f"\n"
-                        f"\nSuccess Rates:"
-                        f"\n  Original: {orig_success:.1f}%"
-                        f"\n  Watermarked: {water_success:.1f}%"
-                        f"\n  Adversarial: {adv_success:.1f}%"
-                        f"\n"
-                        f"\nModel Stats:"
-                        f"\n  All StdDev: {all_std:.4f}"
-                        f"\n  PGD Steps: {current_pgd_steps}"
-                        f"\n  PGD Alpha: {current_alpha:.5f}"
-                        f"\n{'='*50}"
-                    )
+                    if score_original is not None and score_watermarked is not None and score_adversarial is not None and score_probs is not None:
+                        original_scores = score_original
+                        watermarked_scores = score_watermarked
+                        adversarial_scores = score_adversarial
+                        probs_for_logging = score_probs
+                        
+                        # Calculate mean and std of confidence scores
+                        orig_mean = original_scores.mean().item()
+                        orig_std = original_scores.std().item()
+                        water_mean = watermarked_scores.mean().item()
+                        water_std = watermarked_scores.std().item()
+                        adv_mean = adversarial_scores.mean().item()
+                        adv_std = adversarial_scores.std().item()
+                        all_std = probs_for_logging.std().item()
+                        
+                        # Calculate success rates
+                        orig_success = (original_scores < 0.5).float().mean().item() * 100  # Should be classified as 0
+                        water_success = (watermarked_scores > 0.5).float().mean().item() * 100  # Should be classified as 1
+                        adv_success = (adversarial_scores < 0.5).float().mean().item() * 100  # Correctly classified as 0
+                        
+                        # Log training progress in a cleaner format
+                        logging.info(
+                            f"\nEpoch {epoch+1}/{num_epochs} | Batch {i//effective_batch_size + 1}/{1000//effective_batch_size}"
+                            f"\n{'='*50}"
+                            f"\nLosses:"
+                            f"\n  Total: {running_loss:.4f}"
+                            f"\n  Classification: {running_classification_loss:.4f}"
+                            f"\n  Diversity: {running_diversity_loss:.4f}"
+                            f"\n  L2: {running_l2_reg:.4f}"
+                            f"\n"
+                            f"\nScores:"
+                            f"\n  Original: {orig_mean:.4f}±{orig_std:.4f}"
+                            f"\n  Watermarked: {water_mean:.4f}±{water_std:.4f}"
+                            f"\n  Adversarial: {adv_mean:.4f}±{adv_std:.4f}"
+                            f"\n"
+                            f"\nSuccess Rates:"
+                            f"\n  Original: {orig_success:.1f}%"
+                            f"\n  Watermarked: {water_success:.1f}%"
+                            f"\n  Adversarial: {adv_success:.1f}%"
+                            f"\n"
+                            f"\nModel Stats:"
+                            f"\n  All StdDev: {all_std:.4f}"
+                            f"\n  PGD Steps: {current_pgd_steps}"
+                            f"\n  PGD Alpha: {current_alpha:.5f}"
+                            f"\n{'='*50}"
+                        )
+                        
+                        # Free memory again
+                        original_scores = None
+                        watermarked_scores = None
+                        adversarial_scores = None
+                        probs_for_logging = None
+                        score_original = None
+                        score_watermarked = None
+                        score_adversarial = None
+                        score_probs = None
+                        torch.cuda.empty_cache()
+                    else:
+                        logging.info(f"Skipping detailed logging for batch {i//effective_batch_size + 1} - scores not available")
         
         # Average loss for the epoch
         if len(epoch_losses) > 0:
@@ -635,207 +658,204 @@ def generate_adversarial_examples(
     rank: int = 0  # Add rank parameter for controlling logging
 ) -> torch.Tensor:
     """
-    Generate adversarial examples using PGD attack
+    Generate adversarial examples using PGD attack with reduced memory footprint
     """
-    # Save computation graph memory by setting no_grad
+    # Save computation graph memory by setting no_grad for setup
     with torch.no_grad():
         # Clone the original images to avoid modifying them
         images = original_images.clone()
         current_batch_size = images.size(0)
         
-        # Initialize perturbation randomly within constraints
-        perturbation = torch.zeros_like(images, requires_grad=False)
-        perturbation.uniform_(-max_delta, max_delta)
-        
-        # Make sure initial perturbation is valid
-        adv_images = torch.clamp(images + perturbation, -1, 1)
-        perturbation.data = adv_images - images
-        
-        # For momentum-based PGD
-        grad_momentum = torch.zeros_like(perturbation)
-        
-        # For PGD optimization
-        best_adv_images = None
-        best_loss = float('inf')
-        best_score = 0
-        initial_score = None
-        last_loss = 0
-        stagnation_counter = 0
+        # Process in smaller sub-batches to reduce memory usage 
+        max_sub_batch_size = 2  # Process very small batches at a time
+        num_sub_batches = math.ceil(current_batch_size / max_sub_batch_size)
+        all_best_adv_images = torch.zeros_like(images)
         
         # Determine if model uses sigmoid in the final layer
         # Check first output to see if values are between 0 and 1
-        with torch.no_grad():
-            test_output = decoder(images[0:1])
-            is_sigmoid_output = (test_output >= 0).all() and (test_output <= 1).all()
-        
-        # Create target tensor - PGD tries to maximize the probability of being watermarked
-        target = torch.ones((current_batch_size, 1), device=device)
+        test_output = decoder(images[0:1])
+        is_sigmoid_output = (test_output >= 0).all() and (test_output <= 1).all()
     
-    # Perform PGD attack with memory optimization
-    for step in range(num_steps):
-        # Free up memory
-        torch.cuda.empty_cache()
+    # Process each sub-batch separately to save memory
+    for sub_batch_idx in range(num_sub_batches):
+        start_idx = sub_batch_idx * max_sub_batch_size
+        end_idx = min((sub_batch_idx + 1) * max_sub_batch_size, current_batch_size)
+        sub_batch_size = end_idx - start_idx
         
-        # Make sure perturbation requires gradients for this step
-        perturbation.requires_grad_(True)
+        with torch.no_grad():
+            # Get sub-batch of images
+            sub_images = images[start_idx:end_idx].clone()
+            
+            # Initialize perturbation randomly within constraints
+            perturbation = torch.zeros_like(sub_images, requires_grad=False)
+            perturbation.uniform_(-max_delta, max_delta)
+            
+            # Make sure initial perturbation is valid
+            adv_images = torch.clamp(sub_images + perturbation, -1, 1)
+            perturbation.data = adv_images - sub_images
+            
+            # For momentum-based PGD
+            grad_momentum = torch.zeros_like(perturbation)
+            
+            # For PGD optimization
+            best_adv_images = None
+            best_loss = float('inf')
+            best_score = 0
+            initial_score = None
+            last_loss = 0
+            stagnation_counter = 0
+            
+            # Create target tensor - PGD tries to maximize the probability of being watermarked
+            target = torch.ones((sub_batch_size, 1), device=device)
         
-        # Create adversarial examples
-        adv_images = torch.clamp(images + perturbation, -1, 1)
-        
-        # Apply masking if enabled - process in small batches to save memory
-        if key_type != "none":
-            if k_mask is None:
-                # Generate mask if not provided
-                mask_shape = (current_batch_size,) + images.shape[1:]
-                k_mask_batch = generate_mask_secret_key(mask_shape, 2024, device, key_type=key_type)
-                
-                # Use even smaller sub-batches for masking to save memory
-                sub_sub_batch_size = max(1, current_batch_size // 8)
-                decoder_input = process_in_subbatches(
-                    mask_image_with_key, 
-                    adv_images, 
-                    sub_batch_size=sub_sub_batch_size, 
-                    cnn_key=k_mask_batch
-                )
-            else:
-                # Use the provided mask - handle both tensor and CryptoCNN cases
-                # CryptoCNN objects should be used directly without slicing
-                if hasattr(k_mask, 'size') and k_mask.size(0) > 1:
-                    # It's a tensor with batch dimension
+        # Perform PGD attack with memory optimization
+        for step in range(num_steps):
+            # Free up memory
+            torch.cuda.empty_cache()
+            
+            # Make sure perturbation requires gradients for this step
+            perturbation.requires_grad_(True)
+            
+            # Create adversarial examples
+            adv_images = torch.clamp(sub_images + perturbation, -1, 1)
+            
+            # Apply masking if enabled - process in small batches to save memory
+            if key_type != "none":
+                if k_mask is None:
+                    # Generate mask if not provided
+                    mask_shape = (sub_batch_size,) + sub_images.shape[1:]
+                    k_mask_batch = generate_mask_secret_key(mask_shape, 2024, device, key_type=key_type)
+                    
                     # Use smaller sub-batches for masking
-                    sub_sub_batch_size = max(1, current_batch_size // 8)
-                    decoder_input = process_in_subbatches(
-                        mask_image_with_key, 
-                        adv_images, 
-                        sub_batch_size=sub_sub_batch_size, 
-                        cnn_key=k_mask
-                    )
+                    decoder_input = mask_image_with_key(adv_images, k_mask_batch)
                 else:
-                    # It's either a single-batch tensor or a CryptoCNN object
-                    # Use smaller sub-batches for masking
-                    sub_sub_batch_size = max(1, current_batch_size // 8)
-                    decoder_input = process_in_subbatches(
-                        mask_image_with_key, 
-                        adv_images, 
-                        sub_batch_size=sub_sub_batch_size, 
-                        cnn_key=k_mask
-                    )
-        else:
-            decoder_input = adv_images
-        
-        # Process through decoder in smaller batches if needed
-        sub_batch_size = max(1, current_batch_size // 4)
-        outputs_list = []
-        for j in range(0, current_batch_size, sub_batch_size):
-            end_j = min(j + sub_batch_size, current_batch_size)
-            sub_outputs = decoder(decoder_input[j:end_j])
-            outputs_list.append(sub_outputs)
+                    # Use the provided mask - handle both tensor and CryptoCNN cases
+                    # CryptoCNN objects should be used directly without slicing
+                    if hasattr(k_mask, 'size') and k_mask.size(0) > 1:
+                        # It's a tensor with batch dimension
+                        mask_slice = k_mask[start_idx:end_idx]
+                        decoder_input = mask_image_with_key(adv_images, mask_slice)
+                    else:
+                        # It's either a single-batch tensor or a CryptoCNN object
+                        decoder_input = mask_image_with_key(adv_images, k_mask)
+            else:
+                decoder_input = adv_images
+            
+            # Forward pass through decoder
+            outputs = decoder(decoder_input)
+            
+            # Apply sigmoid if needed
+            if is_sigmoid_output:
+                probs = outputs
+            else:
+                probs = torch.sigmoid(outputs)
+            
+            # Compute loss - we want to maximize the probability that this is classified as watermarked
+            if is_sigmoid_output:
+                loss = F.binary_cross_entropy(probs, target)
+            else:
+                loss = F.binary_cross_entropy_with_logits(outputs, target)
+            
+            # Check for stagnation - if loss doesn't improve for several steps
+            if abs(loss.item() - last_loss) < 1e-5:
+                stagnation_counter += 1
+            else:
+                stagnation_counter = 0
+            last_loss = loss.item()
+            
+            # If stagnation detected, add extra randomness to escape local minimum
+            if stagnation_counter >= 5:
+                with torch.no_grad():
+                    random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
+                    perturbation.data += random_noise
+                    stagnation_counter = 0
+            
+            # Keep track of best adversarial examples so far
+            with torch.no_grad():
+                current_score = probs.mean().item()
+                
+                # Record initial score
+                if step == 0:
+                    initial_score = current_score
+                    best_score = current_score
+                    best_adv_images = adv_images.clone()
+                
+                # Track best examples - LOWER loss is better for fooling the model
+                if loss.item() < best_loss:
+                    best_loss = loss.item()
+                    best_score = current_score
+                    best_adv_images = adv_images.clone()
+                
+                # Also track by direct score comparison - higher score is better
+                if current_score > best_score:
+                    best_score = current_score
+                    best_adv_images = adv_images.clone()
+            
+            # Compute gradients
+            grad = torch.autograd.grad(loss, perturbation, create_graph=False, retain_graph=False)[0]
+            
+            # Free up memory explicitly
+            outputs = None
+            probs = None
+            loss = None
+            decoder_input = None
+            
+            # Apply momentum if used
+            if momentum > 0:
+                grad_momentum = momentum * grad_momentum + grad
+                update = alpha * grad_momentum.sign()
+            else:
+                update = alpha * grad.sign()
+            
+            # Free up memory explicitly
+            grad = None
+            torch.cuda.empty_cache()
+            
+            # Update perturbation - gradient descent to minimize loss
+            with torch.no_grad():
+                perturbation -= update
+                
+                # Add small random noise occasionally to escape local minima
+                if step % 10 == 0:
+                    noise = (torch.rand_like(perturbation) * 2 - 1) * alpha * 0.1
+                    perturbation.data += noise
+                
+                # Project perturbation to ensure max_delta constraint
+                perturbation.data = torch.clamp(perturbation.data, -max_delta, max_delta)
+                
+                # Ensure resulting images are in valid range [-1, 1]
+                adv_images = torch.clamp(sub_images + perturbation, -1, 1)
+                
+                # Recompute perturbation based on clamped images
+                perturbation.data = adv_images - sub_images
+            
+            # Free up memory
+            update = None
+            adv_images = None
             torch.cuda.empty_cache()
         
-        outputs = torch.cat(outputs_list, dim=0)
+        # Log sub-batch attack results only at rank 0
+        if initial_score is not None and best_score is not None and rank == 0 and sub_batch_idx == 0:
+            improvement = best_score - initial_score
+            pct_improvement = (improvement / max(initial_score, 0.0001)) * 100
+            logging.info(
+                f"\nPGD Attack Summary (Sub-batch {sub_batch_idx+1}/{num_sub_batches}):"
+                f"\n{'='*30}"
+                f"\nInitial Score: {initial_score:.4f}"
+                f"\nBest Score: {best_score:.4f}"
+                f"\nImprovement: {improvement:.4f} ({pct_improvement:.1f}%)"
+                f"\n{'='*30}"
+            )
         
-        # Apply sigmoid if needed
-        if is_sigmoid_output:
-            probs = outputs
-        else:
-            probs = torch.sigmoid(outputs)
-        
-        # Compute loss - we want to maximize the probability that this is classified as watermarked
-        if is_sigmoid_output:
-            loss = F.binary_cross_entropy(probs, target)
-        else:
-            loss = F.binary_cross_entropy_with_logits(outputs, target)
-        
-        # Check for stagnation - if loss doesn't improve for several steps
-        if abs(loss.item() - last_loss) < 1e-5:
-            stagnation_counter += 1
-        else:
-            stagnation_counter = 0
-        last_loss = loss.item()
-        
-        # If stagnation detected, add extra randomness to escape local minimum
-        if stagnation_counter >= 5:
-            with torch.no_grad():
-                random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
-                perturbation.data += random_noise
-                stagnation_counter = 0
-        
-        # Keep track of best adversarial examples so far
+        # Store the best adversarial examples for this sub-batch
         with torch.no_grad():
-            current_score = probs.mean().item()
-            
-            # Record initial score
-            if step == 0:
-                initial_score = current_score
-                best_score = current_score
-                best_adv_images = adv_images.clone()
-            
-            # Track best examples - LOWER loss is better for fooling the model
-            if loss.item() < best_loss:
-                best_loss = loss.item()
-                best_score = current_score
-                best_adv_images = adv_images.clone()
-            
-            # Also track by direct score comparison - higher score is better
-            if current_score > best_score:
-                best_score = current_score
-                best_adv_images = adv_images.clone()
-        
-        # Compute gradients
-        grad = torch.autograd.grad(loss, perturbation, create_graph=False, retain_graph=False)[0]
-        
-        # Free up memory explicitly
-        outputs = None
-        outputs_list = None
-        probs = None
-        loss = None
-        decoder_input = None
-        
-        # Apply momentum if used
-        if momentum > 0:
-            grad_momentum = momentum * grad_momentum + grad
-            update = alpha * grad_momentum.sign()
-        else:
-            update = alpha * grad.sign()
-        
-        # Free up memory explicitly
-        grad = None
-        torch.cuda.empty_cache()
-        
-        # Update perturbation - gradient descent to minimize loss
-        with torch.no_grad():
-            perturbation -= update
-            
-            # Add small random noise occasionally to escape local minima
-            if step % 10 == 0:
-                noise = (torch.rand_like(perturbation) * 2 - 1) * alpha * 0.1
-                perturbation.data += noise
-            
-            # Project perturbation to ensure max_delta constraint
-            perturbation.data = torch.clamp(perturbation.data, -max_delta, max_delta)
-            
-            # Ensure resulting images are in valid range [-1, 1]
-            adv_images = torch.clamp(images + perturbation, -1, 1)
-            
-            # Recompute perturbation based on clamped images
-            perturbation.data = adv_images - images
+            all_best_adv_images[start_idx:end_idx] = best_adv_images.clone()
         
         # Free up memory
-        update = None
-        adv_images = None
+        sub_images = None
+        perturbation = None
+        grad_momentum = None
+        best_adv_images = None
         torch.cuda.empty_cache()
     
-    # Log final attack results only at rank 0
-    if initial_score is not None and best_score is not None and rank == 0:
-        improvement = best_score - initial_score
-        pct_improvement = (improvement / max(initial_score, 0.0001)) * 100
-        logging.info(
-            f"\nPGD Attack Summary:"
-            f"\n{'='*30}"
-            f"\nInitial Score: {initial_score:.4f}"
-            f"\nBest Score: {best_score:.4f}"
-            f"\nImprovement: {improvement:.4f} ({pct_improvement:.1f}%)"
-            f"\n{'='*30}"
-        )
-    
-    return best_adv_images 
+    return all_best_adv_images 

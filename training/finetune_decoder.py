@@ -12,6 +12,16 @@ from utils.image_utils import constrain_image
 from models.stylegan2 import is_stylegan2
 from evaluation.evaluate_model import evaluate_model
 
+# Custom logging filter that only allows messages from rank 0
+class RankFilter(logging.Filter):
+    def __init__(self, rank):
+        super().__init__()
+        self.rank = rank
+        
+    def filter(self, record):
+        # Only allow log messages from rank 0
+        return self.rank == 0
+
 def process_in_subbatches(func, tensor, sub_batch_size=8, **kwargs):
     """
     Process a tensor in smaller sub-batches to reduce memory usage.
@@ -64,35 +74,19 @@ def finetune_decoder(
     pgd_alpha=0.01,
     save_interval=1
 ):
-    """
-    Finetune an existing decoder to be more robust against PGD attacks by training it on:
-    1. Original images (label 0)
-    2. Watermarked images (post-constrained) (label 1)
-    3. Adversarial samples from PGD attack (label 0)
+    # Configure logging to filter based on rank
+    # Get the root logger and apply the rank filter to all handlers
+    root_logger = logging.getLogger()
     
-    This function makes the entire decoder trainable without freezing any layers.
+    # First remove existing rank filters if any
+    for handler in root_logger.handlers:
+        for filter in handler.filters[:]:
+            if isinstance(filter, RankFilter):
+                handler.removeFilter(filter)
+        
+        # Add our rank filter to each handler
+        handler.addFilter(RankFilter(rank))
     
-    Args:
-        time_string: String based on current time for file naming
-        gan_model: Original generator model
-        watermarked_model: Watermarked model
-        decoder: Decoder model to be finetuned
-        latent_dim: Dimension of the latent space
-        batch_size: Batch size for training
-        device: Device to use for training
-        num_epochs: Number of epochs to train
-        learning_rate: Learning rate for optimizer
-        max_delta: Maximum allowed perturbation for both watermarking and attacks
-        saving_path: Path to save the finetuned model
-        mask_switch_on: Whether to use masking
-        seed_key: Seed for random number generation
-        rank: Process rank for distributed training
-        world_size: Total number of processes for distributed training
-        key_type: Type of key generation method
-        pgd_steps: Number of PGD steps for generating adversarial examples
-        pgd_alpha: Step size for PGD attack
-        save_interval: How often to save the model (in epochs)
-    """
     if rank == 0:
         logging.info(f"Starting decoder finetuning for {num_epochs} epochs")
         logging.info(f"World size: {world_size}")

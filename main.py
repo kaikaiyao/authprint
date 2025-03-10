@@ -107,7 +107,7 @@ def main():
 
     if args.rank == 0:
         log_file = os.path.join(args.saving_path, f'training_log_{time_string}.txt')
-        setup_logging(log_file)
+        setup_logging(log_file, args.rank)
 
         logging.info("===== Input Parameters =====")
         logging.info(pprint.pformat(vars(args)))

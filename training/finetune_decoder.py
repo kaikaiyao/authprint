@@ -155,6 +155,7 @@ def finetune_decoder(
     if mask_switch_on and key_type != "none":
         # Create a dummy batch to get the shape
         dummy_batch = torch.zeros((batch_size, 3, 256, 256), device=device)
+        # For CryptoCNN, we only need to generate it once
         k_mask = generate_mask_secret_key(
             image_shape=dummy_batch.shape,
             seed=seed_key,
@@ -546,7 +547,7 @@ def generate_adversarial_examples(
     max_delta: float = 0.05,
     momentum: float = 0.9,
     key_type: str = "none",
-    k_mask: torch.Tensor = None
+    k_mask: torch.Tensor = None  # Note: k_mask can be a Tensor or a CryptoCNN object
 ) -> torch.Tensor:
     """
     Generate adversarial examples for the decoder by performing PGD attack.
@@ -620,6 +621,7 @@ def generate_adversarial_examples(
             if step > 0:
                 torch.cuda.empty_cache()
             
+            # Make sure perturbation requires gradients for this step
             perturbation.requires_grad_(True)
             
             # Create adversarial examples
@@ -633,11 +635,15 @@ def generate_adversarial_examples(
                     k_mask_batch = generate_mask_secret_key(mask_shape, 2024, device, key_type=key_type)
                     decoder_input = mask_image_with_key(images=adv_images, cnn_key=k_mask_batch)
                 else:
-                    # Use the provided slice of the mask
-                    decoder_input = mask_image_with_key(
-                        images=adv_images, 
-                        cnn_key=k_mask[start_idx:end_idx] if k_mask.size(0) > 1 else k_mask
-                    )
+                    # Use the provided mask - handle both tensor and CryptoCNN cases
+                    # CryptoCNN objects should be used directly without slicing
+                    if hasattr(k_mask, 'size') and k_mask.size(0) > 1:
+                        # It's a tensor with batch dimension, slice it
+                        mask_slice = k_mask[start_idx:end_idx]
+                        decoder_input = mask_image_with_key(images=adv_images, cnn_key=mask_slice)
+                    else:
+                        # It's either a single-batch tensor or a CryptoCNN object, use as is
+                        decoder_input = mask_image_with_key(images=adv_images, cnn_key=k_mask)
             else:
                 decoder_input = adv_images
             

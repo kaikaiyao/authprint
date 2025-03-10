@@ -38,6 +38,8 @@ def finetune_decoder(
     2. Watermarked images (post-constrained) (label 1)
     3. Adversarial samples from PGD attack (label 0)
     
+    This function makes the entire decoder trainable without freezing any layers.
+    
     Args:
         time_string: String based on current time for file naming
         gan_model: Original generator model
@@ -74,42 +76,16 @@ def finetune_decoder(
     # Get the actual decoder model (handle DDP case)
     decoder_module = decoder.module if isinstance(decoder, nn.parallel.DistributedDataParallel) else decoder
 
-    # Freeze most of the decoder layers - only train the final layers
-    # This helps prevent catastrophic forgetting and model collapse
-    frozen_count = 0
+    # Make all decoder layers trainable instead of freezing some
     trainable_count = 0
     
-    # Get all parameter names
-    param_names = list(name for name, _ in decoder_module.named_parameters())
-    
-    # Determine the number of layers to keep trainable
-    num_trainable_layers = max(2, len(param_names) // 4)  # Keep at least the last 2 layers or 25% of all layers
-    trainable_layer_names = set(param_names[-num_trainable_layers:])
-    
-    if rank == 0:
-        logging.info(f"Total model layers: {len(param_names)}")
-        logging.info(f"Keeping the last {num_trainable_layers} layers trainable: {trainable_layer_names}")
-    
+    # Make all parameters trainable
     for name, param in decoder_module.named_parameters():
-        # Keep the last few layers trainable
-        if name in trainable_layer_names:
-            param.requires_grad = True
-            trainable_count += param.numel()
-        else:
-            param.requires_grad = False
-            frozen_count += param.numel()
+        param.requires_grad = True
+        trainable_count += param.numel()
     
     if rank == 0:
-        logging.info(f"Frozen parameters: {frozen_count}, Trainable parameters: {trainable_count}")
-    
-    # Make sure we have at least some trainable parameters
-    if trainable_count == 0:
-        logging.warning("No trainable parameters found! Making all parameters trainable.")
-        for param in decoder_module.parameters():
-            param.requires_grad = True
-        trainable_count = sum(p.numel() for p in decoder_module.parameters())
-        frozen_count = 0
-        logging.info(f"Updated - Frozen parameters: {frozen_count}, Trainable parameters: {trainable_count}")
+        logging.info(f"Total model layers are trainable: {trainable_count} parameters")
     
     decoder.train()
     
@@ -269,7 +245,8 @@ def finetune_decoder(
                 alpha=current_alpha,
                 max_delta=max_delta,
                 key_type=key_type if mask_switch_on else "none",
-                k_mask=k_mask if mask_switch_on and key_type != "none" else None
+                k_mask=k_mask if mask_switch_on and key_type != "none" else None,
+                rank=rank
             )
             
             # Apply masking if enabled
@@ -413,27 +390,28 @@ def finetune_decoder(
                     adv_score_medium = (adversarial_scores > 0.7).float().mean().item() * 100  # Medium confidence wrong predictions
                     adv_score_low = (adversarial_scores > 0.5).float().mean().item() * 100  # Low confidence wrong predictions
                     
-                    logging.info(
-                        f"Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}/{1000//batch_size}, "
-                        f"Loss: {loss.item():.4f}, Class Loss: {classification_loss.item():.4f}, "
-                        f"Div Loss: {diversity_loss:.4f}, L2: {l2_reg.item():.4f}, All StdDev: {all_std:.4f}"
-                    )
-                    logging.info(
-                        f"Separate Losses - Original: {orig_loss.item():.4f}, Watermarked: {water_loss.item():.4f}, "
-                        f"Adversarial: {adv_loss.item():.4f} (weight: {adv_weight:.2f}), "
-                        f"PGD Steps: {current_pgd_steps}, PGD Alpha: {current_alpha:.5f}"
-                    )
-                    logging.info(
-                        f"Scores: Original {orig_mean:.4f}±{orig_std:.4f}, "
-                        f"Watermarked {water_mean:.4f}±{water_std:.4f}, "
-                        f"Adversarial {adv_mean:.4f}±{adv_std:.4f}"
-                    )
-                    logging.info(
-                        f"Success Rates: Original {orig_success:.1f}%, Watermarked {water_success:.1f}%, "
-                        f"Adversarial (misclassified as watermarked): {adv_success_before:.1f}% "
-                        f"(high: {adv_score_high:.1f}%, med: {adv_score_medium:.1f}%, low: {adv_score_low:.1f}%), "
-                        f"Adversarial (correctly classified): {adv_success_after:.1f}%"
-                    )
+                    if rank == 0:
+                        logging.info(
+                            f"Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}/{1000//batch_size}, "
+                            f"Loss: {loss.item():.4f}, Class Loss: {classification_loss.item():.4f}, "
+                            f"Div Loss: {diversity_loss:.4f}, L2: {l2_reg.item():.4f}, All StdDev: {all_std:.4f}"
+                        )
+                        logging.info(
+                            f"Separate Losses - Original: {orig_loss.item():.4f}, Watermarked: {water_loss.item():.4f}, "
+                            f"Adversarial: {adv_loss.item():.4f} (weight: {adv_weight:.2f}), "
+                            f"PGD Steps: {current_pgd_steps}, PGD Alpha: {current_alpha:.5f}"
+                        )
+                        logging.info(
+                            f"Scores: Original {orig_mean:.4f}±{orig_std:.4f}, "
+                            f"Watermarked {water_mean:.4f}±{water_std:.4f}, "
+                            f"Adversarial {adv_mean:.4f}±{adv_std:.4f}"
+                        )
+                        logging.info(
+                            f"Success Rates: Original {orig_success:.1f}%, Watermarked {water_success:.1f}%, "
+                            f"Adversarial (misclassified as watermarked): {adv_success_before:.1f}% "
+                            f"(high: {adv_score_high:.1f}%, med: {adv_score_medium:.1f}%, low: {adv_score_low:.1f}%), "
+                            f"Adversarial (correctly classified): {adv_success_after:.1f}%"
+                        )
         
         # Average loss for the epoch
         avg_loss = sum(epoch_losses) / len(epoch_losses)
@@ -533,7 +511,8 @@ def finetune_decoder(
             logging.info(f"Mean score (watermarked): {mean_score_watermarked:.4f}")
             logging.info(f"Std score (watermarked): {std_score_watermarked:.4f}")
         
-        logging.info("Decoder finetuning completed.")
+        if rank == 0:
+            logging.info("Decoder finetuning completed.")
         
     return decoder
 
@@ -547,7 +526,8 @@ def generate_adversarial_examples(
     max_delta: float = 0.05,
     momentum: float = 0.9,
     key_type: str = "none",
-    k_mask: torch.Tensor = None  # Note: k_mask can be a Tensor or a CryptoCNN object
+    k_mask: torch.Tensor = None,  # Note: k_mask can be a Tensor or a CryptoCNN object
+    rank: int = 0  # Add rank parameter for controlling logging
 ) -> torch.Tensor:
     """
     Generate adversarial examples for the decoder by performing PGD attack.
@@ -563,6 +543,7 @@ def generate_adversarial_examples(
         momentum: Momentum factor for PGD attack
         key_type: Type of key generation method
         k_mask: Pre-generated mask for efficiency (only used if key_type != "none")
+        rank: Process rank for controlling logging
         
     Returns:
         Adversarial examples
@@ -672,7 +653,8 @@ def generate_adversarial_examples(
                     random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
                     perturbation.data += random_noise
                     stagnation_counter = 0
-                    logging.debug(f"Added random noise at step {step+1} to escape local minimum")
+                    if rank == 0:
+                        logging.debug(f"Added random noise at step {step+1} to escape local minimum")
             
             # Keep track of best adversarial examples so far
             with torch.no_grad():
@@ -697,7 +679,7 @@ def generate_adversarial_examples(
                     
                 # Log progress at specific intervals
                 log_steps = [0, num_steps//4, num_steps//2, 3*num_steps//4, num_steps-1]  # Log at these steps
-                if step in log_steps:
+                if step in log_steps and rank == 0:
                     perturbation_norm = torch.norm(perturbation, p=float('inf')).item()
                     logging.info(
                         f"PGD Attack Step {step+1}/{num_steps}: "
@@ -749,7 +731,7 @@ def generate_adversarial_examples(
             torch.cuda.empty_cache()
         
         # Log final attack results
-        if initial_score is not None and best_score is not None:
+        if initial_score is not None and best_score is not None and rank == 0:
             improvement = best_score - initial_score
             pct_improvement = (improvement / max(initial_score, 0.0001)) * 100
             logging.info(

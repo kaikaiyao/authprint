@@ -1,7 +1,7 @@
 import logging
 
 # Custom logging filter that only allows messages from rank 0
-class RankFilter(logging.Filter):
+class LogRankFilter(logging.Filter):
     def __init__(self, rank):
         super().__init__()
         self.rank = rank
@@ -21,7 +21,7 @@ def setup_logging(log_file, rank=0):
         logger.removeHandler(handler)
     
     # Create a rank filter
-    rank_filter = RankFilter(rank)
+    rank_filter = LogRankFilter(rank)
 
     # Create a file handler for writing logs to a file
     file_handler = logging.FileHandler(log_file)

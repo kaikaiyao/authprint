@@ -11,16 +11,7 @@ from key.key import generate_mask_secret_key, mask_image_with_key
 from utils.image_utils import constrain_image
 from models.stylegan2 import is_stylegan2
 from evaluation.evaluate_model import evaluate_model
-
-# Custom logging filter that only allows messages from rank 0
-class RankFilter(logging.Filter):
-    def __init__(self, rank):
-        super().__init__()
-        self.rank = rank
-        
-    def filter(self, record):
-        # Only allow log messages from rank 0
-        return self.rank == 0
+from utils.logging import LogRankFilter
 
 def process_in_subbatches(func, tensor, sub_batch_size=8, **kwargs):
     """
@@ -81,11 +72,11 @@ def finetune_decoder(
     # First remove existing rank filters if any
     for handler in root_logger.handlers:
         for filter in handler.filters[:]:
-            if isinstance(filter, RankFilter):
+            if isinstance(filter, LogRankFilter):
                 handler.removeFilter(filter)
         
         # Add our rank filter to each handler
-        handler.addFilter(RankFilter(rank))
+        handler.addFilter(LogRankFilter(rank))
     
     if rank == 0:
         logging.info(f"Starting decoder finetuning for {num_epochs} epochs")

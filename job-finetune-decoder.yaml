@@ -65,13 +65,13 @@ spec:
               
               # Main execution block - this will be logged due to set -x
               {
-                torchrun --nproc_per_node=1 \
+                torchrun --nproc_per_node=4 \
                         --nnodes=1 \
                         --node_rank=0 \
                         --master_addr=127.0.0.1 \
                         --master_port=12345 \
                         main.py finetune \
-                        --finetune_epochs 500 \
+                        --finetune_epochs 2000 \
                         --finetune_lr 1e-3 \
                         --finetune_batch_size 32 \
                         --finetune_pgd_steps 100 \
@@ -101,7 +101,7 @@ spec:
               sleep infinity
           resources:
             limits:
-              nvidia.com/gpu: "1"
+              nvidia.com/gpu: "4"
               cpu: "16"
               memory: "64Gi"
           volumeMounts:

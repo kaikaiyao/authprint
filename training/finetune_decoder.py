@@ -5,6 +5,7 @@ import os
 import gc
 import math
 import torch.nn.functional as F
+import time
 
 from key.key import generate_mask_secret_key, mask_image_with_key
 from utils.image_utils import constrain_image
@@ -120,8 +121,14 @@ def finetune_decoder(
     
     decoder.train()
     
-    # Create optimizer for decoder only - add momentum and weight decay (L2 regularization)
-    optimizer_D = torch.optim.SGD(
+    # Create optimizer for decoder
+    if isinstance(decoder, (nn.parallel.DistributedDataParallel, torch.nn.DataParallel)):
+        decoder_module = decoder.module
+    else:
+        decoder_module = decoder
+    
+    # Keep the original optimizer settings
+    optimizer = torch.optim.SGD(
         filter(lambda p: p.requires_grad, decoder.parameters()),
         lr=learning_rate,
         momentum=0.9,
@@ -130,8 +137,11 @@ def finetune_decoder(
     
     # Add learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer_D, mode='min', factor=0.5, patience=2, verbose=True if rank == 0 else False
+        optimizer, mode='min', factor=0.5, patience=2, verbose=True if rank == 0 else False
     )
+    
+    # Add accumulation steps for gradient accumulation
+    accumulation_steps = 2  # Adjust based on memory requirements
     
     # Track metrics
     avg_losses = []
@@ -181,13 +191,31 @@ def finetune_decoder(
         )
     
     for epoch in range(num_epochs):
-        epoch_losses = []
+        # Start time for this epoch
+        epoch_start_time = time.time()
         
-        # We'll process approximately 1000 images per epoch
-        for i in range(0, 1000, effective_batch_size):
-            current_batch_size = min(effective_batch_size, 1000 - i)
-            if current_batch_size <= 0:
-                break
+        # Set models to training mode
+        decoder.train()
+        
+        running_loss = 0.0
+        running_classification_loss = 0.0
+        running_diversity_loss = 0.0
+        running_l2_reg = 0.0
+        epoch_losses = []  # Initialize epoch_losses list
+        
+        # Shuffled indices for accessing both sets
+        loader_indices = torch.randperm(1000)
+        
+        # Process in batches of size batch_size
+        for idx in range(0, 1000, effective_batch_size):
+            # Get indices for this batch
+            indices = loader_indices[idx:min(idx + effective_batch_size, 1000)]
+            i = indices[0].item()  # Use first index for logging
+            current_batch_size = min(effective_batch_size, 1000 - idx)
+
+            # Zero gradients only at the beginning of accumulation cycle
+            if idx % (accumulation_steps * effective_batch_size) == 0:
+                optimizer.zero_grad()
                 
             torch.cuda.empty_cache()
             gc.collect()
@@ -327,7 +355,7 @@ def finetune_decoder(
             labels[current_batch_size:2*current_batch_size] = 1.0  # Watermarked images have label 1
             
             # Train the decoder
-            optimizer_D.zero_grad()
+            optimizer.zero_grad()
             
             # Forward pass
             outputs = decoder(train_images)
@@ -398,30 +426,44 @@ def finetune_decoder(
             
             loss += 0.001 * l2_reg
             
-            loss.backward()
+            # Scale the loss according to accumulation steps
+            loss = loss / accumulation_steps
             
-            # Gradient clipping to prevent extreme updates
-            torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=1.0)
+            # Backward pass with memory optimization
+            with torch.cuda.amp.autocast(enabled=False):
+                loss.backward()
             
-            # Update weights
-            optimizer_D.step()
+            # Free up memory
+            original_outputs = None
+            watermarked_outputs = None
+            adversarial_outputs = None
+            original_preds = None
+            watermarked_preds = None
+            adversarial_preds = None
+            train_images = None
+            torch.cuda.empty_cache()
             
-            # Track metrics
-            epoch_losses.append(loss.item())
+            # Update weights only after accumulating gradients
+            if (idx + effective_batch_size) % (accumulation_steps * effective_batch_size) == 0 or (idx + effective_batch_size) >= 1000:
+                # Clip gradients to prevent exploding gradients
+                torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+                torch.cuda.empty_cache()
             
-            # Check if model is collapsing and reset if necessary
-            with torch.no_grad():
-                pred_std = probs.std().item()
-                if pred_std < 0.01:  # If predictions have very small std deviation
-                    if rank == 0:
-                        logging.warning(f"Model collapse detected (std={pred_std:.6f})! Resetting model weights.")
-                    
-                    # Reset model weights to initial state with small random perturbation
-                    for name, param in decoder_module.named_parameters():
-                        if param.requires_grad:
-                            init_weight = initial_state[name]
-                            # Add small random noise to break symmetry
-                            param.data = init_weight + 0.01 * torch.randn_like(init_weight)
+            # Accumulate loss statistics
+            running_loss += loss.item() * accumulation_steps
+            running_classification_loss += classification_loss.item()
+            running_diversity_loss += diversity_loss.item() * 0.01
+            running_l2_reg += l2_reg.item()
+            epoch_losses.append(loss.item() * accumulation_steps)  # Track for epoch average
+            
+            # Free up remaining tensors
+            classification_loss = None
+            diversity_loss = None
+            l2_reg = None
+            loss = None
+            torch.cuda.empty_cache()
             
             # Log more frequently - every 5 batches or at beginning/end
             if rank == 0 and (i == 0 or (i + effective_batch_size) >= 1000 or i % 5 == 0):
@@ -450,10 +492,10 @@ def finetune_decoder(
                         f"\nEpoch {epoch+1}/{num_epochs} | Batch {i//effective_batch_size + 1}/{1000//effective_batch_size}"
                         f"\n{'='*50}"
                         f"\nLosses:"
-                        f"\n  Total: {loss.item():.4f}"
-                        f"\n  Classification: {classification_loss.item():.4f}"
-                        f"\n  Diversity: {diversity_loss:.4f}"
-                        f"\n  L2: {l2_reg.item():.4f}"
+                        f"\n  Total: {running_loss:.4f}"
+                        f"\n  Classification: {running_classification_loss:.4f}"
+                        f"\n  Diversity: {running_diversity_loss:.4f}"
+                        f"\n  L2: {running_l2_reg:.4f}"
                         f"\n"
                         f"\nScores:"
                         f"\n  Original: {orig_mean:.4f}±{orig_std:.4f}"
@@ -473,10 +515,14 @@ def finetune_decoder(
                     )
         
         # Average loss for the epoch
-        avg_loss = sum(epoch_losses) / len(epoch_losses)
-        avg_losses.append(avg_loss)
+        if len(epoch_losses) > 0:
+            avg_loss = sum(epoch_losses) / len(epoch_losses)
+            avg_losses.append(avg_loss)
+        else:
+            avg_loss = running_loss / (1000 // effective_batch_size)
+            avg_losses.append(avg_loss)
         
-        # Update learning rate based on validation loss
+        # Update learning rate scheduler
         scheduler.step(avg_loss)
         
         if rank == 0:
@@ -589,243 +635,207 @@ def generate_adversarial_examples(
     rank: int = 0  # Add rank parameter for controlling logging
 ) -> torch.Tensor:
     """
-    Generate adversarial examples for the decoder by performing PGD attack.
-    Unlike the regular attack function, this uses the actual decoder for the attack.
-    
-    Args:
-        decoder: The decoder model to attack
-        original_images: The original images to perturb
-        device: Device to perform the attack on
-        num_steps: Number of PGD steps
-        alpha: Step size for PGD
-        max_delta: Maximum perturbation allowed
-        momentum: Momentum factor for PGD attack
-        key_type: Type of key generation method
-        k_mask: Pre-generated mask for efficiency (only used if key_type != "none")
-        rank: Process rank for controlling logging
-        
-    Returns:
-        Adversarial examples
+    Generate adversarial examples using PGD attack
     """
-    # Ensure decoder is in eval mode during attack generation
-    was_training = decoder.training
-    decoder.eval()
-    
-    # Determine output type (sigmoid or logits)
+    # Save computation graph memory by setting no_grad
     with torch.no_grad():
-        dummy_input = torch.zeros((1, 3, 256, 256), device=device)  # Smaller dummy input
-        dummy_output = decoder(dummy_input)
-        is_sigmoid_output = torch.all((dummy_output >= 0) & (dummy_output <= 1))
-    
-    # Get batch size and determine sub-batch size to reduce memory usage
-    full_batch_size = original_images.size(0)
-    # Use smaller sub-batches for memory efficiency in DDP
-    sub_batch_size = min(8, full_batch_size)
-    
-    # Initialize the result tensor to store all adversarial examples
-    with torch.no_grad():
-        all_adv_images = torch.zeros_like(original_images)
-    
-    # Process each sub-batch separately
-    for start_idx in range(0, full_batch_size, sub_batch_size):
-        end_idx = min(start_idx + sub_batch_size, full_batch_size)
-        current_batch_size = end_idx - start_idx
+        # Clone the original images to avoid modifying them
+        images = original_images.clone()
+        current_batch_size = images.size(0)
         
-        # Get the current sub-batch
-        images = original_images[start_idx:end_idx].clone().detach()
+        # Initialize perturbation randomly within constraints
+        perturbation = torch.zeros_like(images, requires_grad=False)
+        perturbation.uniform_(-max_delta, max_delta)
         
-        # Initialize perturbation with small random noise to avoid bad local minima
-        perturbation = (torch.rand_like(images) * 2 - 1) * max_delta * 0.1
+        # Make sure initial perturbation is valid
+        adv_images = torch.clamp(images + perturbation, -1, 1)
+        perturbation.data = adv_images - images
+        
+        # For momentum-based PGD
+        grad_momentum = torch.zeros_like(perturbation)
+        
+        # For PGD optimization
+        best_adv_images = None
+        best_loss = float('inf')
+        best_score = 0
+        initial_score = None
+        last_loss = 0
+        stagnation_counter = 0
+        
+        # Determine if model uses sigmoid in the final layer
+        # Check first output to see if values are between 0 and 1
+        with torch.no_grad():
+            test_output = decoder(images[0:1])
+            is_sigmoid_output = (test_output >= 0).all() and (test_output <= 1).all()
+        
+        # Create target tensor - PGD tries to maximize the probability of being watermarked
+        target = torch.ones((current_batch_size, 1), device=device)
+    
+    # Perform PGD attack with memory optimization
+    for step in range(num_steps):
+        # Free up memory
+        torch.cuda.empty_cache()
+        
+        # Make sure perturbation requires gradients for this step
         perturbation.requires_grad_(True)
         
-        # Target is 1.0 (watermarked) to fool the decoder
-        target = torch.ones(current_batch_size, 1, device=device)
+        # Create adversarial examples
+        adv_images = torch.clamp(images + perturbation, -1, 1)
         
-        # Initialize tracking variables
-        best_adv_images = images.clone()  # Default to original images
-        best_loss = float('inf')
-        initial_score = None
-        best_score = 0.0  # Initialize to a low value
-        
-        # Momentum buffer
-        if momentum > 0:
-            grad_momentum = torch.zeros_like(images)
-        
-        # Stagnation tracking
-        stagnation_counter = 0
-        last_loss = float('inf')
-        
-        # Perform PGD attack
-        for step in range(num_steps):
-            # Free up memory
-            if step > 0:
-                torch.cuda.empty_cache()
-            
-            # Make sure perturbation requires gradients for this step
-            perturbation.requires_grad_(True)
-            
-            # Create adversarial examples
-            adv_images = torch.clamp(images + perturbation, -1, 1)
-            
-            # Apply masking if enabled
-            if key_type != "none":
-                if k_mask is None:
-                    # Generate mask if not provided
-                    mask_shape = (current_batch_size,) + images.shape[1:]
-                    k_mask_batch = generate_mask_secret_key(mask_shape, 2024, device, key_type=key_type)
-                    
-                    # Use even smaller sub-batches for masking
-                    sub_sub_batch_size = max(1, current_batch_size // 4)
+        # Apply masking if enabled - process in small batches to save memory
+        if key_type != "none":
+            if k_mask is None:
+                # Generate mask if not provided
+                mask_shape = (current_batch_size,) + images.shape[1:]
+                k_mask_batch = generate_mask_secret_key(mask_shape, 2024, device, key_type=key_type)
+                
+                # Use even smaller sub-batches for masking to save memory
+                sub_sub_batch_size = max(1, current_batch_size // 8)
+                decoder_input = process_in_subbatches(
+                    mask_image_with_key, 
+                    adv_images, 
+                    sub_batch_size=sub_sub_batch_size, 
+                    cnn_key=k_mask_batch
+                )
+            else:
+                # Use the provided mask - handle both tensor and CryptoCNN cases
+                # CryptoCNN objects should be used directly without slicing
+                if hasattr(k_mask, 'size') and k_mask.size(0) > 1:
+                    # It's a tensor with batch dimension
+                    # Use smaller sub-batches for masking
+                    sub_sub_batch_size = max(1, current_batch_size // 8)
                     decoder_input = process_in_subbatches(
                         mask_image_with_key, 
                         adv_images, 
                         sub_batch_size=sub_sub_batch_size, 
-                        cnn_key=k_mask_batch
+                        cnn_key=k_mask
                     )
                 else:
-                    # Use the provided mask - handle both tensor and CryptoCNN cases
-                    # CryptoCNN objects should be used directly without slicing
-                    if hasattr(k_mask, 'size') and k_mask.size(0) > 1:
-                        # It's a tensor with batch dimension, slice it
-                        mask_slice = k_mask[start_idx:end_idx]
-                        
-                        # Use even smaller sub-batches for masking
-                        sub_sub_batch_size = max(1, current_batch_size // 4)
-                        decoder_input = process_in_subbatches(
-                            mask_image_with_key, 
-                            adv_images, 
-                            sub_batch_size=sub_sub_batch_size, 
-                            cnn_key=mask_slice
-                        )
-                    else:
-                        # It's either a single-batch tensor or a CryptoCNN object
-                        # Use even smaller sub-batches for masking
-                        sub_sub_batch_size = max(1, current_batch_size // 4)
-                        decoder_input = process_in_subbatches(
-                            mask_image_with_key, 
-                            adv_images, 
-                            sub_batch_size=sub_sub_batch_size, 
-                            cnn_key=k_mask
-                        )
-            else:
-                decoder_input = adv_images
-            
-            # Forward pass through decoder
-            outputs = decoder(decoder_input)
+                    # It's either a single-batch tensor or a CryptoCNN object
+                    # Use smaller sub-batches for masking
+                    sub_sub_batch_size = max(1, current_batch_size // 8)
+                    decoder_input = process_in_subbatches(
+                        mask_image_with_key, 
+                        adv_images, 
+                        sub_batch_size=sub_sub_batch_size, 
+                        cnn_key=k_mask
+                    )
+        else:
+            decoder_input = adv_images
+        
+        # Process through decoder in smaller batches if needed
+        sub_batch_size = max(1, current_batch_size // 4)
+        outputs_list = []
+        for j in range(0, current_batch_size, sub_batch_size):
+            end_j = min(j + sub_batch_size, current_batch_size)
+            sub_outputs = decoder(decoder_input[j:end_j])
+            outputs_list.append(sub_outputs)
+            torch.cuda.empty_cache()
+        
+        outputs = torch.cat(outputs_list, dim=0)
+        
+        # Apply sigmoid if needed
+        if is_sigmoid_output:
             probs = outputs
-            if not is_sigmoid_output:
-                probs = torch.sigmoid(outputs)
-            
-            # Compute loss - we want to maximize the probability that this is classified as watermarked
-            if is_sigmoid_output:
-                loss = F.binary_cross_entropy(probs, target)
-            else:
-                loss = F.binary_cross_entropy_with_logits(outputs, target)
-            
-            # Check for stagnation - if loss doesn't improve for several steps
-            if abs(loss.item() - last_loss) < 1e-5:
-                stagnation_counter += 1
-            else:
+        else:
+            probs = torch.sigmoid(outputs)
+        
+        # Compute loss - we want to maximize the probability that this is classified as watermarked
+        if is_sigmoid_output:
+            loss = F.binary_cross_entropy(probs, target)
+        else:
+            loss = F.binary_cross_entropy_with_logits(outputs, target)
+        
+        # Check for stagnation - if loss doesn't improve for several steps
+        if abs(loss.item() - last_loss) < 1e-5:
+            stagnation_counter += 1
+        else:
+            stagnation_counter = 0
+        last_loss = loss.item()
+        
+        # If stagnation detected, add extra randomness to escape local minimum
+        if stagnation_counter >= 5:
+            with torch.no_grad():
+                random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
+                perturbation.data += random_noise
                 stagnation_counter = 0
-            last_loss = loss.item()
-            
-            # If stagnation detected, add extra randomness to escape local minimum
-            if stagnation_counter >= 5:
-                with torch.no_grad():
-                    random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
-                    perturbation.data += random_noise
-                    stagnation_counter = 0
-            
-            # Keep track of best adversarial examples so far
-            with torch.no_grad():
-                current_score = probs.mean().item()
-                
-                # Record initial score
-                if step == 0:
-                    initial_score = current_score
-                    best_score = current_score
-                    best_adv_images = adv_images.clone()
-                
-                # Track best examples - LOWER loss is better for fooling the model
-                if loss.item() < best_loss:
-                    best_loss = loss.item()
-                    best_score = current_score
-                    best_adv_images = adv_images.clone()
-                
-                # Also track by direct score comparison - higher score is better
-                if current_score > best_score:
-                    best_score = current_score
-                    best_adv_images = adv_images.clone()
-            
-            # Compute gradients
-            grad = torch.autograd.grad(loss, perturbation, create_graph=False, retain_graph=False)[0]
-            
-            # Free up memory explicitly
-            outputs = None
-            probs = None
-            loss = None
-            
-            # Apply momentum if used
-            if momentum > 0:
-                grad_momentum = momentum * grad_momentum + grad
-                update = alpha * grad_momentum.sign()
-            else:
-                update = alpha * grad.sign()
-            
-            # Free up memory explicitly
-            grad = None
-            torch.cuda.empty_cache()
-            
-            # Update perturbation - gradient descent to minimize loss
-            with torch.no_grad():
-                perturbation -= update
-                
-                # Add small random noise occasionally to escape local minima
-                if step % 10 == 0:
-                    noise = (torch.rand_like(perturbation) * 2 - 1) * alpha * 0.1
-                    perturbation.data += noise
-                
-                # Project perturbation to ensure max_delta constraint
-                perturbation.data = torch.clamp(perturbation.data, -max_delta, max_delta)
-                
-                # Ensure resulting images are in valid range [-1, 1]
-                adv_images = torch.clamp(images + perturbation, -1, 1)
-                
-                # Recompute perturbation based on clamped images
-                perturbation.data = adv_images - images
-            
-            # Free up memory
-            update = None
-            adv_images = None
-            torch.cuda.empty_cache()
         
-        # Log final attack results only at rank 0
-        if initial_score is not None and best_score is not None and rank == 0:
-            improvement = best_score - initial_score
-            pct_improvement = (improvement / max(initial_score, 0.0001)) * 100
-            logging.info(
-                f"\nPGD Attack Summary:"
-                f"\n{'='*30}"
-                f"\nInitial Score: {initial_score:.4f}"
-                f"\nBest Score: {best_score:.4f}"
-                f"\nImprovement: {improvement:.4f} ({pct_improvement:.1f}%)"
-                f"\n{'='*30}"
-            )
-        
-        # Store the best adversarial examples for this sub-batch
+        # Keep track of best adversarial examples so far
         with torch.no_grad():
-            all_adv_images[start_idx:end_idx] = best_adv_images
+            current_score = probs.mean().item()
+            
+            # Record initial score
+            if step == 0:
+                initial_score = current_score
+                best_score = current_score
+                best_adv_images = adv_images.clone()
+            
+            # Track best examples - LOWER loss is better for fooling the model
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                best_score = current_score
+                best_adv_images = adv_images.clone()
+            
+            # Also track by direct score comparison - higher score is better
+            if current_score > best_score:
+                best_score = current_score
+                best_adv_images = adv_images.clone()
         
-        # Free memory
-        images = None
-        best_adv_images = None
-        perturbation = None
+        # Compute gradients
+        grad = torch.autograd.grad(loss, perturbation, create_graph=False, retain_graph=False)[0]
+        
+        # Free up memory explicitly
+        outputs = None
+        outputs_list = None
+        probs = None
+        loss = None
+        decoder_input = None
+        
+        # Apply momentum if used
         if momentum > 0:
-            grad_momentum = None
+            grad_momentum = momentum * grad_momentum + grad
+            update = alpha * grad_momentum.sign()
+        else:
+            update = alpha * grad.sign()
+        
+        # Free up memory explicitly
+        grad = None
+        torch.cuda.empty_cache()
+        
+        # Update perturbation - gradient descent to minimize loss
+        with torch.no_grad():
+            perturbation -= update
+            
+            # Add small random noise occasionally to escape local minima
+            if step % 10 == 0:
+                noise = (torch.rand_like(perturbation) * 2 - 1) * alpha * 0.1
+                perturbation.data += noise
+            
+            # Project perturbation to ensure max_delta constraint
+            perturbation.data = torch.clamp(perturbation.data, -max_delta, max_delta)
+            
+            # Ensure resulting images are in valid range [-1, 1]
+            adv_images = torch.clamp(images + perturbation, -1, 1)
+            
+            # Recompute perturbation based on clamped images
+            perturbation.data = adv_images - images
+        
+        # Free up memory
+        update = None
+        adv_images = None
         torch.cuda.empty_cache()
     
-    # Restore original training state
-    decoder.train(was_training)
+    # Log final attack results only at rank 0
+    if initial_score is not None and best_score is not None and rank == 0:
+        improvement = best_score - initial_score
+        pct_improvement = (improvement / max(initial_score, 0.0001)) * 100
+        logging.info(
+            f"\nPGD Attack Summary:"
+            f"\n{'='*30}"
+            f"\nInitial Score: {initial_score:.4f}"
+            f"\nBest Score: {best_score:.4f}"
+            f"\nImprovement: {improvement:.4f} ({pct_improvement:.1f}%)"
+            f"\n{'='*30}"
+        )
     
-    # Return final adversarial examples
-    return all_adv_images 
+    return best_adv_images 

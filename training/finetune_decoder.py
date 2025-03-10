@@ -205,35 +205,38 @@ def finetune_decoder(
             def get_difficulty_level(progress, num_levels=10):
                 """
                 Create a step-wise progression with plateaus.
-                Starts at 20% strength and increases in steps.
+                Starts at very low strength and increases in steps.
                 
                 Plateau periods:
-                - 20% strength for first 15% of training
-                - 30% strength from 15-25% of training
-                - 40% strength from 25-40% of training
-                - 50% strength from 40-50% of training
-                - 60% strength from 50-60% of training
-                - 70% strength from 60-70% of training
-                - 80% strength from 70-80% of training
+                - 2% strength for first 10% of training
+                - 5% strength from 10-20% of training
+                - 10% strength from 20-30% of training
+                - 20% strength from 30-40% of training
+                - 30% strength from 40-50% of training
+                - 45% strength from 50-60% of training
+                - 60% strength from 60-70% of training
+                - 75% strength from 70-80% of training
                 - 90% strength from 80-90% of training
                 - Full strength for last 10% of training
                 """
-                if progress < 0.15:
-                    return 0.2  # Start at 20% strength
-                elif progress < 0.25:
-                    return 0.3  # 30% strength
+                if progress < 0.10:
+                    return 0.02  # Start at 2% strength
+                elif progress < 0.20:
+                    return 0.05  # 5% strength
+                elif progress < 0.30:
+                    return 0.10  # 10% strength
                 elif progress < 0.40:
-                    return 0.4  # 40% strength
+                    return 0.20  # 20% strength
                 elif progress < 0.50:
-                    return 0.5  # 50% strength
+                    return 0.30  # 30% strength
                 elif progress < 0.60:
-                    return 0.6  # 60% strength
+                    return 0.45  # 45% strength
                 elif progress < 0.70:
-                    return 0.7  # 70% strength
+                    return 0.60  # 60% strength
                 elif progress < 0.80:
-                    return 0.8  # 80% strength
+                    return 0.75  # 75% strength
                 elif progress < 0.90:
-                    return 0.9  # 90% strength
+                    return 0.90  # 90% strength
                 else:
                     return 1.0  # Full strength
             
@@ -241,9 +244,9 @@ def finetune_decoder(
             difficulty = get_difficulty_level(current_progress)
             
             # Calculate PGD steps and alpha based on difficulty level
-            # Steps range from 20% to 100% of pgd_steps
-            # Alpha ranges from 20% to 100% of pgd_alpha
-            current_pgd_steps = max(5, int(pgd_steps * difficulty))
+            # Steps range from 2% to 100% of pgd_steps
+            # Alpha ranges from 2% to 100% of pgd_alpha
+            current_pgd_steps = max(3, int(pgd_steps * difficulty))
             current_alpha = pgd_alpha * difficulty
             
             # Log PGD difficulty adjustment at regular intervals
@@ -594,6 +597,9 @@ def generate_adversarial_examples(
     log_steps = [0, num_steps//4, num_steps//2, 3*num_steps//4, num_steps-1]  # Log at these steps
     
     # Perform PGD attack
+    stagnation_counter = 0
+    last_loss = float('inf')
+    
     for step in range(num_steps):
         perturbation.requires_grad_(True)
         
@@ -621,6 +627,21 @@ def generate_adversarial_examples(
             loss = F.binary_cross_entropy(probs, target)
         else:
             loss = F.binary_cross_entropy_with_logits(outputs, target)
+        
+        # Check for stagnation - if loss doesn't improve for several steps
+        if abs(loss.item() - last_loss) < 1e-5:
+            stagnation_counter += 1
+        else:
+            stagnation_counter = 0
+        last_loss = loss.item()
+        
+        # If stagnation detected, add extra randomness to escape local minimum
+        if stagnation_counter >= 5:
+            with torch.no_grad():
+                random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
+                perturbation.data += random_noise
+                stagnation_counter = 0
+                logging.debug(f"Added random noise at step {step+1} to escape local minimum")
         
         # Keep track of best adversarial examples so far
         with torch.no_grad():

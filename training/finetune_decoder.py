@@ -130,14 +130,15 @@ def finetune_decoder(
     # Keep the original optimizer settings
     optimizer = torch.optim.SGD(
         filter(lambda p: p.requires_grad, decoder.parameters()),
-        lr=learning_rate,
+        lr=learning_rate * 0.1,  # Reduce initial learning rate
         momentum=0.9,
         weight_decay=1e-4
     )
     
-    # Add learning rate scheduler
+    # Add learning rate scheduler with more conservative settings
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=2, verbose=True if rank == 0 else False
+        optimizer, mode='min', factor=0.5, patience=5, verbose=True if rank == 0 else False,
+        min_lr=1e-6  # Add minimum learning rate
     )
     
     # Add accumulation steps for gradient accumulation
@@ -389,7 +390,7 @@ def finetune_decoder(
             # Weighted loss - gradually increase the weight of adversarial loss
             # Start with equal weights and linearly increase adv_weight
             progress = (epoch * 1000 + i) / (num_epochs * 1000)
-            adv_weight = 1.0 + 4.0 * progress  # Increase from 1.0 to 5.0 over training
+            adv_weight = 1.0 + 2.0 * progress  # Reduce from 4.0 to 2.0 to make it less aggressive
             
             # Combined classification loss with weighting
             classification_loss = orig_loss + water_loss + adv_weight * adv_loss
@@ -415,8 +416,8 @@ def finetune_decoder(
                 # Penalize high similarity (encourage diversity)
                 diversity_loss = (orig_sim + adv_sim + water_sim) / 3.0
             
-            # Combined loss
-            loss = classification_loss + 0.01 * diversity_loss
+            # Combined loss with reduced diversity loss weight
+            loss = classification_loss + 0.005 * diversity_loss  # Reduce from 0.01 to 0.005
             
             # Add L2 regularization to prevent extreme weights
             l2_reg = 0.0
@@ -424,7 +425,7 @@ def finetune_decoder(
                 if param.requires_grad:
                     l2_reg += torch.norm(param)
             
-            loss += 0.001 * l2_reg
+            loss += 0.0005 * l2_reg  # Reduce from 0.001 to 0.0005
             
             # Scale the loss according to accumulation steps
             loss = loss / accumulation_steps
@@ -453,8 +454,8 @@ def finetune_decoder(
             
             # Update weights only after accumulating gradients
             if (idx + effective_batch_size) % (accumulation_steps * effective_batch_size) == 0 or (idx + effective_batch_size) >= 1000:
-                # Clip gradients to prevent exploding gradients
-                torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=1.0)
+                # Clip gradients to prevent exploding gradients - reduce max_norm
+                torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=0.5)  # Reduce from 1.0 to 0.5
                 optimizer.step()
                 optimizer.zero_grad()
                 torch.cuda.empty_cache()

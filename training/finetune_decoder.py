@@ -220,7 +220,7 @@ def finetune_decoder(
                 - Full strength for last 10% of training
                 """
                 if progress < 0.10:
-                    return 0.10  # Start at 2% strength
+                    return 0.05  # Start at 2% strength
                 elif progress < 0.20:
                     return 0.10  # 5% strength
                 elif progress < 0.30:

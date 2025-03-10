@@ -74,7 +74,7 @@ spec:
                         --finetune_epochs 100 \
                         --finetune_lr 1e-3 \
                         --finetune_batch_size 32 \
-                        --finetune_pgd_steps 200 \
+                        --finetune_pgd_steps 100 \
                         --finetune_pgd_alpha 0.02 \
                         --num_eval_samples 100 \
                         --batch_size 16 \

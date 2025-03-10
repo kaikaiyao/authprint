@@ -28,7 +28,7 @@ def finetune_decoder(
     rank=0,
     world_size=1,
     key_type="csprng",
-    pgd_steps=200,
+    pgd_steps=100,
     pgd_alpha=0.01,
     save_interval=1
 ):
@@ -220,9 +220,9 @@ def finetune_decoder(
                 - Full strength for last 10% of training
                 """
                 if progress < 0.10:
-                    return 0.02  # Start at 2% strength
+                    return 0.10  # Start at 2% strength
                 elif progress < 0.20:
-                    return 0.05  # 5% strength
+                    return 0.10  # 5% strength
                 elif progress < 0.30:
                     return 0.10  # 10% strength
                 elif progress < 0.40:

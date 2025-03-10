@@ -51,6 +51,11 @@ def main():
     parser.add_argument("--mask_switch_on", action="store_true", help="Enable the new masking pipeline")
     parser.set_defaults(mask_switch_on=False)
     parser.add_argument("--mask_switch_off", dest="mask_switch_on", action="store_false", help="Disable the new masking pipeline")
+    parser.add_argument("--random_smooth", action="store_true", help="Enable randomized smoothing by adding Gaussian noise to images before masking")
+    parser.set_defaults(random_smooth=False)
+    parser.add_argument("--random_smooth_type", type=str, default="original", choices=["original", "both"], 
+                        help="Where to apply noise: 'original' for x_M only, 'both' for both x_M and x_M_hat_constrained")
+    parser.add_argument("--random_smooth_std", type=float, default=0.01, help="Standard deviation of Gaussian noise for randomized smoothing")
     parser.add_argument("--resume_checkpoint", type=str, help="Path to a checkpoint file to resume training")
 
     # Evaluation arguments
@@ -198,6 +203,10 @@ def main():
             world_size=args.world_size,
             key_type=args.key_type,
             compute_fid=args.compute_fid,
+            flip_key_type=args.flip_key_type,
+            random_smooth=args.random_smooth,
+            random_smooth_type=args.random_smooth_type,
+            random_smooth_std=args.random_smooth_std,
         )
 
     elif args.mode == "eval":

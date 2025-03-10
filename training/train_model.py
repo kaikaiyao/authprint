@@ -41,6 +41,9 @@ def train_model(
     key_type="csprng",
     compute_fid=False,
     flip_key_type="none",
+    random_smooth=False,
+    random_smooth_type="original",
+    random_smooth_std=0.01,
 ):
     # Configure logging to filter based on rank
     root_logger = logging.getLogger()
@@ -58,6 +61,13 @@ def train_model(
         logging.info(f"World size: {world_size}")
         logging.info(f"max_delta = {max_delta}")
         logging.info(f"time_string = {time_string}")
+        logging.info(f"mask_switch_on = {mask_switch_on}")
+        logging.info(f"key_type = {key_type}")
+        logging.info(f"flip_key_type = {flip_key_type}")
+        if random_smooth:
+            logging.info(f"Random smoothing enabled with type '{random_smooth_type}' and std {random_smooth_std}")
+        else:
+            logging.info(f"Random smoothing disabled")
         logging.info("Decoder structure:\n%s", decoder.module if isinstance(decoder, DDP) else decoder)
         logging.info(f"Decoder parameters: {sum(p.numel() for p in decoder.parameters())}")
 
@@ -100,6 +110,16 @@ def train_model(
 
             x_M_original = x_M.clone().detach()
             x_M_hat_constrained_original = x_M_hat_constrained.clone().detach()
+
+            # Apply randomized smoothing if enabled
+            if random_smooth:
+                if random_smooth_type == "original" or random_smooth_type == "both":
+                    # Add Gaussian noise to original image
+                    x_M = x_M + torch.randn_like(x_M) * random_smooth_std
+                
+                if random_smooth_type == "both":
+                    # Add Gaussian noise to watermarked image
+                    x_M_hat_constrained = x_M_hat_constrained + torch.randn_like(x_M_hat_constrained) * random_smooth_std
 
             x_M = mask_image_with_key(images=x_M, cnn_key=k_mask)
             x_M_hat_constrained = mask_image_with_key(images=x_M_hat_constrained, cnn_key=k_mask)

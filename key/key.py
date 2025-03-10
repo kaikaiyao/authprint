@@ -165,6 +165,7 @@ def generate_mask_secret_key(
     device: str = 'cpu',
     flip_key_type: str = 'none',
     key_type: str = 'csprng',
+    rank: int = 0,
 ) -> nn.Module:
     """Generates a frozen CNN-based mask generator with cryptographic initialization.
     
@@ -174,7 +175,8 @@ def generate_mask_secret_key(
         device: Target device for the mask generator
         flip_key_type: Type of key bit flipping to apply
         key_type: Type of key generation method to use ("encryption" or "csprng")
-    
+        rank: Process rank for distributed training (for logging)
+        
     Returns:
         Initialized and frozen CNN mask generator
     """
@@ -188,13 +190,13 @@ def generate_mask_secret_key(
     if flip_key_type == "none":
         pass
     else:
-        binary_key = flip_key(input_key=binary_key, flip_key_type=flip_key_type)
-
+        binary_key = flip_key(input_key=binary_key, flip_key_type=flip_key_type, rank=rank)
+    
     # Create and freeze CNN
     mask_generator = CryptoCNN(channels, channels, binary_key, key_type).to(device)
     for param in mask_generator.parameters():
         param.requires_grad = False
-        
+    
     return mask_generator
 
 

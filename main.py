@@ -14,7 +14,7 @@ from models.attack_combined_model import CombinedModel
 from models.model_utils import clone_model, load_finetuned_model
 from utils.gpu import get_gpu_info, initialize_cuda
 from utils.file_utils import generate_time_based_string
-from utils.logging import setup_logging
+from utils.logging import setup_logging, LogRankFilter
 
 from training.train_model import train_model
 from training.finetune_decoder import finetune_decoder
@@ -108,6 +108,14 @@ def main():
     if args.rank == 0:
         log_file = os.path.join(args.saving_path, f'training_log_{time_string}.txt')
         setup_logging(log_file, args.rank)
+        
+        # Apply rank filter to ensure only rank 0 logs appear
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            for filter in handler.filters[:]:
+                if isinstance(filter, LogRankFilter):
+                    handler.removeFilter(filter)
+            handler.addFilter(LogRankFilter(args.rank))
 
         logging.info("===== Input Parameters =====")
         logging.info(pprint.pformat(vars(args)))

@@ -6,6 +6,7 @@ import gc
 import math
 import torch.nn.functional as F
 import time
+import builtins  # Import builtins to access the built-in filter function
 
 from key.key import generate_mask_secret_key, mask_image_with_key
 from utils.image_utils import constrain_image
@@ -114,7 +115,7 @@ def finetune_decoder(
     
     # Keep the original optimizer settings
     optimizer = torch.optim.SGD(
-        filter(lambda p: p.requires_grad, decoder.parameters()),
+        builtins.filter(lambda p: p.requires_grad, decoder.parameters()),
         lr=learning_rate * 0.1,  # Reduce initial learning rate
         momentum=0.9,
         weight_decay=1e-4

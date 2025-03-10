@@ -10,6 +10,7 @@ from evaluation.evaluate_model import evaluate_model
 from models.stylegan2 import is_stylegan2
 from utils.image_utils import constrain_image
 from key.key import generate_mask_secret_key, mask_image_with_key
+from utils.logging import LogRankFilter
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -41,6 +42,18 @@ def train_model(
     compute_fid=False,
     flip_key_type="none",
 ):
+    # Configure logging to filter based on rank
+    root_logger = logging.getLogger()
+    
+    # First remove existing rank filters if any
+    for handler in root_logger.handlers:
+        for filter in handler.filters[:]:
+            if isinstance(filter, LogRankFilter):
+                handler.removeFilter(filter)
+        
+        # Add our rank filter to each handler
+        handler.addFilter(LogRankFilter(rank))
+        
     if rank == 0:
         logging.info(f"World size: {world_size}")
         logging.info(f"max_delta = {max_delta}")

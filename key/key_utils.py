@@ -1,8 +1,22 @@
 import os
 import random
 import logging
+from utils.logging import LogRankFilter
 
-def flip_key(input_key: bytes, flip_key_type: str) -> bytes:
+def apply_rank_filter(rank=0):
+    """Apply rank filtering to ensure only rank 0 logs messages"""
+    root_logger = logging.getLogger()
+    
+    # First remove existing rank filters if any
+    for handler in root_logger.handlers:
+        for filter in handler.filters[:]:
+            if isinstance(filter, LogRankFilter):
+                handler.removeFilter(filter)
+        
+        # Add our rank filter to each handler
+        handler.addFilter(LogRankFilter(rank))
+
+def flip_key(input_key: bytes, flip_key_type: str, rank=0) -> bytes:
     """Flips bits in a 256-bit (32-byte) key according to the chosen flip_key_type.
     
     flip_key_type options:
@@ -10,6 +24,9 @@ def flip_key(input_key: bytes, flip_key_type: str) -> bytes:
       "10"     - Flip exactly 10 unique random bits.
       "random" - Flip every bit with a random mask, resulting in a completely random key.
     """
+    # Apply rank filtering to ensure only rank 0 logs messages
+    apply_rank_filter(rank)
+    
     if len(input_key) != 32:
         raise ValueError("Input key must be exactly 32 bytes long")
 

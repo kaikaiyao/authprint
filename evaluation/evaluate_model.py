@@ -18,6 +18,7 @@ from torchvision.transforms.functional import to_pil_image
 from models.stylegan2 import is_stylegan2, load_stylegan2_model
 from torchmetrics.image.fid import FrechetInceptionDistance
 from key.key import generate_mask_secret_key, mask_image_with_key
+from utils.logging import LogRankFilter
 
 
 def evaluate_model(
@@ -48,6 +49,18 @@ def evaluate_model(
     Returns:
         Dictionary containing metrics for all test cases (on rank 0) or empty dict (on other ranks)
     """
+    # Configure logging to filter based on rank
+    root_logger = logging.getLogger()
+    
+    # First remove existing rank filters if any
+    for handler in root_logger.handlers:
+        for filter in handler.filters[:]:
+            if isinstance(filter, LogRankFilter):
+                handler.removeFilter(filter)
+        
+        # Add our rank filter to each handler
+        handler.addFilter(LogRankFilter(rank))
+    
     # Only run evaluation on rank 0
     if rank != 0:
         return {}

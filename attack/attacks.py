@@ -15,6 +15,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.metrics import roc_curve, roc_auc_score
+from utils.logging import LogRankFilter
 
 def train_surrogate_decoder(
     attack_type: str,
@@ -33,6 +34,18 @@ def train_surrogate_decoder(
     """
     Train the surrogate decoder using a loss function similar to the real decoder's training objective.
     """
+    # Configure logging to filter based on rank
+    root_logger = logging.getLogger()
+    
+    # First remove existing rank filters if any
+    for handler in root_logger.handlers:
+        for filter in handler.filters[:]:
+            if isinstance(filter, LogRankFilter):
+                handler.removeFilter(filter)
+        
+        # Add our rank filter to each handler
+        handler.addFilter(LogRankFilter(rank))
+        
     time_string = generate_time_based_string()
     if rank == 0:
         logging.info(f"time_string = {time_string}")
@@ -701,9 +714,17 @@ def attack_label_based(
         key_type (str): Type of key to use for masking
         surrogate_training_only (bool): If True, only perform surrogate training and skip all other steps
     """
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    if alpha_values is None:
-        alpha_values = [0.001]
+    # Configure logging to filter based on rank
+    root_logger = logging.getLogger()
+    
+    # First remove existing rank filters if any
+    for handler in root_logger.handlers:
+        for filter in handler.filters[:]:
+            if isinstance(filter, LogRankFilter):
+                handler.removeFilter(filter)
+        
+        # Add our rank filter to each handler
+        handler.addFilter(LogRankFilter(rank))
 
     if rank == 0:
         if surrogate_training_only:

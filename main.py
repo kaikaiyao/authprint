@@ -105,18 +105,12 @@ def main():
 
     os.makedirs(args.saving_path, exist_ok=True)
 
+    # Set up logging with rank-aware configuration
+    log_file = os.path.join(args.saving_path, f'training_log_{time_string}.txt')
+    setup_logging(log_file, args.rank)
+    
+    # Only rank 0 should log anything from this point on
     if args.rank == 0:
-        log_file = os.path.join(args.saving_path, f'training_log_{time_string}.txt')
-        setup_logging(log_file, args.rank)
-        
-        # Apply rank filter to ensure only rank 0 logs appear
-        root_logger = logging.getLogger()
-        for handler in root_logger.handlers:
-            for filter in handler.filters[:]:
-                if isinstance(filter, LogRankFilter):
-                    handler.removeFilter(filter)
-            handler.addFilter(LogRankFilter(args.rank))
-
         logging.info("===== Input Parameters =====")
         logging.info(pprint.pformat(vars(args)))
         logging.info("============================\n")

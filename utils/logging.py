@@ -12,30 +12,41 @@ class LogRankFilter(logging.Filter):
 
 # Set up logging
 def setup_logging(log_file, rank=0):
+    """
+    Set up logging configuration with strict rank filtering.
+    Only messages from rank 0 will be logged.
+    
+    Args:
+        log_file: Path to the log file
+        rank: Process rank (0 for main process)
+    """
+    # Clear existing loggers first
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+        
     # Create a logger
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     
-    # Clear existing handlers if any
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
+    # Only rank 0 should log anything
+    if rank != 0:
+        # Set up a null handler that discards all messages for non-zero ranks
+        null_handler = logging.NullHandler()
+        logger.addHandler(null_handler)
+        return
     
-    # Create a rank filter
-    rank_filter = LogRankFilter(rank)
-
+    # For rank 0, set up normal logging
     # Create a file handler for writing logs to a file
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)
     file_formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     file_handler.setFormatter(file_formatter)
-    file_handler.addFilter(rank_filter)  # Add rank filter to file handler
 
     # Create a stream handler for printing logs to the terminal
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging.INFO)
     stream_formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     stream_handler.setFormatter(stream_formatter)
-    stream_handler.addFilter(rank_filter)  # Add rank filter to stream handler
 
     # Add both handlers to the logger
     logger.addHandler(file_handler)

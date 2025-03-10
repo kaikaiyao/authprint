@@ -570,151 +570,202 @@ def generate_adversarial_examples(
     was_training = decoder.training
     decoder.eval()
     
-    # Check if the model outputs sigmoid or logits
+    # Determine output type (sigmoid or logits)
     with torch.no_grad():
-        dummy_input = torch.randn(1, 3, 256, 256, device=device)
+        dummy_input = torch.zeros((1, 3, 256, 256), device=device)  # Smaller dummy input
         dummy_output = decoder(dummy_input)
         is_sigmoid_output = torch.all((dummy_output >= 0) & (dummy_output <= 1))
     
-    # Clone the original images to avoid modifying them
-    images = original_images.clone().detach()
+    # Get batch size and determine sub-batch size to reduce memory usage
+    full_batch_size = original_images.size(0)
+    # Use smaller sub-batches for memory efficiency in DDP
+    sub_batch_size = min(8, full_batch_size)
     
-    # Initialize perturbation with small random noise to avoid bad local minima
-    perturbation = (torch.rand_like(images) * 2 - 1) * max_delta * 0.1
-    perturbation.requires_grad_(True)
+    # Initialize the result tensor to store all adversarial examples
+    with torch.no_grad():
+        all_adv_images = torch.zeros_like(original_images)
     
-    # Initialize momentum buffer if using momentum
-    if momentum > 0:
-        grad_momentum = torch.zeros_like(images)
-    
-    # Target is 1.0 (watermarked) to fool the decoder
-    target = torch.ones(images.size(0), 1, device=device)
-    
-    best_adv_images = None
-    best_loss = float('inf')  # Initialize to infinity as we want to MINIMIZE loss
-    initial_score = None
-    best_score = None
-    log_steps = [0, num_steps//4, num_steps//2, 3*num_steps//4, num_steps-1]  # Log at these steps
-    
-    # Perform PGD attack
-    stagnation_counter = 0
-    last_loss = float('inf')
-    
-    for step in range(num_steps):
+    # Process each sub-batch separately
+    for start_idx in range(0, full_batch_size, sub_batch_size):
+        end_idx = min(start_idx + sub_batch_size, full_batch_size)
+        current_batch_size = end_idx - start_idx
+        
+        # Get the current sub-batch
+        images = original_images[start_idx:end_idx].clone().detach()
+        
+        # Initialize perturbation with small random noise to avoid bad local minima
+        perturbation = (torch.rand_like(images) * 2 - 1) * max_delta * 0.1
         perturbation.requires_grad_(True)
         
-        # Create adversarial examples
-        adv_images = torch.clamp(images + perturbation, -1, 1)
+        # Target is 1.0 (watermarked) to fool the decoder
+        target = torch.ones(current_batch_size, 1, device=device)
         
-        # Apply masking if enabled
-        if key_type != "none":
-            if k_mask is None:
-                # Generate mask if not provided
-                k_mask = generate_mask_secret_key(adv_images.shape, 2024, device, key_type=key_type)
-            masked_images = mask_image_with_key(images=adv_images, cnn_key=k_mask)
-            decoder_input = masked_images
-        else:
-            decoder_input = adv_images
+        # Initialize tracking variables
+        best_adv_images = images.clone()  # Default to original images
+        best_loss = float('inf')
+        initial_score = None
+        best_score = 0.0  # Initialize to a low value
         
-        # Forward pass through decoder
-        outputs = decoder(decoder_input)
-        probs = outputs
-        if not is_sigmoid_output:
-            probs = torch.sigmoid(outputs)
-        
-        # Compute loss - we want to maximize the probability that this is classified as watermarked
-        if is_sigmoid_output:
-            loss = F.binary_cross_entropy(probs, target)
-        else:
-            loss = F.binary_cross_entropy_with_logits(outputs, target)
-        
-        # Check for stagnation - if loss doesn't improve for several steps
-        if abs(loss.item() - last_loss) < 1e-5:
-            stagnation_counter += 1
-        else:
-            stagnation_counter = 0
-        last_loss = loss.item()
-        
-        # If stagnation detected, add extra randomness to escape local minimum
-        if stagnation_counter >= 5:
-            with torch.no_grad():
-                random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
-                perturbation.data += random_noise
-                stagnation_counter = 0
-                logging.debug(f"Added random noise at step {step+1} to escape local minimum")
-        
-        # Keep track of best adversarial examples so far
-        with torch.no_grad():
-            current_score = probs.mean().item()
-            
-            # Record initial score
-            if step == 0:
-                initial_score = current_score
-                best_score = current_score
-                best_adv_images = adv_images.clone()
-            
-            # Track best examples - LOWER loss is better for fooling the model
-            if loss.item() < best_loss:
-                best_loss = loss.item()
-                best_score = current_score
-                best_adv_images = adv_images.clone()
-            
-            # Also track by direct score comparison - higher score is better
-            if current_score > best_score:
-                best_score = current_score
-                best_adv_images = adv_images.clone()
-                
-            # Log progress at specific intervals
-            if step in log_steps:
-                perturbation_norm = torch.norm(perturbation, p=float('inf')).item()
-                logging.info(
-                    f"PGD Attack Step {step+1}/{num_steps}: "
-                    f"Loss={loss.item():.6f} (lower is better), "
-                    f"Current Score={current_score:.4f}, Best Score Found={best_score:.4f}, "
-                    f"Max Perturbation={perturbation_norm:.4f}"
-                )
-        
-        # Compute gradients
-        grad = torch.autograd.grad(loss, perturbation)[0]
-        
-        # Apply momentum if used
+        # Momentum buffer
         if momentum > 0:
-            grad_momentum = momentum * grad_momentum + grad
-            update = alpha * grad_momentum.sign()
-        else:
-            update = alpha * grad.sign()
+            grad_momentum = torch.zeros_like(images)
         
-        # Update perturbation - gradient descent to minimize loss
-        with torch.no_grad():
-            perturbation -= update
+        # Stagnation tracking
+        stagnation_counter = 0
+        last_loss = float('inf')
+        
+        # Perform PGD attack
+        for step in range(num_steps):
+            # Free up memory
+            if step > 0:
+                torch.cuda.empty_cache()
             
-            # Add small random noise occasionally to escape local minima
-            if step % 10 == 0:
-                noise = (torch.rand_like(perturbation) * 2 - 1) * alpha * 0.1
-                perturbation.data += noise
+            perturbation.requires_grad_(True)
             
-            # Project perturbation to ensure max_delta constraint
-            perturbation.data = torch.clamp(perturbation.data, -max_delta, max_delta)
-            
-            # Ensure resulting images are in valid range [-1, 1]
+            # Create adversarial examples
             adv_images = torch.clamp(images + perturbation, -1, 1)
             
-            # Recompute perturbation based on clamped images
-            perturbation.data = adv_images - images
-    
-    # Log final attack results
-    if initial_score is not None and best_score is not None:
-        logging.info(
-            f"PGD Attack Complete: "
-            f"Initial Score={initial_score:.4f}, Best Score Found={best_score:.4f}, "
-            f"Improvement={best_score-initial_score:.4f} ({(best_score-initial_score)/max(initial_score, 0.0001)*100:.1f}%)"
-        )
+            # Apply masking if enabled
+            if key_type != "none":
+                if k_mask is None:
+                    # Generate mask if not provided
+                    mask_shape = (current_batch_size,) + images.shape[1:]
+                    k_mask_batch = generate_mask_secret_key(mask_shape, 2024, device, key_type=key_type)
+                    decoder_input = mask_image_with_key(images=adv_images, cnn_key=k_mask_batch)
+                else:
+                    # Use the provided slice of the mask
+                    decoder_input = mask_image_with_key(
+                        images=adv_images, 
+                        cnn_key=k_mask[start_idx:end_idx] if k_mask.size(0) > 1 else k_mask
+                    )
+            else:
+                decoder_input = adv_images
+            
+            # Forward pass through decoder
+            outputs = decoder(decoder_input)
+            probs = outputs
+            if not is_sigmoid_output:
+                probs = torch.sigmoid(outputs)
+            
+            # Compute loss - we want to maximize the probability that this is classified as watermarked
+            if is_sigmoid_output:
+                loss = F.binary_cross_entropy(probs, target)
+            else:
+                loss = F.binary_cross_entropy_with_logits(outputs, target)
+            
+            # Check for stagnation - if loss doesn't improve for several steps
+            if abs(loss.item() - last_loss) < 1e-5:
+                stagnation_counter += 1
+            else:
+                stagnation_counter = 0
+            last_loss = loss.item()
+            
+            # If stagnation detected, add extra randomness to escape local minimum
+            if stagnation_counter >= 5:
+                with torch.no_grad():
+                    random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
+                    perturbation.data += random_noise
+                    stagnation_counter = 0
+                    logging.debug(f"Added random noise at step {step+1} to escape local minimum")
+            
+            # Keep track of best adversarial examples so far
+            with torch.no_grad():
+                current_score = probs.mean().item()
+                
+                # Record initial score
+                if step == 0:
+                    initial_score = current_score
+                    best_score = current_score
+                    best_adv_images = adv_images.clone()
+                
+                # Track best examples - LOWER loss is better for fooling the model
+                if loss.item() < best_loss:
+                    best_loss = loss.item()
+                    best_score = current_score
+                    best_adv_images = adv_images.clone()
+                
+                # Also track by direct score comparison - higher score is better
+                if current_score > best_score:
+                    best_score = current_score
+                    best_adv_images = adv_images.clone()
+                    
+                # Log progress at specific intervals
+                log_steps = [0, num_steps//4, num_steps//2, 3*num_steps//4, num_steps-1]  # Log at these steps
+                if step in log_steps:
+                    perturbation_norm = torch.norm(perturbation, p=float('inf')).item()
+                    logging.info(
+                        f"PGD Attack Step {step+1}/{num_steps}: "
+                        f"Loss={loss.item():.6f} (lower is better), "
+                        f"Current Score={current_score:.4f}, Best Score Found={best_score:.4f}, "
+                        f"Max Perturbation={perturbation_norm:.4f}"
+                    )
+            
+            # Compute gradients
+            grad = torch.autograd.grad(loss, perturbation, create_graph=False, retain_graph=False)[0]
+            
+            # Free up memory explicitly
+            outputs = None
+            probs = None
+            loss = None
+            
+            # Apply momentum if used
+            if momentum > 0:
+                grad_momentum = momentum * grad_momentum + grad
+                update = alpha * grad_momentum.sign()
+            else:
+                update = alpha * grad.sign()
+            
+            # Free up memory explicitly
+            grad = None
+            torch.cuda.empty_cache()
+            
+            # Update perturbation - gradient descent to minimize loss
+            with torch.no_grad():
+                perturbation -= update
+                
+                # Add small random noise occasionally to escape local minima
+                if step % 10 == 0:
+                    noise = (torch.rand_like(perturbation) * 2 - 1) * alpha * 0.1
+                    perturbation.data += noise
+                
+                # Project perturbation to ensure max_delta constraint
+                perturbation.data = torch.clamp(perturbation.data, -max_delta, max_delta)
+                
+                # Ensure resulting images are in valid range [-1, 1]
+                adv_images = torch.clamp(images + perturbation, -1, 1)
+                
+                # Recompute perturbation based on clamped images
+                perturbation.data = adv_images - images
+            
+            # Free up memory
+            update = None
+            adv_images = None
+            torch.cuda.empty_cache()
+        
+        # Log final attack results
+        if initial_score is not None and best_score is not None:
+            improvement = best_score - initial_score
+            pct_improvement = (improvement / max(initial_score, 0.0001)) * 100
+            logging.info(
+                f"PGD Attack Complete: "
+                f"Initial Score={initial_score:.4f}, Best Score Found={best_score:.4f}, "
+                f"Improvement={improvement:.4f} ({pct_improvement:.1f}%)"
+            )
+        
+        # Store the best adversarial examples for this sub-batch
+        with torch.no_grad():
+            all_adv_images[start_idx:end_idx] = best_adv_images
+        
+        # Free memory
+        images = None
+        best_adv_images = None
+        perturbation = None
+        if momentum > 0:
+            grad_momentum = None
+        torch.cuda.empty_cache()
     
     # Restore original training state
     decoder.train(was_training)
     
-    # Return the best adversarial examples found
-    if best_adv_images is not None:
-        return best_adv_images
-    else:
-        return torch.clamp(images + perturbation.detach(), -1, 1) 
+    # Return final adversarial examples
+    return all_adv_images 

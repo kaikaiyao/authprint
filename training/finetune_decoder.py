@@ -11,6 +11,37 @@ from utils.image_utils import constrain_image
 from models.stylegan2 import is_stylegan2
 from evaluation.evaluate_model import evaluate_model
 
+def process_in_subbatches(func, tensor, sub_batch_size=8, **kwargs):
+    """
+    Process a tensor in smaller sub-batches to reduce memory usage.
+    
+    Args:
+        func: Function to apply to each sub-batch
+        tensor: Input tensor to process
+        sub_batch_size: Size of each sub-batch
+        **kwargs: Additional arguments to pass to func
+    
+    Returns:
+        Processed tensor with same shape as input
+    """
+    result = []
+    num_subbatches = math.ceil(tensor.size(0) / sub_batch_size)
+    
+    for i in range(num_subbatches):
+        start_idx = i * sub_batch_size
+        end_idx = min((i + 1) * sub_batch_size, tensor.size(0))
+        
+        # Process this sub-batch
+        sub_tensor = tensor[start_idx:end_idx]
+        processed = func(sub_tensor, **kwargs)
+        result.append(processed)
+        
+        # Free memory
+        torch.cuda.empty_cache()
+    
+    # Combine results
+    return torch.cat(result, dim=0)
+
 def finetune_decoder(
     time_string,
     gan_model,
@@ -105,8 +136,18 @@ def finetune_decoder(
     # Track metrics
     avg_losses = []
     
+    # Adjust batch size for training
+    effective_batch_size = batch_size
+    
+    # With full model training, reduce batch size to conserve memory if using DDP
+    if world_size > 1:
+        # Scale down batch size based on world size and reduce further due to full model training
+        effective_batch_size = max(1, batch_size // (world_size * 2))
+        if rank == 0:
+            logging.info(f"Reduced batch size for DDP: {batch_size} -> {effective_batch_size} (full model training)")
+    
     # Training loop
-    total_batches = math.ceil(num_epochs * 1000 / batch_size)  # Assuming 1000 images per epoch
+    total_batches = math.ceil(num_epochs * 1000 / effective_batch_size)  # Assuming 1000 images per epoch
     
     # For logits output, use BCEWithLogitsLoss; for sigmoid output, use BCELoss
     # First, let's check what kind of output the model produces
@@ -130,7 +171,7 @@ def finetune_decoder(
     # Generate a mask for the entire training if using masking
     if mask_switch_on and key_type != "none":
         # Create a dummy batch to get the shape
-        dummy_batch = torch.zeros((batch_size, 3, 256, 256), device=device)
+        dummy_batch = torch.zeros((effective_batch_size, 3, 256, 256), device=device)
         # For CryptoCNN, we only need to generate it once
         k_mask = generate_mask_secret_key(
             image_shape=dummy_batch.shape,
@@ -143,9 +184,9 @@ def finetune_decoder(
         epoch_losses = []
         
         # We'll process approximately 1000 images per epoch
-        for i in range(0, 1000, batch_size):
-            batch_size_actual = min(batch_size, 1000 - i)
-            if batch_size_actual <= 0:
+        for i in range(0, 1000, effective_batch_size):
+            current_batch_size = min(effective_batch_size, 1000 - i)
+            if current_batch_size <= 0:
                 break
                 
             torch.cuda.empty_cache()
@@ -153,7 +194,7 @@ def finetune_decoder(
             
             # Generate random latent vectors (different on each device)
             torch.manual_seed(seed_key + epoch * 1000 + i * world_size + rank)
-            z = torch.randn((batch_size_actual, latent_dim), device=device)
+            z = torch.randn((current_batch_size, latent_dim), device=device)
             
             # Step 1: Generate original images (label 0)
             with torch.no_grad():
@@ -227,7 +268,7 @@ def finetune_decoder(
             current_alpha = pgd_alpha * difficulty
             
             # Log PGD difficulty adjustment at regular intervals
-            if rank == 0 and (i == 0 or (i + batch_size) >= 1000 or i % 5 == 0):
+            if rank == 0 and (i == 0 or (i + effective_batch_size) >= 1000 or i % 5 == 0):
                 steps_pct = (current_pgd_steps / pgd_steps) * 100
                 alpha_pct = (current_alpha / pgd_alpha) * 100
                 training_pct = current_progress * 100
@@ -251,19 +292,39 @@ def finetune_decoder(
             
             # Apply masking if enabled
             if mask_switch_on and key_type != "none":
-                masked_original = mask_image_with_key(images=original_images, cnn_key=k_mask)
-                masked_watermarked = mask_image_with_key(images=watermarked_images, cnn_key=k_mask)
-                masked_adversarial = mask_image_with_key(images=adversarial_images, cnn_key=k_mask)
+                # Process images in smaller batches to reduce memory usage
+                sub_batch_size = max(1, current_batch_size // 4)  # Use smaller sub-batches
+                
+                masked_original = process_in_subbatches(
+                    mask_image_with_key, 
+                    original_images, 
+                    sub_batch_size=sub_batch_size, 
+                    cnn_key=k_mask
+                )
+                
+                masked_watermarked = process_in_subbatches(
+                    mask_image_with_key, 
+                    watermarked_images, 
+                    sub_batch_size=sub_batch_size, 
+                    cnn_key=k_mask
+                )
+                
+                masked_adversarial = process_in_subbatches(
+                    mask_image_with_key, 
+                    adversarial_images, 
+                    sub_batch_size=sub_batch_size, 
+                    cnn_key=k_mask
+                )
                 
                 train_images = torch.cat([masked_original, masked_watermarked, masked_adversarial], dim=0)
             else:
                 train_images = torch.cat([original_images, watermarked_images, adversarial_images], dim=0)
             
             # Create labels:
-            # 0 for original and adversarial (first batch_size_actual and last batch_size_actual)
-            # 1 for watermarked (middle batch_size_actual)
+            # 0 for original and adversarial (first current_batch_size and last current_batch_size)
+            # 1 for watermarked (middle current_batch_size)
             labels = torch.zeros(train_images.size(0), 1, device=device)
-            labels[batch_size_actual:2*batch_size_actual] = 1.0  # Watermarked images have label 1
+            labels[current_batch_size:2*current_batch_size] = 1.0  # Watermarked images have label 1
             
             # Train the decoder
             optimizer_D.zero_grad()
@@ -277,9 +338,9 @@ def finetune_decoder(
                 probs = torch.sigmoid(outputs)
             
             # Split the outputs for different types of images
-            original_outputs = outputs[:batch_size_actual]
-            watermarked_outputs = outputs[batch_size_actual:2*batch_size_actual]
-            adversarial_outputs = outputs[2*batch_size_actual:]
+            original_outputs = outputs[:current_batch_size]
+            watermarked_outputs = outputs[current_batch_size:2*current_batch_size]
+            adversarial_outputs = outputs[2*current_batch_size:]
             
             # Binary cross entropy loss for each type separately
             # This gives us more control over weighting
@@ -307,13 +368,13 @@ def finetune_decoder(
             
             # Diversity loss - cosine similarity between predictions within the same class
             # This encourages the network to make diverse predictions even within a class
-            original_preds = probs[:batch_size_actual]
-            watermarked_preds = probs[batch_size_actual:2*batch_size_actual]
-            adversarial_preds = probs[2*batch_size_actual:]
+            original_preds = probs[:current_batch_size]
+            watermarked_preds = probs[current_batch_size:2*current_batch_size]
+            adversarial_preds = probs[2*current_batch_size:]
             
-            # Calculate pair-wise cosine similarities (if batch_size > 1)
+            # Calculate pair-wise cosine similarities (if current_batch_size > 1)
             diversity_loss = 0.0
-            if batch_size_actual > 1:
+            if current_batch_size > 1:
                 orig_flat = original_preds.view(-1, 1)
                 water_flat = watermarked_preds.view(-1, 1)
                 adv_flat = adversarial_preds.view(-1, 1)
@@ -363,7 +424,7 @@ def finetune_decoder(
                             param.data = init_weight + 0.01 * torch.randn_like(init_weight)
             
             # Log more frequently - every 5 batches or at beginning/end
-            if rank == 0 and (i == 0 or (i + batch_size) >= 1000 or i % 5 == 0):
+            if rank == 0 and (i == 0 or (i + effective_batch_size) >= 1000 or i % 5 == 0):
                 # Calculate and log scores
                 with torch.no_grad():
                     original_scores = original_preds
@@ -392,7 +453,7 @@ def finetune_decoder(
                     
                     if rank == 0:
                         logging.info(
-                            f"Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}/{1000//batch_size}, "
+                            f"Epoch {epoch+1}/{num_epochs}, Batch {i//effective_batch_size + 1}/{1000//effective_batch_size}, "
                             f"Loss: {loss.item():.4f}, Class Loss: {classification_loss.item():.4f}, "
                             f"Div Loss: {diversity_loss:.4f}, L2: {l2_reg.item():.4f}, All StdDev: {all_std:.4f}"
                         )
@@ -454,7 +515,7 @@ def finetune_decoder(
                         compute_fid=False,
                         key_type=key_type,
                         rank=rank,
-                        batch_size=batch_size
+                        batch_size=effective_batch_size
                     )
                     
                     # Log the key metrics
@@ -496,7 +557,7 @@ def finetune_decoder(
                 compute_fid=False,
                 key_type=key_type,
                 rank=rank,
-                batch_size=batch_size
+                batch_size=effective_batch_size
             )
             
             # Log the final metrics
@@ -614,17 +675,40 @@ def generate_adversarial_examples(
                     # Generate mask if not provided
                     mask_shape = (current_batch_size,) + images.shape[1:]
                     k_mask_batch = generate_mask_secret_key(mask_shape, 2024, device, key_type=key_type)
-                    decoder_input = mask_image_with_key(images=adv_images, cnn_key=k_mask_batch)
+                    
+                    # Use even smaller sub-batches for masking
+                    sub_sub_batch_size = max(1, current_batch_size // 4)
+                    decoder_input = process_in_subbatches(
+                        mask_image_with_key, 
+                        adv_images, 
+                        sub_batch_size=sub_sub_batch_size, 
+                        cnn_key=k_mask_batch
+                    )
                 else:
                     # Use the provided mask - handle both tensor and CryptoCNN cases
                     # CryptoCNN objects should be used directly without slicing
                     if hasattr(k_mask, 'size') and k_mask.size(0) > 1:
                         # It's a tensor with batch dimension, slice it
                         mask_slice = k_mask[start_idx:end_idx]
-                        decoder_input = mask_image_with_key(images=adv_images, cnn_key=mask_slice)
+                        
+                        # Use even smaller sub-batches for masking
+                        sub_sub_batch_size = max(1, current_batch_size // 4)
+                        decoder_input = process_in_subbatches(
+                            mask_image_with_key, 
+                            adv_images, 
+                            sub_batch_size=sub_sub_batch_size, 
+                            cnn_key=mask_slice
+                        )
                     else:
-                        # It's either a single-batch tensor or a CryptoCNN object, use as is
-                        decoder_input = mask_image_with_key(images=adv_images, cnn_key=k_mask)
+                        # It's either a single-batch tensor or a CryptoCNN object
+                        # Use even smaller sub-batches for masking
+                        sub_sub_batch_size = max(1, current_batch_size // 4)
+                        decoder_input = process_in_subbatches(
+                            mask_image_with_key, 
+                            adv_images, 
+                            sub_batch_size=sub_sub_batch_size, 
+                            cnn_key=k_mask
+                        )
             else:
                 decoder_input = adv_images
             

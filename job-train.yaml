@@ -60,7 +60,7 @@ spec:
               mkdir -p /workspace/kubernets/results
               curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
               curl -o lsuncat100k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada.pkl"
-              torchrun --nproc_per_node=8 \
+              torchrun --nproc_per_node=4 \
                       --nnodes=1 \
                       --node_rank=0 \
                       --master_addr=127.0.0.1 \
@@ -86,7 +86,7 @@ spec:
               sleep infinity
           resources:
             limits:
-              nvidia.com/gpu: "8"
+              nvidia.com/gpu: "4"
               cpu: "32"
               memory: "64Gi"
           volumeMounts:

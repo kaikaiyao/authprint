@@ -196,28 +196,64 @@ def finetune_decoder(
                 watermarked_images = constrain_image(watermarked_images, original_images, max_delta)
             
             # Step 3: Generate adversarial samples using PGD attack (label 0)
-            # Gradually increase PGD strength during training
+            # Use a step-wise progression with plateaus instead of a smooth curve
             current_progress = (epoch * 1000 + i) / (num_epochs * 1000)
             
-            # Much more gradual progression - start with just 1 step and very small alpha
-            # Use a cubic function to have slower growth initially and faster growth later
-            progress_cubic = current_progress ** 3  # Cubic growth for very slow initial increase
+            # Get the current step level (0-10) based on progress
+            # This creates 10 distinct difficulty levels
+            # We'll use a custom step function to create plateaus
+            def get_difficulty_level(progress, num_levels=10):
+                """
+                Create a step-wise progression with plateaus.
+                Starts at 20% strength and increases in steps.
+                
+                Plateau periods:
+                - 20% strength for first 15% of training
+                - 30% strength from 15-25% of training
+                - 40% strength from 25-40% of training
+                - 50% strength from 40-50% of training
+                - 60% strength from 50-60% of training
+                - 70% strength from 60-70% of training
+                - 80% strength from 70-80% of training
+                - 90% strength from 80-90% of training
+                - Full strength for last 10% of training
+                """
+                if progress < 0.15:
+                    return 0.2  # Start at 20% strength
+                elif progress < 0.25:
+                    return 0.3  # 30% strength
+                elif progress < 0.40:
+                    return 0.4  # 40% strength
+                elif progress < 0.50:
+                    return 0.5  # 50% strength
+                elif progress < 0.60:
+                    return 0.6  # 60% strength
+                elif progress < 0.70:
+                    return 0.7  # 70% strength
+                elif progress < 0.80:
+                    return 0.8  # 80% strength
+                elif progress < 0.90:
+                    return 0.9  # 90% strength
+                else:
+                    return 1.0  # Full strength
             
-            # Steps start at 1 and grow to full pgd_steps
-            current_pgd_steps = max(1, int(1 + (pgd_steps - 1) * progress_cubic))
+            # Get current difficulty level (0.2-1.0)
+            difficulty = get_difficulty_level(current_progress)
             
-            # Alpha starts at 1% of pgd_alpha and grows to full pgd_alpha
-            current_alpha = pgd_alpha * (0.01 + 0.99 * progress_cubic)
+            # Calculate PGD steps and alpha based on difficulty level
+            # Steps range from 20% to 100% of pgd_steps
+            # Alpha ranges from 20% to 100% of pgd_alpha
+            current_pgd_steps = max(5, int(pgd_steps * difficulty))
+            current_alpha = pgd_alpha * difficulty
             
             # Log PGD difficulty adjustment at regular intervals
             if rank == 0 and (i == 0 or (i + batch_size) >= 1000 or i % 5 == 0):
-                pgd_progress_pct = current_progress * 100
-                progress_cubic_pct = progress_cubic * 100
                 steps_pct = (current_pgd_steps / pgd_steps) * 100
                 alpha_pct = (current_alpha / pgd_alpha) * 100
+                training_pct = current_progress * 100
                 logging.info(
-                    f"PGD Difficulty: Training Progress {pgd_progress_pct:.1f}% (cubic: {progress_cubic_pct:.1f}%), "
-                    f"Steps {current_pgd_steps}/{pgd_steps} ({steps_pct:.1f}%), "
+                    f"PGD Difficulty: Training Progress {training_pct:.1f}%, "
+                    f"Level: {difficulty:.1f}, Steps {current_pgd_steps}/{pgd_steps} ({steps_pct:.1f}%), "
                     f"Alpha {current_alpha:.5f}/{pgd_alpha:.5f} ({alpha_pct:.1f}%)"
                 )
             

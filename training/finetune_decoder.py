@@ -443,36 +443,34 @@ def finetune_decoder(
                     # Calculate success rates
                     orig_success = (original_scores < 0.5).float().mean().item() * 100  # Should be classified as 0
                     water_success = (watermarked_scores > 0.5).float().mean().item() * 100  # Should be classified as 1
-                    adv_success_before = (adversarial_scores > 0.5).float().mean().item() * 100  # Was initially misclassified as 1
-                    adv_success_after = (adversarial_scores < 0.5).float().mean().item() * 100  # Now correctly classified as 0
+                    adv_success = (adversarial_scores < 0.5).float().mean().item() * 100  # Correctly classified as 0
                     
-                    # Calculate strength of adversarial attack
-                    adv_score_high = (adversarial_scores > 0.9).float().mean().item() * 100  # Very high confidence wrong predictions
-                    adv_score_medium = (adversarial_scores > 0.7).float().mean().item() * 100  # Medium confidence wrong predictions
-                    adv_score_low = (adversarial_scores > 0.5).float().mean().item() * 100  # Low confidence wrong predictions
-                    
-                    if rank == 0:
-                        logging.info(
-                            f"Epoch {epoch+1}/{num_epochs}, Batch {i//effective_batch_size + 1}/{1000//effective_batch_size}, "
-                            f"Loss: {loss.item():.4f}, Class Loss: {classification_loss.item():.4f}, "
-                            f"Div Loss: {diversity_loss:.4f}, L2: {l2_reg.item():.4f}, All StdDev: {all_std:.4f}"
-                        )
-                        logging.info(
-                            f"Separate Losses - Original: {orig_loss.item():.4f}, Watermarked: {water_loss.item():.4f}, "
-                            f"Adversarial: {adv_loss.item():.4f} (weight: {adv_weight:.2f}), "
-                            f"PGD Steps: {current_pgd_steps}, PGD Alpha: {current_alpha:.5f}"
-                        )
-                        logging.info(
-                            f"Scores: Original {orig_mean:.4f}±{orig_std:.4f}, "
-                            f"Watermarked {water_mean:.4f}±{water_std:.4f}, "
-                            f"Adversarial {adv_mean:.4f}±{adv_std:.4f}"
-                        )
-                        logging.info(
-                            f"Success Rates: Original {orig_success:.1f}%, Watermarked {water_success:.1f}%, "
-                            f"Adversarial (misclassified as watermarked): {adv_success_before:.1f}% "
-                            f"(high: {adv_score_high:.1f}%, med: {adv_score_medium:.1f}%, low: {adv_score_low:.1f}%), "
-                            f"Adversarial (correctly classified): {adv_success_after:.1f}%"
-                        )
+                    # Log training progress in a cleaner format
+                    logging.info(
+                        f"\nEpoch {epoch+1}/{num_epochs} | Batch {i//effective_batch_size + 1}/{1000//effective_batch_size}"
+                        f"\n{'='*50}"
+                        f"\nLosses:"
+                        f"\n  Total: {loss.item():.4f}"
+                        f"\n  Classification: {classification_loss.item():.4f}"
+                        f"\n  Diversity: {diversity_loss:.4f}"
+                        f"\n  L2: {l2_reg.item():.4f}"
+                        f"\n"
+                        f"\nScores:"
+                        f"\n  Original: {orig_mean:.4f}±{orig_std:.4f}"
+                        f"\n  Watermarked: {water_mean:.4f}±{water_std:.4f}"
+                        f"\n  Adversarial: {adv_mean:.4f}±{adv_std:.4f}"
+                        f"\n"
+                        f"\nSuccess Rates:"
+                        f"\n  Original: {orig_success:.1f}%"
+                        f"\n  Watermarked: {water_success:.1f}%"
+                        f"\n  Adversarial: {adv_success:.1f}%"
+                        f"\n"
+                        f"\nModel Stats:"
+                        f"\n  All StdDev: {all_std:.4f}"
+                        f"\n  PGD Steps: {current_pgd_steps}"
+                        f"\n  PGD Alpha: {current_alpha:.5f}"
+                        f"\n{'='*50}"
+                    )
         
         # Average loss for the epoch
         avg_loss = sum(epoch_losses) / len(epoch_losses)
@@ -737,8 +735,6 @@ def generate_adversarial_examples(
                     random_noise = (torch.rand_like(perturbation) * 2 - 1) * max_delta * 0.1
                     perturbation.data += random_noise
                     stagnation_counter = 0
-                    if rank == 0:
-                        logging.debug(f"Added random noise at step {step+1} to escape local minimum")
             
             # Keep track of best adversarial examples so far
             with torch.no_grad():
@@ -760,17 +756,6 @@ def generate_adversarial_examples(
                 if current_score > best_score:
                     best_score = current_score
                     best_adv_images = adv_images.clone()
-                    
-                # Log progress at specific intervals
-                log_steps = [0, num_steps//4, num_steps//2, 3*num_steps//4, num_steps-1]  # Log at these steps
-                if step in log_steps and rank == 0:
-                    perturbation_norm = torch.norm(perturbation, p=float('inf')).item()
-                    logging.info(
-                        f"PGD Attack Step {step+1}/{num_steps}: "
-                        f"Loss={loss.item():.6f} (lower is better), "
-                        f"Current Score={current_score:.4f}, Best Score Found={best_score:.4f}, "
-                        f"Max Perturbation={perturbation_norm:.4f}"
-                    )
             
             # Compute gradients
             grad = torch.autograd.grad(loss, perturbation, create_graph=False, retain_graph=False)[0]
@@ -814,14 +799,17 @@ def generate_adversarial_examples(
             adv_images = None
             torch.cuda.empty_cache()
         
-        # Log final attack results
+        # Log final attack results only at rank 0
         if initial_score is not None and best_score is not None and rank == 0:
             improvement = best_score - initial_score
             pct_improvement = (improvement / max(initial_score, 0.0001)) * 100
             logging.info(
-                f"PGD Attack Complete: "
-                f"Initial Score={initial_score:.4f}, Best Score Found={best_score:.4f}, "
-                f"Improvement={improvement:.4f} ({pct_improvement:.1f}%)"
+                f"\nPGD Attack Summary:"
+                f"\n{'='*30}"
+                f"\nInitial Score: {initial_score:.4f}"
+                f"\nBest Score: {best_score:.4f}"
+                f"\nImprovement: {improvement:.4f} ({pct_improvement:.1f}%)"
+                f"\n{'='*30}"
             )
         
         # Store the best adversarial examples for this sub-batch

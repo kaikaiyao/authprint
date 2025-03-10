@@ -267,11 +267,11 @@ def finetune_decoder(
                 if progress < 0.10:
                     return 0.10  # Start at 2% strength
                 elif progress < 0.20:
-                    return 0.10  # 5% strength
+                    return 0.20  # 5% strength
                 elif progress < 0.30:
-                    return 0.10  # 10% strength
+                    return 0.20  # 10% strength
                 elif progress < 0.40:
-                    return 0.20  # 20% strength
+                    return 0.30  # 20% strength
                 elif progress < 0.50:
                     return 0.30  # 30% strength
                 elif progress < 0.60:

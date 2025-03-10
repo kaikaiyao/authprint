@@ -65,7 +65,7 @@ spec:
               
               # Main execution block - this will be logged due to set -x
               {
-                torchrun --nproc_per_node=8 \
+                torchrun --nproc_per_node=4 \
                         --nnodes=1 \
                         --node_rank=0 \
                         --master_addr=127.0.0.1 \
@@ -101,7 +101,7 @@ spec:
               sleep infinity
           resources:
             limits:
-              nvidia.com/gpu: "8"
+              nvidia.com/gpu: "4"
               cpu: "16"
               memory: "64Gi"
           volumeMounts:

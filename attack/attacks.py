@@ -889,6 +889,16 @@ def attack_label_based(
             logging.info(f"Actual FPR: {actual_fpr:.2f}%")
             logging.info(f"Mean original score: {original_scores_np.mean():.4f} ± {original_scores_np.std():.4f}")
             logging.info(f"Mean watermarked score: {watermarked_scores_np.mean():.4f} ± {watermarked_scores_np.std():.4f}")
+            
+            # Debug information
+            logging.info("\nDetailed Score Distribution:")
+            logging.info(f"Number of watermarked scores: {len(watermarked_scores_np)}")
+            logging.info(f"Number above threshold: {np.sum(watermarked_scores_np >= threshold)}")
+            logging.info(f"Percentiles of watermarked scores:")
+            for p in [0, 10, 25, 50, 75, 90, 100]:
+                logging.info(f"{p}th percentile: {np.percentile(watermarked_scores_np, p):.4f}")
+            logging.info(f"Number of scores above mean: {np.sum(watermarked_scores_np >= watermarked_scores_np.mean())}")
+            
             logging.info("-"*80)
 
     # Generate different types of attack images using image_attack_size

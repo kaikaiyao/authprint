@@ -101,8 +101,8 @@ spec:
                           --train_size 16 \
                           --key_type "csprng" \
                           --seed_key 2024 \
-                          --image_attack_size 100 \
-                          --alpha_values_pgd "0.001" \
+                          --image_attack_size 10 \
+                          --alpha_values_pgd "0.0001,0.001,0.01,0.1,1.0" \
                           --surrogate_decoder_folder '/nfs-user-029/data/csprng/surr-base-secure-0305-checkpoint/'
                   exit_status=$?
                   echo "Run $run finished with exit status $exit_status"

@@ -81,7 +81,7 @@ spec:
                       --max_delta=0.05 \
                       --random_smooth \
                       --random_smooth_type="both" \
-                      --random_smooth_std=0.015 \\
+                      --random_smooth_std=0.015 \
                       --saving_path=results
               exit_status=$?
               echo "Python script finished with exit status $exit_status, sleeping indefinitely"

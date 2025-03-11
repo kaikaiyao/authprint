@@ -850,7 +850,7 @@ def attack_label_based(
             original_scores.extend(original_output.cpu().numpy().flatten().tolist())
             watermarked_scores.extend(watermarked_output.cpu().numpy().flatten().tolist())
             
-        # Calculate threshold at 99% TPR
+        # Calculate threshold at X% TPR
         original_scores_np = np.array(original_scores)
         watermarked_scores_np = np.array(watermarked_scores)
         
@@ -863,13 +863,13 @@ def attack_label_based(
         
         fpr, tpr, thresholds = roc_curve(labels, combined_scores)
         
-        # Find threshold at 99% TPR
-        target_tpr = 0.99
+        # Find threshold at X% TPR
+        target_tpr = 0.90
         threshold_candidates = [(tpr[i], thresholds[i]) for i in range(len(tpr)) if tpr[i] >= target_tpr]
         if threshold_candidates:
             threshold = max(threshold_candidates, key=lambda x: x[1])[1]  # Use maximum valid threshold
         else:
-            # If no threshold gives exactly 99% TPR, take the one closest to it
+            # If no threshold gives exactly X% TPR, take the one closest to it
             threshold_idx = np.argmin(np.abs(tpr - target_tpr))
             threshold = thresholds[threshold_idx]
             
@@ -1093,7 +1093,7 @@ def attack_label_based(
         for case_name, result in attack_results.items():
             attack_scores = result['scores']
             
-            # Calculate ASR@99%TPR - percentage of attack images above threshold
+            # Calculate ASR@X%TPR - percentage of attack images above threshold
             asr = np.mean(attack_scores >= threshold) * 100  # Convert to percentage
             attack_success_rates[case_name] = asr
         

@@ -89,8 +89,8 @@ spec:
                           main.py attack \
                           --attack_type "base_secure" \
                           --stylegan2_url "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" \
-                          --watermarked_model_path '/nfs-user-029/data/csprng/RS-2/watermarked_model_final_20250310213819741284.pkl' \
-                          --decoder_model_path '/nfs-user-029/data/csprng/RS-2/decoder_model_final_20250310213819741284.pth' \
+                          --watermarked_model_path '/nfs-user-107/data/csprng/watermarked_model_final_20250306214547096906.pkl' \
+                          --decoder_model_path '/nfs-user-107/data/csprng/decoder_model_final_20250306214547096906.pth' \
                           --num_conv_layers 7 \
                           --num_pool_layers 7 \
                           --initial_channels 64 \
@@ -101,7 +101,7 @@ spec:
                           --train_size 16 \
                           --key_type "csprng" \
                           --seed_key 2024 \
-                          --image_attack_size 10 \
+                          --image_attack_size 100 \
                           --alpha_values_pgd "0.0001,0.001,0.01,0.1,1.0" \
                           --surrogate_decoder_folder '/nfs-user-029/data/csprng/surr-base-secure-0305-checkpoint/'
                   exit_status=$?

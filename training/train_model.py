@@ -98,6 +98,16 @@ def train_model(
         
         x_M_hat_constrained = constrain_image(x_M_hat, x_M, max_delta)
 
+        # Apply randomized smoothing if enabled, regardless of mask_switch_on
+        if random_smooth:
+            if random_smooth_type == "original" or random_smooth_type == "both":
+                # Add Gaussian noise to original image
+                x_M = x_M + torch.randn_like(x_M) * random_smooth_std
+            
+            if random_smooth_type == "both":
+                # Add Gaussian noise to watermarked image
+                x_M_hat_constrained = x_M_hat_constrained + torch.randn_like(x_M_hat_constrained) * random_smooth_std
+
         if mask_switch_on:
             if i == 0 or start_iter != 0:
                 k_mask = generate_mask_secret_key(
@@ -110,16 +120,6 @@ def train_model(
 
             x_M_original = x_M.clone().detach()
             x_M_hat_constrained_original = x_M_hat_constrained.clone().detach()
-
-            # Apply randomized smoothing if enabled
-            if random_smooth:
-                if random_smooth_type == "original" or random_smooth_type == "both":
-                    # Add Gaussian noise to original image
-                    x_M = x_M + torch.randn_like(x_M) * random_smooth_std
-                
-                if random_smooth_type == "both":
-                    # Add Gaussian noise to watermarked image
-                    x_M_hat_constrained = x_M_hat_constrained + torch.randn_like(x_M_hat_constrained) * random_smooth_std
 
             x_M = mask_image_with_key(images=x_M, cnn_key=k_mask)
             x_M_hat_constrained = mask_image_with_key(images=x_M_hat_constrained, cnn_key=k_mask)

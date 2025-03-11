@@ -481,7 +481,7 @@ def perform_pgd_attack(
         
     Returns:
         If return_details=False: (k_attack_scores_mean, k_attack_scores_std)
-        If return_details=True: (k_attack_scores_mean, k_attack_scores_std, attacked_images, attack_scores)
+        If return_details=True: (k_attack_scores_mean, k_attack_scores_std, attacked_images_dict, attack_scores_dict)
     """
     # Input validation
     if len(surrogate_decoders) == 0:
@@ -529,11 +529,10 @@ def perform_pgd_attack(
     k_attack_scores_mean = []
     k_attack_scores_std = []
     
-    # If we need detailed results, keep track of the best attacked images and scores
+    # If we need detailed results, keep track of the best attacked images and scores for each alpha
     if return_details:
-        best_attacked_images = None
-        best_attack_scores = None
-        best_mean_score = -float('inf')  # We want to maximize score
+        attacked_images_dict = {}
+        attack_scores_dict = {}
 
     # Test different alpha values for PGD attack
     for alpha_idx, alpha in enumerate(alpha_values):
@@ -646,11 +645,10 @@ def perform_pgd_attack(
         k_attack_scores_mean.append(mean_score)
         k_attack_scores_std.append(std_score)
         
-        # Update best overall results if needed
-        if return_details and mean_score > best_mean_score:
-            best_mean_score = mean_score
-            best_attacked_images = attacked_images.clone().detach().cpu()
-            best_attack_scores = k_attack_scores_alpha.flatten().detach().cpu().numpy().tolist()
+        # Store results for this alpha if needed
+        if return_details:
+            attacked_images_dict[alpha] = attacked_images.clone().detach().cpu()
+            attack_scores_dict[alpha] = k_attack_scores_alpha.flatten().detach().cpu().numpy().tolist()
         
         # Clean up for next alpha
         del attacked_images, k_attack_scores_alpha
@@ -660,7 +658,7 @@ def perform_pgd_attack(
         logging.info(f"Alpha = {alpha}: k_attack_score mean = {mean_score:.3f}, std = {std_score:.3f}")
     
     if return_details:
-        return k_attack_scores_mean, k_attack_scores_std, best_attacked_images, best_attack_scores
+        return k_attack_scores_mean, k_attack_scores_std, attacked_images_dict, attack_scores_dict
     return k_attack_scores_mean, k_attack_scores_std
 
 def attack_label_based(
@@ -1057,7 +1055,7 @@ def attack_label_based(
         # Collect results for all test cases
         for i, (case_name, case_images) in enumerate(test_cases.items()):
             logging.info(f"  Attacking {case_name} images ({i+1}/{len(test_cases)})...")
-            attack_scores_mean, attack_scores_std, attack_images, attack_scores = perform_pgd_attack(
+            attack_scores_mean, attack_scores_std, attack_images_dict, attack_scores_dict = perform_pgd_attack(
                 attack_type=attack_type,
                 surrogate_decoders=surrogate_decoders,
                 decoder=decoder,
@@ -1075,44 +1073,75 @@ def attack_label_based(
             attack_results[case_name] = {
                 'mean': attack_scores_mean,
                 'std': attack_scores_std,
-                'images': attack_images,
-                'scores': attack_scores
+                'images_dict': attack_images_dict,
+                'scores_dict': attack_scores_dict
             }
         
         logging.info("-"*80)
         logging.info("Step 7: Calculating attack metrics...")
         
-        # Calculate attack success rates
+        # Calculate attack success rates for each alpha value
         attack_success_rates = {}
         
         for case_name, result in attack_results.items():
-            attack_scores = result['scores']
+            attack_success_rates[case_name] = {}
             
-            # Calculate ASR@X%TPR - percentage of attack images above threshold
-            asr = np.mean(attack_scores >= threshold) * 100  # Convert to percentage
-            attack_success_rates[case_name] = asr
+            for i, alpha in enumerate(alpha_values):
+                attack_scores = result['scores_dict'][alpha]
+                
+                # Calculate ASR@X%TPR - percentage of attack images above threshold
+                asr = np.mean(np.array(attack_scores) >= threshold) * 100  # Convert to percentage
+                attack_success_rates[case_name][alpha] = asr
         
         # Print results in a clean, readable format
         logging.info("\n")
-        logging.info("="*80)
-        logging.info(f"{'ATTACK EVALUATION RESULTS':^80}")
-        logging.info("="*80)
+        logging.info("="*120)
+        logging.info(f"{'ATTACK EVALUATION RESULTS':^120}")
+        logging.info("="*120)
         logging.info(f"Reference threshold at {target_tpr*100:.0f}% TPR: {threshold:.4f}")
-        logging.info("-"*80)
-        logging.info(f"{'Attack Success Rates':^80}")
-        logging.info("-"*80)
-        logging.info(f"{'Attack Case':<25} | {'ASR (%)':<10} | {'Mean Score':<15} | {'Std Dev':<10}")
-        logging.info("-"*80)
+        logging.info("-"*120)
+        logging.info(f"{'Attack Success Rates Across Multiple Alpha Values':^120}")
+        logging.info("-"*120)
+        logging.info(f"{'Attack Case':<25} | {'Alpha':<10} | {'ASR (%)':<10} | {'Mean Score':<15} | {'Std Dev':<10}")
+        logging.info("-"*120)
+        
+        # Track best results for each case
+        best_results = {}
         
         for case_name in attack_success_rates.keys():
-            asr = attack_success_rates[case_name]
-            mean_score = attack_results[case_name]['mean'][0]  # Get the mean for the first alpha value
-            std_score = attack_results[case_name]['std'][0]    # Get the std for the first alpha value
-            logging.info(f"{case_name:<25} | {asr:9.2f}% | {mean_score:14.4f} | {std_score:9.4f}")
+            # For each case, print results for all alpha values
+            for i, alpha in enumerate(alpha_values):
+                mean_score = attack_results[case_name]['mean'][i]
+                std_score = attack_results[case_name]['std'][i]
+                asr = attack_success_rates[case_name][alpha]
+                
+                # Print the result row
+                if i == 0:  # First alpha value for this case
+                    logging.info(f"{case_name:<25} | {alpha:<10.4f} | {asr:9.2f}% | {mean_score:14.4f} | {std_score:9.4f}")
+                else:  # Subsequent alpha values - don't repeat case name
+                    logging.info(f"{'':<25} | {alpha:<10.4f} | {asr:9.2f}% | {mean_score:14.4f} | {std_score:9.4f}")
+                
+                # Track best result for this case
+                if case_name not in best_results or asr > best_results[case_name]['asr']:
+                    best_results[case_name] = {'alpha': alpha, 'asr': asr, 'mean': mean_score}
+            
+            # Add separator between cases
+            logging.info("-"*120)
         
-        logging.info("="*80)
+        # Print summary of best results
+        logging.info("\n")
+        logging.info("="*120)
+        logging.info(f"{'BEST ALPHA VALUES FOR EACH ATTACK CASE':^120}")
+        logging.info("="*120)
+        logging.info(f"{'Attack Case':<25} | {'Best Alpha':<15} | {'Best ASR (%)':<15} | {'Mean Score':<15}")
+        logging.info("-"*120)
+        
+        for case_name, result in best_results.items():
+            logging.info(f"{case_name:<25} | {result['alpha']:<15.4f} | {result['asr']:<15.2f}% | {result['mean']:<15.4f}")
+        
+        logging.info("="*120)
         logging.info(f"Higher ASR means more successful attack (more images fooling the detector)")
-        logging.info("="*80)
+        logging.info("="*120)
         
         return None, attack_success_rates, attack_results, None  # Modified return values to remove AUC metrics
     

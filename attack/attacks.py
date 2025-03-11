@@ -794,10 +794,10 @@ def attack_label_based(
     # Generate original watermarked images for reference
     with torch.no_grad():
         if rank == 0:
-            logging.info("Step 1: Generating reference watermarked images for threshold calculation (10,000 images)...")
+            logging.info("Step 1: Generating reference watermarked images for threshold calculation (100 images)...")
             
-        # Use fixed 10,000 images for threshold calculation
-        threshold_image_count = 10000
+        # Use 1000 images for threshold calculation
+        threshold_image_count = 1000
         
         # Generate a set of original watermarked images to calculate threshold
         watermarked_batches = []
@@ -850,7 +850,7 @@ def attack_label_based(
             original_scores.extend(original_output.cpu().numpy().flatten().tolist())
             watermarked_scores.extend(watermarked_output.cpu().numpy().flatten().tolist())
             
-        # Calculate threshold at 0.1% FPR (changed from 1%)
+        # Calculate threshold at 99% TPR
         original_scores_np = np.array(original_scores)
         watermarked_scores_np = np.array(watermarked_scores)
         
@@ -863,33 +863,30 @@ def attack_label_based(
         
         fpr, tpr, thresholds = roc_curve(labels, combined_scores)
         
-        # Find threshold at 0.1% FPR (changed from 1%)
-        target_fpr = 0.001
-        threshold_candidates = [(fpr[i], thresholds[i]) for i in range(len(fpr)) if fpr[i] <= target_fpr]
+        # Find threshold at 99% TPR
+        target_tpr = 0.99
+        threshold_candidates = [(tpr[i], thresholds[i]) for i in range(len(tpr)) if tpr[i] >= target_tpr]
         if threshold_candidates:
-            threshold = min(threshold_candidates, key=lambda x: x[1])[1]  # Use minimum valid threshold
+            threshold = max(threshold_candidates, key=lambda x: x[1])[1]  # Use maximum valid threshold
         else:
-            # If no threshold gives exactly 0.1% FPR, take the one closest to it
-            threshold_idx = np.argmin(np.abs(fpr - target_fpr))
+            # If no threshold gives exactly 99% TPR, take the one closest to it
+            threshold_idx = np.argmin(np.abs(tpr - target_tpr))
             threshold = thresholds[threshold_idx]
             
         # Check if the threshold is valid
         if not np.isfinite(threshold):
             # Fallback to a manual threshold calculation if ROC curve fails
             logging.warning("Invalid threshold from ROC curve, using manual calculation")
-            orig_max = np.max(original_scores_np)
-            wm_min = np.min(watermarked_scores_np)
-            # If distributions are well-separated, set threshold between them
-            if orig_max < wm_min:
-                threshold = (orig_max + wm_min) / 2
-            else:
-                # Otherwise use a percentile-based approach
-                threshold = np.percentile(original_scores_np, 99.9)  # 99.9th percentile for 0.1% FPR
+            wm_sorted = np.sort(watermarked_scores_np)
+            idx = int(len(wm_sorted) * (1 - target_tpr))
+            threshold = wm_sorted[max(0, idx)]
             
         if rank == 0:
-            original_auc = roc_auc_score(labels, combined_scores)
-            logging.info(f"Reference ROC-AUC: {original_auc:.4f}")
-            logging.info(f"Selected threshold at 0.1% FPR: {threshold:.4f}")
+            actual_tpr = np.mean(watermarked_scores_np >= threshold) * 100
+            actual_fpr = np.mean(original_scores_np >= threshold) * 100
+            logging.info(f"Selected threshold at target {target_tpr*100:.0f}% TPR: {threshold:.4f}")
+            logging.info(f"Actual TPR: {actual_tpr:.2f}%")
+            logging.info(f"Actual FPR: {actual_fpr:.2f}%")
             logging.info(f"Mean original score: {original_scores_np.mean():.4f} ± {original_scores_np.std():.4f}")
             logging.info(f"Mean watermarked score: {watermarked_scores_np.mean():.4f} ± {watermarked_scores_np.std():.4f}")
             logging.info("-"*80)
@@ -1090,88 +1087,38 @@ def attack_label_based(
         logging.info("-"*80)
         logging.info("Step 7: Calculating attack metrics...")
         
-        # Calculate combined metrics for overall ROC-AUC
-        combined_attack_scores = []
-        combined_attack_labels = []
+        # Calculate attack success rates
+        attack_success_rates = {}
         
         for case_name, result in attack_results.items():
             attack_scores = result['scores']
-            combined_attack_scores.extend(attack_scores)
-            combined_attack_labels.extend([0] * len(attack_scores))  # All attack images are negatives
-        
-        # Add watermarked images as positives
-        combined_attack_scores.extend(watermarked_scores)
-        combined_attack_labels.extend([1] * len(watermarked_scores))
-        
-        # Calculate overall ROC-AUC
-        overall_attack_auc = roc_auc_score(combined_attack_labels, combined_attack_scores)
-        
-        # Calculate per-case ROC-AUC and ASR@1%FPR
-        attack_success_rates = {}
-        per_case_auc = {}
-        
-        for case_name, result in attack_results.items():
-            attack_scores = np.array(result['scores'])
             
-            # Calculate ASR@1%FPR - percentage of attack images above threshold
+            # Calculate ASR@99%TPR - percentage of attack images above threshold
             asr = np.mean(attack_scores >= threshold) * 100  # Convert to percentage
             attack_success_rates[case_name] = asr
-            
-            # Calculate per-case ROC-AUC - compare this attack case vs watermarked
-            # Ensure equal number of samples from each class for balanced evaluation
-            n_samples = min(len(attack_scores), len(watermarked_scores))
-            
-            if n_samples > 0:
-                # Randomly sample if needed to ensure balance
-                if len(attack_scores) > n_samples:
-                    np.random.seed(2024)  # For reproducibility
-                    attack_idx = np.random.choice(len(attack_scores), n_samples, replace=False)
-                    case_attack_scores = attack_scores[attack_idx]
-                else:
-                    case_attack_scores = attack_scores
-                
-                if len(watermarked_scores) > n_samples:
-                    np.random.seed(2024)  # For reproducibility
-                    wm_idx = np.random.choice(len(watermarked_scores), n_samples, replace=False)
-                    case_wm_scores = np.array(watermarked_scores)[wm_idx]
-                else:
-                    case_wm_scores = np.array(watermarked_scores)
-                
-                # Create labels and combined scores
-                case_labels = np.array([0] * len(case_attack_scores) + [1] * len(case_wm_scores))
-                case_scores = np.concatenate([case_attack_scores, case_wm_scores])
-                
-                # Calculate ROC-AUC for this case
-                case_auc = roc_auc_score(case_labels, case_scores)
-                per_case_auc[case_name] = case_auc
-            else:
-                per_case_auc[case_name] = float('nan')
         
         # Print results in a clean, readable format
         logging.info("\n")
         logging.info("="*80)
         logging.info(f"{'ATTACK EVALUATION RESULTS':^80}")
         logging.info("="*80)
-        logging.info(f"Reference threshold at 1% FPR: {threshold:.4f}")
-        logging.info(f"Overall Attack ROC-AUC: {overall_attack_auc:.4f}")
+        logging.info(f"Reference threshold at {target_tpr*100:.0f}% TPR: {threshold:.4f}")
         logging.info("-"*80)
-        logging.info(f"{'Attack Success Rates (ASR@1%FPR) and Per-Case ROC-AUC':^80}")
+        logging.info(f"{'Attack Success Rates':^80}")
         logging.info("-"*80)
-        logging.info(f"{'Attack Case':<25} | {'ASR (%)':<10} | {'ROC-AUC':<10} | {'Mean Score':<15} | {'Std Dev':<10}")
+        logging.info(f"{'Attack Case':<25} | {'ASR (%)':<10} | {'Mean Score':<15} | {'Std Dev':<10}")
         logging.info("-"*80)
         
         for case_name in attack_success_rates.keys():
             asr = attack_success_rates[case_name]
-            auc = per_case_auc[case_name]
             mean_score = attack_results[case_name]['mean'][0]  # Get the mean for the first alpha value
             std_score = attack_results[case_name]['std'][0]    # Get the std for the first alpha value
-            logging.info(f"{case_name:<25} | {asr:9.2f}% | {auc:10.4f} | {mean_score:14.4f} | {std_score:9.4f}")
+            logging.info(f"{case_name:<25} | {asr:9.2f}% | {mean_score:14.4f} | {std_score:9.4f}")
         
         logging.info("="*80)
         logging.info(f"Higher ASR means more successful attack (more images fooling the detector)")
-        logging.info(f"Lower ROC-AUC means less separation between authentic and attacked images")
         logging.info("="*80)
         
-        return overall_attack_auc, attack_success_rates, attack_results, per_case_auc  # Return per-case AUC as well
+        return None, attack_success_rates, attack_results, None  # Modified return values to remove AUC metrics
     
     return None, None, None, None  # Return None for non-rank-0 processes

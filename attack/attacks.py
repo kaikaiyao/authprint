@@ -857,29 +857,14 @@ def attack_label_based(
         # Check if we have valid scores before proceeding
         if len(original_scores_np) == 0 or len(watermarked_scores_np) == 0:
             raise ValueError("Empty original or watermarked scores arrays")
-            
-        labels = np.array([0] * len(original_scores_np) + [1] * len(watermarked_scores_np))
-        combined_scores = np.concatenate([original_scores_np, watermarked_scores_np])
         
-        fpr, tpr, thresholds = roc_curve(labels, combined_scores)
-        
-        # Find threshold at X% TPR
+        # Simple percentile-based threshold calculation
         target_tpr = 0.90
-        threshold_candidates = [(tpr[i], thresholds[i]) for i in range(len(tpr)) if tpr[i] >= target_tpr]
-        if threshold_candidates:
-            threshold = max(threshold_candidates, key=lambda x: x[1])[1]  # Use maximum valid threshold
-        else:
-            # If no threshold gives exactly X% TPR, take the one closest to it
-            threshold_idx = np.argmin(np.abs(tpr - target_tpr))
-            threshold = thresholds[threshold_idx]
-            
-        # Check if the threshold is valid
-        if not np.isfinite(threshold):
-            # Fallback to a manual threshold calculation if ROC curve fails
-            logging.warning("Invalid threshold from ROC curve, using manual calculation")
-            wm_sorted = np.sort(watermarked_scores_np)
-            idx = int(len(wm_sorted) * (1 - target_tpr))
-            threshold = wm_sorted[max(0, idx)]
+        # Sort scores and select threshold that gives exactly target_tpr (90%) TPR
+        sorted_wm_scores = np.sort(watermarked_scores_np)
+        # 10th percentile from the bottom = 90th percentile from the top
+        percentile_idx = int(len(sorted_wm_scores) * (1 - target_tpr))
+        threshold = sorted_wm_scores[percentile_idx]
             
         if rank == 0:
             actual_tpr = np.mean(watermarked_scores_np >= threshold) * 100

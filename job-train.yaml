@@ -97,7 +97,7 @@ spec:
               mountPath: /nfs-user-107
             - name: nfs-user-029
               mountPath: /nfs-user-029
-            - name: dshm  # For shared memory
+            - name: dshm
               mountPath: /dev/shm
       volumes:
         - name: nfs-user-107
@@ -111,4 +111,4 @@ spec:
         - name: dshm
           emptyDir:
             medium: Memory
-            sizeLimit: 16Gi  # Adjust based on needs
+            sizeLimit: 16Gi

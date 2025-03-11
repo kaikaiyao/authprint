@@ -497,6 +497,7 @@ def main():
             momentum=args.momentum_pgd,
             key_type=args.key_type,
             surrogate_training_only=args.surrogate_training_only,
+            saving_path=args.saving_path,
         )
         
         if args.rank == 0 and attack_auc is not None:

@@ -74,7 +74,7 @@ spec:
                         --num_eval_samples 100 \
                         --batch_size 16 \
                         --stylegan2_url "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" \
-                        --watermarked_model_path '/nfs-user-107/data/csprng/watermarked_model_final_20250304104237332664.pkl' \
+                        --watermarked_model_path '/nfs-user-107/data/csprng/watermarked_model_final_20250306214547096906.pkl' \
                         --decoder_model_path '/nfs-user-107/data/csprng/decoder_model_final_20250306214547096906.pth' \
                         --num_conv_layers 7 \
                         --num_pool_layers 7 \

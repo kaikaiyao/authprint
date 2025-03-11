@@ -30,6 +30,7 @@ def train_surrogate_decoder(
     batch_size: int = 16,
     rank: int = 0,
     world_size: int = 1,
+    saving_path: str = "results",
 ) -> None:
     """
     Train the surrogate decoder using a loss function similar to the real decoder's training objective.
@@ -131,7 +132,7 @@ def train_surrogate_decoder(
         gc.collect()
 
     if rank == 0:
-        model_filename = f"surrogate_decoder_{time_string}.pt"
+        model_filename = os.path.join(saving_path, f"surrogate_decoder_{time_string}.pt")
         if world_size > 1:
             torch.save(surrogate_decoder.module.state_dict(), model_filename)
         else:
@@ -685,6 +686,7 @@ def attack_label_based(
     momentum: float = 0.9,
     key_type: str = "csprng",
     surrogate_training_only: bool = False,
+    saving_path: str = "results",
 ) -> tuple:
     """
     Performs a label-based attack on a watermarked GAN model with optional surrogate fine-tuning.
@@ -713,6 +715,7 @@ def attack_label_based(
         momentum (float): Momentum for PGD attack
         key_type (str): Type of key to use for masking
         surrogate_training_only (bool): If True, only perform surrogate training and skip all other steps
+        saving_path (str): Path to save models and results
     """
     # Configure logging to filter based on rank
     root_logger = logging.getLogger()
@@ -773,6 +776,7 @@ def attack_label_based(
                     batch_size=batch_size,
                     rank=rank,
                     world_size=world_size,
+                    saving_path=saving_path,
                 )
                 if rank == 0:
                     logging.info(f"  Surrogate decoder {i + 1} training completed")
@@ -1026,6 +1030,7 @@ def attack_label_based(
                 batch_size=batch_size,
                 rank=rank,
                 world_size=world_size,
+                saving_path=saving_path,
             )
             if rank == 0:
                 logging.info(f"  Surrogate decoder {i + 1} training completed")

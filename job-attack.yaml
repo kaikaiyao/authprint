@@ -98,7 +98,7 @@ spec:
                           --num_pool_layers_surr 7 \
                           --initial_channels_surr 64 \
                           --max_delta 0.05 \
-                          --train_size 16 \
+                          --train_size 10000 \
                           --key_type "none" \
                           --seed_key 2024 \
                           --image_attack_size 100 \

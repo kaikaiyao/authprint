@@ -261,21 +261,25 @@ def main():
             fid_score = eval_results['fid_score']
             mean_score_watermarked = eval_results['watermarked']['mean_score']
             std_score_watermarked = eval_results['watermarked']['std_score']
+            mean_score_original = eval_results['original']['mean_score']
+            std_score_original = eval_results['original']['std_score']
 
             # Log the comprehensive results
             logging.info("Evaluation Results:")
-            logging.info(f"AUC score: {auc:.4f}")
-            logging.info(f"TPR@1%FPR (watermarked): {tpr_at_1_fpr:.4f}")
+            logging.info(f"AUC score: {auc:.10f}")
+            logging.info(f"TPR@1%FPR (watermarked): {tpr_at_1_fpr:.10f}")
             if fid_score is not None:
                 logging.info(f"FID score: {fid_score:.4f}")
-            logging.info(f"Mean score (watermarked): {mean_score_watermarked:.4f}")
-            logging.info(f"Std score (watermarked): {std_score_watermarked:.4f}")
+            logging.info(f"Mean score (watermarked): {mean_score_watermarked:.10f}")
+            logging.info(f"Std score (watermarked): {std_score_watermarked:.10f}")
+            logging.info(f"Mean score (original): {mean_score_original:.10f}")
+            logging.info(f"Std score (original): {std_score_original:.10f}")
 
             # Log TNR@1%FPR for other cases
             for case_name, case_data in eval_results.items():
                 if case_name not in ['auc', 'fid_score', 'watermarked']:
                     if 'tnr_at_1_fpr' in case_data:
-                        logging.info(f"TNR@1%FPR ({case_name}): {case_data['tnr_at_1_fpr']:.4f}")
+                        logging.info(f"TNR@1%FPR ({case_name}): {case_data['tnr_at_1_fpr']:.10f}")
 
     elif args.mode == "finetune":
         logging.info("Starting decoder finetuning...")

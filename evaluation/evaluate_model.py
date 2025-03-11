@@ -371,7 +371,7 @@ def calculate_comprehensive_metrics(test_cases: Dict, fid_metric: FrechetIncepti
             threshold_idx = np.argmin(np.abs(fpr - target_fpr))
             threshold = thresholds[threshold_idx]
     
-    logging.info(f"Selected threshold: {threshold:.4f}")
+    logging.info(f"Selected threshold: {threshold:.10f}")
     logging.info(f"Number of original images: {len(original_scores)}")
     logging.info(f"Number of watermarked images: {len(watermarked_scores)}")
     

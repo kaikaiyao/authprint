@@ -89,8 +89,8 @@ spec:
                           main.py attack \
                           --attack_type "base_secure" \
                           --stylegan2_url "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" \
-                          --watermarked_model_path '/nfs-user-029/data/csprng/RS-2/watermarked_model_final_20250310213819741284.pkl' \
-                          --decoder_model_path '/nfs-user-029/data/csprng/RS-2/decoder_model_final_20250310213819741284.pth' \
+                          --watermarked_model_path '/nfs-user-107/data/csprng/watermarked_model_final_20250306214547096906.pkl' \
+                          --decoder_model_path '/nfs-user-107/data/csprng/decoder_model_final_20250306214547096906.pth' \
                           --num_conv_layers 7 \
                           --num_pool_layers 7 \
                           --initial_channels 64 \

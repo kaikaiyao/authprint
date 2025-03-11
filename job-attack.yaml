@@ -49,7 +49,7 @@ spec:
           - name: NCCL_IB_DISABLE
             value: "1"
           - name: NUM_RUNS
-            value: "1"
+            value: "10"
           command: ["/bin/bash", "-c"]
           args:
             - |
@@ -81,7 +81,7 @@ spec:
               {
                 for run in $(seq 1 $total_runs); do
                   echo "Starting run $run of $total_runs"
-                  torchrun --nproc_per_node=1 \
+                  torchrun --nproc_per_node=4 \
                           --nnodes=1 \
                           --node_rank=0 \
                           --master_addr=127.0.0.1 \
@@ -102,8 +102,7 @@ spec:
                           --key_type "none" \
                           --seed_key 2024 \
                           --image_attack_size 100 \
-                          --alpha_values_pgd "0.0001,0.001,0.01,0.1,1.0" \
-                          --surrogate_decoder_folder '/nfs-user-029/data/baseline/'
+                          --surrogate_training_only
                   exit_status=$?
                   echo "Run $run finished with exit status $exit_status"
                   
@@ -127,9 +126,9 @@ spec:
               sleep infinity
           resources:
             limits:
-              nvidia.com/gpu: "1"
-              cpu: "4"
-              memory: "16Gi"
+              nvidia.com/gpu: "4"
+              cpu: "16"
+              memory: "64Gi"
           volumeMounts:
             - name: nfs-user-107
               mountPath: /nfs-user-107

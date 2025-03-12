@@ -68,7 +68,7 @@ spec:
                       main.py train \
                       --stylegan2_url="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" \
                       --batch_size=8 \
-                      --n_iterations=15000 \
+                      --n_iterations=100000 \
                       --num_eval_samples=1000 \
                       --num_conv_layers=7 \
                       --num_pool_layers=7 \
@@ -81,7 +81,7 @@ spec:
                       --max_delta=0.05 \
                       --random_smooth \
                       --random_smooth_type="both" \
-                      --random_smooth_std=0.1 \
+                      --random_smooth_std=0.025 \
                       --saving_path=results
               exit_status=$?
               echo "Python script finished with exit status $exit_status, sleeping indefinitely"

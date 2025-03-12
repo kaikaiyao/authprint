@@ -867,11 +867,11 @@ def attack_label_based(
         if rank == 0:
             actual_tpr = np.mean(watermarked_scores_np >= threshold) * 100
             actual_fpr = np.mean(original_scores_np >= threshold) * 100
-            logging.info(f"Selected threshold at target {target_tpr*100:.0f}% TPR: {threshold:.4f}")
+            logging.info(f"Selected threshold at target {target_tpr*100:.0f}% TPR: {threshold:.10f}")
             logging.info(f"Actual TPR: {actual_tpr:.2f}%")
             logging.info(f"Actual FPR: {actual_fpr:.2f}%")
-            logging.info(f"Mean original score: {original_scores_np.mean():.4f} ± {original_scores_np.std():.4f}")
-            logging.info(f"Mean watermarked score: {watermarked_scores_np.mean():.4f} ± {watermarked_scores_np.std():.4f}")
+            logging.info(f"Mean original score: {original_scores_np.mean():.10f} ± {original_scores_np.std():.10f}")
+            logging.info(f"Mean watermarked score: {watermarked_scores_np.mean():.10f} ± {watermarked_scores_np.std():.10f}")
             
             # Debug information
             logging.info("\nDetailed Score Distribution:")
@@ -879,7 +879,7 @@ def attack_label_based(
             logging.info(f"Number above threshold: {np.sum(watermarked_scores_np >= threshold)}")
             logging.info(f"Percentiles of watermarked scores:")
             for p in [0, 10, 25, 50, 75, 90, 100]:
-                logging.info(f"{p}th percentile: {np.percentile(watermarked_scores_np, p):.4f}")
+                logging.info(f"{p}th percentile: {np.percentile(watermarked_scores_np, p):.10f}")
             logging.info(f"Number of scores above mean: {np.sum(watermarked_scores_np >= watermarked_scores_np.mean())}")
             
             logging.info("-"*80)
@@ -1098,7 +1098,7 @@ def attack_label_based(
         logging.info("="*120)
         logging.info(f"{'ATTACK EVALUATION RESULTS':^120}")
         logging.info("="*120)
-        logging.info(f"Reference threshold at {target_tpr*100:.0f}% TPR: {threshold:.4f}")
+        logging.info(f"Reference threshold at {target_tpr*100:.0f}% TPR: {threshold:.10f}")
         logging.info("-"*120)
         logging.info(f"{'Attack Success Rates Across Multiple Alpha Values':^120}")
         logging.info("-"*120)

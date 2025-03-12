@@ -76,8 +76,8 @@ spec:
                       --lr_M_hat=2e-4 \
                       --lr_D=2e-4 \
                       --seed_key=2024 \
-                      --key_type="none" \
-                      --mask_switch_off \
+                      --key_type="csprng" \
+                      --mask_switch_on \
                       --max_delta=0.05 \
                       --random_smooth \
                       --random_smooth_type="both" \

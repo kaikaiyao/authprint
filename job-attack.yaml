@@ -102,7 +102,7 @@ spec:
                           --key_type "none" \
                           --seed_key 2024 \
                           --image_attack_size 100 \
-                          --surrogate_training_only
+                          --surrogate_decoder_folder '/nfs-user-029/data/baseline/RS/surr/'
                   exit_status=$?
                   echo "Run $run finished with exit status $exit_status"
                   

@@ -82,7 +82,7 @@ def main():
     parser.add_argument("--surrogate_decoder_folder", type=str, help="Path to a folder containing surrogate decoder models (files starting with 'surrogate_decoder_')")
     parser.add_argument("--batch_size_surr", type=int, default=16, help="Batch size for training the surrogate decoder")
     parser.add_argument("--num_steps_pgd", type=int, default=200, help="Number of steps during the attack")
-    parser.add_argument("--alpha_values_pgd", type=str, default="0.01", help="Alpha values for the attack (comma-separated list of floats)")
+    parser.add_argument("--alpha_values_pgd", type=str, default="0.001", help="Alpha values for the attack (comma-separated list of floats)")
     parser.add_argument("--attack_batch_size_pgd", type=int, default=10, help="Batch size for the attack")
     parser.add_argument("--momentum_pgd", type=float, default=0.9, help="Momentum factor for PGD attack")
     parser.add_argument("--finetune_surrogate", action="store_true", help="Fine-tune surrogate with real decoder outputs")

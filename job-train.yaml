@@ -68,7 +68,7 @@ spec:
                       main.py train \
                       --stylegan2_url="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl" \
                       --batch_size=8 \
-                      --n_iterations=50000 \
+                      --n_iterations=100000 \
                       --num_eval_samples=1000 \
                       --num_conv_layers=7 \
                       --num_pool_layers=7 \
@@ -76,9 +76,9 @@ spec:
                       --lr_M_hat=2e-4 \
                       --lr_D=2e-4 \
                       --seed_key=2024 \
-                      --key_type="none" \
-                      --mask_switch_off \
-                      --max_delta=0.05 \
+                      --key_type="csprng" \
+                      --mask_switch_on \
+                      --max_delta=0.5 \
                       --random_smooth \
                       --random_smooth_type="both" \
                       --random_smooth_std=0.01 \
@@ -89,7 +89,7 @@ spec:
           resources:
             limits:
               nvidia.com/gpu: "4"
-              cpu: "4"
+              cpu: "8"
               memory: "32Gi"
           volumeMounts:
             - name: nfs-user-107

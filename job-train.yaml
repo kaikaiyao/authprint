@@ -77,7 +77,8 @@ spec:
                       --master_port=12345 \
                       scripts/train.py \
                       --batch_size 16 \
-                      --total_iterations 200000 \
+                      --total_iterations 1000 \
+                      --checkpoint_interval 1000 \
                       --key_length 4 \
                       --lambda_lpips 1.0 \
                       --output_dir results

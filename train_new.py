@@ -62,7 +62,7 @@ def load_stylegan2_model(url: str, local_path: str, device: torch.device) -> tor
 
 class KeyMapper(nn.Module):
     """
-    Fixed secret mapping: maps a 32-element z_partial to a 4-bit binary key.
+    Fixed secret mapping: maps a 32-element z_partial to a configurable-bit binary key.
     """
     def __init__(self, input_dim=32, output_dim=4):
         super(KeyMapper, self).__init__()
@@ -79,7 +79,7 @@ class KeyMapper(nn.Module):
 
 class Decoder(nn.Module):
     """
-    Decoder network that predicts 4-bit key logits from an input image.
+    Decoder network that predicts configurable-bit key logits from an input image.
     With increased capacity for better convergence.
     """
     def __init__(self, image_size=256, channels=3, output_dim=4):
@@ -212,7 +212,7 @@ def main(args):
         # ------------------------------
         # Initialize Decoder and KeyMapper
         # ------------------------------
-        decoder = Decoder(image_size=args.img_size, channels=3, output_dim=4).to(device)
+        decoder = Decoder(image_size=args.img_size, channels=3, output_dim=args.key_length).to(device)
         if world_size > 1:
             decoder = DDP(decoder, device_ids=[rank])
 
@@ -226,7 +226,7 @@ def main(args):
         if len(z_indices) != len(set(z_indices)):
             logging.warning("z_indices contains duplicate indices which may not be intended")
         
-        key_mapper = KeyMapper(input_dim=len(z_indices), output_dim=4).to(device)
+        key_mapper = KeyMapper(input_dim=len(z_indices), output_dim=args.key_length).to(device)
 
         # Loss functions
         bce_loss_fn = nn.BCEWithLogitsLoss()
@@ -255,7 +255,7 @@ def main(args):
 
             # Extract z_partial using fixed indices
             z_partial = z[:, z_indices]  # shape: (batch_size, len(z_indices))
-            true_key = key_mapper(z_partial)  # shape: (batch_size, 4) with binary values
+            true_key = key_mapper(z_partial)  # shape: (batch_size, key_length) with binary values
 
             # Predict key from watermarked image using the decoder (raw logits)
             pred_key_logits = decoder(x_water)
@@ -305,6 +305,7 @@ if __name__ == "__main__":
     parser.add_argument("--total_iterations", type=int, default=100000, help="Total number of training iterations")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--lambda_lpips", type=float, default=0.5, help="Weight for LPIPS loss")
+    parser.add_argument("--key_length", type=int, default=1, help="Length of the binary key (output dimension)")
     parser.add_argument("--z_indices", type=str, default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31",
                         help="Comma-separated list of indices to select for z_partial (should total 32 indices)")
     parser.add_argument("--output_dir", type=str, default="results", help="Directory to save logs and checkpoints")

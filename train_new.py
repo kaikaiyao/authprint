@@ -74,7 +74,7 @@ class KeyMapper(nn.Module):
         # Linear projection + tanh activation
         projection = torch.matmul(z_partial, self.W) + self.b
         activated = torch.tanh(projection)
-        target = (activated > -1000).float()  # binary output
+        target = (activated > 0).float()  # binary output
         return target
 
 class Decoder(nn.Module):

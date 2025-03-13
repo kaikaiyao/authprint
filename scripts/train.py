@@ -7,6 +7,9 @@ import logging
 import sys
 import os
 
+# Add the parent directory (project root) to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from config.default_config import Config, get_default_config
 from trainers.watermark_trainer import WatermarkTrainer
 from utils.distributed import setup_distributed, cleanup_distributed

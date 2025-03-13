@@ -53,6 +53,8 @@ spec:
               value: "${MAX_DELTA}"
             - name: NCCL_IB_HCA
               value: "^mlx5"
+            - name: PYTHONPATH
+              value: "/workspace/kubernets"
           command: ["/bin/bash", "-c"]
           args:
             - |
@@ -66,6 +68,8 @@ spec:
               
               # Run training directly with torchrun
               echo "Starting training..."
+              export PYTHONPATH=$PYTHONPATH:/workspace/kubernets
+              
               torchrun --nproc_per_node=4 \
                       --nnodes=1 \
                       --node_rank=0 \

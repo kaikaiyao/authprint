@@ -62,7 +62,7 @@ def load_stylegan2_model(url: str, local_path: str, device: torch.device) -> tor
 
 class KeyMapper(nn.Module):
     """
-    Fixed secret mapping: maps a 32-element z_partial to a configurable-bit binary key.
+    Fixed secret mapping: maps a 32-element latent partial vector to a configurable-bit binary key.
     """
     def __init__(self, input_dim=32, output_dim=4):
         super(KeyMapper, self).__init__()
@@ -70,9 +70,9 @@ class KeyMapper(nn.Module):
         self.register_buffer('W', torch.randn(input_dim, output_dim))
         self.register_buffer('b', torch.randn(output_dim))
     
-    def forward(self, z_partial):
+    def forward(self, latent_partial):
         # Linear projection + tanh activation
-        projection = torch.matmul(z_partial, self.W) + self.b
+        projection = torch.matmul(latent_partial, self.W) + self.b
         activated = torch.tanh(projection)
         target = (activated > 0).float()  # binary output
         return target
@@ -216,17 +216,18 @@ def main(args):
         if world_size > 1:
             decoder = DDP(decoder, device_ids=[rank])
 
-        # Fixed indices for z_partial (passed as comma-separated string)
-        z_indices = [int(idx) for idx in args.z_indices.split(',')]
-        logging.info(f"Using z_partial indices: {z_indices}")
+        # Fixed indices for latent partial (passed as comma-separated string)
+        # These indices will now be applied on the representative w vector.
+        latent_indices = [int(idx) for idx in args.selected_indices.split(',')]
+        logging.info(f"Using latent partial indices: {latent_indices}")
         
-        # Validate z_indices
-        if max(z_indices) >= latent_dim:
-            raise ValueError(f"z_indices contains indices >= latent_dim ({latent_dim}). Max index: {max(z_indices)}")
-        if len(z_indices) != len(set(z_indices)):
-            logging.warning("z_indices contains duplicate indices which may not be intended")
+        # Validate latent_indices
+        if max(latent_indices) >= latent_dim:
+            raise ValueError(f"latent_indices contains indices >= latent_dim ({latent_dim}). Max index: {max(latent_indices)}")
+        if len(latent_indices) != len(set(latent_indices)):
+            logging.warning("latent_indices contains duplicate indices which may not be intended")
         
-        key_mapper = KeyMapper(input_dim=len(z_indices), output_dim=args.key_length).to(device)
+        key_mapper = KeyMapper(input_dim=len(latent_indices), output_dim=args.key_length).to(device)
 
         # Loss functions
         bce_loss_fn = nn.BCEWithLogitsLoss()
@@ -244,18 +245,30 @@ def main(args):
             optimizer.zero_grad()
             # Sample a batch of latent vectors z: shape (batch_size, latent_dim)
             z = torch.randn(args.batch_size, latent_dim, device=device)
+            
+            # Obtain w latent vector using the mapping network of the watermarked model
+            w = watermarked_model.mapping(z, None)
+            # If w is replicated for each synthesis layer (shape: [batch_size, num_ws, w_dim]), take the first as representative
+            if w.ndim == 3:
+                w_single = w[:, 0, :]
+            else:
+                w_single = w
 
-            # Generate watermarked image from watermarked model
-            # Using the StyleGAN2-ADA API: pass z and other arguments as needed.
-            # Here, noise_mode is set to "const" for consistency.
-            x_water = watermarked_model(z, None, truncation_psi=1.0, noise_mode="const")
+            # Generate watermarked image using the synthesis network with the full w vector
+            x_water = watermarked_model.synthesis(w, noise_mode="const")
+
             # Compute the original image using the frozen pretrained model for LPIPS loss
             with torch.no_grad():
-                x_orig = gan_model(z, None, truncation_psi=1.0, noise_mode="const")
+                w_orig = gan_model.mapping(z, None)
+                if w_orig.ndim == 3:
+                    w_orig_single = w_orig[:, 0, :]
+                else:
+                    w_orig_single = w_orig
+                x_orig = gan_model.synthesis(w_orig, noise_mode="const")
 
-            # Extract z_partial using fixed indices
-            z_partial = z[:, z_indices]  # shape: (batch_size, len(z_indices))
-            true_key = key_mapper(z_partial)  # shape: (batch_size, key_length) with binary values
+            # Extract a partial w vector using the fixed indices from w_single
+            w_partial = w_single[:, latent_indices]  # shape: (batch_size, len(latent_indices))
+            true_key = key_mapper(w_partial)  # shape: (batch_size, key_length) with binary values
 
             # Predict key from watermarked image using the decoder (raw logits)
             pred_key_logits = decoder(x_water)
@@ -272,14 +285,13 @@ def main(args):
 
             if global_step % args.log_interval == 0 and rank == 0:
                 logging.info(f"Iteration [{iteration}/{args.total_iterations}] "
-                         f"Key Loss: {key_loss.item():.4f}, LPIPS Loss: {lpips_loss.item():.4f}, Total Loss: {total_loss.item():.4f}")
+                             f"Key Loss: {key_loss.item():.4f}, LPIPS Loss: {lpips_loss.item():.4f}, Total Loss: {total_loss.item():.4f}")
             
             # Save checkpoint at regular intervals
             if iteration % args.checkpoint_interval == 0:
                 save_checkpoint(iteration, watermarked_model, decoder, args.output_dir, rank)
 
-        # Final checkpoint is already saved by the interval logic if total_iterations is divisible by checkpoint_interval
-        # Otherwise, save the final state explicitly
+        # Final checkpoint if not already saved
         if args.total_iterations % args.checkpoint_interval != 0:
             save_checkpoint(args.total_iterations, watermarked_model, decoder, args.output_dir, rank)
 
@@ -306,8 +318,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--lambda_lpips", type=float, default=0, help="Weight for LPIPS loss")
     parser.add_argument("--key_length", type=int, default=4, help="Length of the binary key (output dimension)")
-    parser.add_argument("--z_indices", type=str, default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31",
-                        help="Comma-separated list of indices to select for z_partial (should total 32 indices)")
+    parser.add_argument("--selected_indices", type=str, default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31",
+                        help="Comma-separated list of indices to select for latent partial (should total 32 indices)")
     parser.add_argument("--output_dir", type=str, default="results", help="Directory to save logs and checkpoints")
     parser.add_argument("--log_interval", type=int, default=1, help="Interval for logging training progress")
     parser.add_argument("--checkpoint_interval", type=int, default=10000, help="Interval for saving checkpoints")

@@ -65,7 +65,7 @@ spec:
                       --node_rank=0 \
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
-                      train_new.py --batch_size 16 --total_iterations 100000
+                      train_new.py --batch_size 16 --total_iterations 100000 --lambda_lpips 0.01
               exit_status=$?
               echo "Python script finished with exit status $exit_status, sleeping indefinitely"
               sleep infinity

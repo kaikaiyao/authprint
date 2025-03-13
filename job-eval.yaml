@@ -76,11 +76,12 @@ spec:
                       --master_port=12345 \
                       scripts/evaluate.py \
                       --checkpoint_path "/nfs-user-029/data/new/key_length_4/checkpoint_iter50000.pth" \
-                      --evaluation_mode "batch" \
+                      --evaluation_mode "visual" \
                       --num_samples 100 \
+                      --num_vis_samples 10 \
                       --batch_size 16 \
                       --key_length 4 \
-                      --key_mapper_seed 2026
+                      --key_mapper_seed 2025
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

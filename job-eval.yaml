@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ${USER}-job-train-${JOB_SUFFIX}
+  name: ${USER}-job-eval-${JOB_SUFFIX}
   labels:
     eidf/user: ${USER}
     kueue.x-k8s.io/queue-name: ${QUEUE_NAME}
@@ -39,7 +39,7 @@ spec:
           value: "True"
           effect: "NoSchedule"
       containers:
-        - name: stylegan-watermark
+        - name: stylegan-watermark-eval
           image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
           workingDir: "/workspace/kubernets"
           env:
@@ -59,27 +59,28 @@ spec:
           args:
             - |
               echo "Setting up environment..."
-              mkdir -p /workspace/kubernets/results
+              mkdir -p /workspace/kubernets/evaluation_results
               
               # Download pretrained models
               echo "Downloading pretrained models..."
               curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
               
-              # Run training directly with torchrun
-              echo "Starting training..."
+              # Run evaluation using torchrun for consistency with training
+              echo "Starting evaluation..."
               export PYTHONPATH=$PYTHONPATH:/workspace/kubernets
               
-              torchrun --nproc_per_node=4 \
+              torchrun --nproc_per_node=1 \
                       --nnodes=1 \
                       --node_rank=0 \
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
-                      scripts/train.py \
+                      scripts/evaluate.py \
+                      --checkpoint_path ${CHECKPOINT_PATH} \
+                      --evaluation_mode "batch" \
+                      --num_samples 1000 \
                       --batch_size 16 \
-                      --total_iterations 200000 \
-                      --checkpoint_interval 50000 \
                       --key_length 4 \
-                      --lambda_lpips 1.0
+                      --key_mapper_seed 2025
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"
@@ -87,9 +88,9 @@ spec:
               sleep infinity
           resources:
             limits:
-              nvidia.com/gpu: "4"
-              cpu: "8"
-              memory: "32Gi"
+              nvidia.com/gpu: "1"
+              cpu: "4"
+              memory: "16Gi"
           volumeMounts:
             - name: nfs-user-107
               mountPath: /nfs-user-107
@@ -109,4 +110,4 @@ spec:
         - name: dshm
           emptyDir:
             medium: Memory
-            sizeLimit: 16Gi
+            sizeLimit: 16Gi 

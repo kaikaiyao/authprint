@@ -16,6 +16,7 @@ def save_checkpoint(
     decoder: Union[nn.Module, DDP],
     output_dir: str,
     rank: int,
+    key_mapper: Optional[nn.Module] = None,
     optimizer: Optional[torch.optim.Optimizer] = None,
     global_step: Optional[int] = None,
     **kwargs
@@ -29,6 +30,7 @@ def save_checkpoint(
         decoder (nn.Module or DDP): The decoder model.
         output_dir (str): Directory to save the checkpoint to.
         rank (int): Process rank in distributed training.
+        key_mapper (nn.Module, optional): The key mapper model to save.
         optimizer (torch.optim.Optimizer, optional): Optimizer to save.
         global_step (int, optional): Global step counter for training progress.
         **kwargs: Additional items to save in the checkpoint.
@@ -50,6 +52,10 @@ def save_checkpoint(
         'global_step': global_step
     }
     
+    # Save key_mapper state if provided
+    if key_mapper is not None:
+        checkpoint['key_mapper_state'] = key_mapper.state_dict()
+    
     if optimizer is not None:
         checkpoint['optimizer_state'] = optimizer.state_dict()
     
@@ -65,6 +71,7 @@ def load_checkpoint(
     watermarked_model: Union[nn.Module, DDP],
     decoder: Union[nn.Module, DDP],
     optimizer: Optional[torch.optim.Optimizer] = None,
+    key_mapper: Optional[nn.Module] = None,
     device: torch.device = torch.device('cpu')
 ) -> Dict:
     """
@@ -75,6 +82,7 @@ def load_checkpoint(
         watermarked_model (nn.Module or DDP): The watermarked generator model.
         decoder (nn.Module or DDP): The decoder model.
         optimizer (torch.optim.Optimizer, optional): Optimizer to load state into.
+        key_mapper (nn.Module, optional): The key mapper model to load.
         device (torch.device): Device to load the checkpoint onto.
         
     Returns:
@@ -88,6 +96,10 @@ def load_checkpoint(
     
     w_model.load_state_dict(checkpoint['watermarked_model_state'])
     dec.load_state_dict(checkpoint['decoder_state'])
+    
+    # Load key_mapper state if provided and exists in checkpoint
+    if key_mapper is not None and 'key_mapper_state' in checkpoint:
+        key_mapper.load_state_dict(checkpoint['key_mapper_state'])
     
     if optimizer is not None and 'optimizer_state' in checkpoint:
         optimizer.load_state_dict(checkpoint['optimizer_state'])

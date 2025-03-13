@@ -111,7 +111,8 @@ class WatermarkTrainer:
         # Initialize key mapper
         self.key_mapper = KeyMapper(
             input_dim=len(self.latent_indices),
-            output_dim=self.config.model.key_length
+            output_dim=self.config.model.key_length,
+            seed=self.config.model.key_mapper_seed
         ).to(self.device)
         
         # Set up LPIPS loss function
@@ -221,24 +222,17 @@ class WatermarkTrainer:
             self.setup_models()
             self.validate_indices()
         
-        # Load checkpoint
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        # Load checkpoint using the utility function
+        checkpoint = load_checkpoint(
+            checkpoint_path=checkpoint_path,
+            watermarked_model=self.watermarked_model,
+            decoder=self.decoder,
+            optimizer=self.optimizer,
+            key_mapper=self.key_mapper,  # Include key_mapper
+            device=self.device
+        )
         
-        # Load model states
-        if isinstance(self.watermarked_model, DDP):
-            self.watermarked_model.module.load_state_dict(checkpoint['watermarked_model_state'])
-        else:
-            self.watermarked_model.load_state_dict(checkpoint['watermarked_model_state'])
-            
-        if isinstance(self.decoder, DDP):
-            self.decoder.module.load_state_dict(checkpoint['decoder_state'])
-        else:
-            self.decoder.load_state_dict(checkpoint['decoder_state'])
-        
-        # Load optimizer state
-        self.optimizer.load_state_dict(checkpoint['optimizer_state'])
-        
-        # Load training state
+        # Set training state
         self.global_step = checkpoint['global_step']
         self.start_iteration = checkpoint['iteration'] + 1  # Start from next iteration
         
@@ -282,9 +276,10 @@ class WatermarkTrainer:
                         decoder=self.decoder,
                         output_dir=self.config.output_dir,
                         rank=self.rank,
+                        key_mapper=self.key_mapper,  # Include key_mapper
                         optimizer=self.optimizer,
                         metrics=metrics,
-                        global_step=self.global_step  # Add global_step to checkpoint
+                        global_step=self.global_step
                     )
             
             # Final checkpoint if not already saved
@@ -295,9 +290,10 @@ class WatermarkTrainer:
                     decoder=self.decoder,
                     output_dir=self.config.output_dir,
                     rank=self.rank,
+                    key_mapper=self.key_mapper,  # Include key_mapper
                     optimizer=self.optimizer,
                     metrics=metrics,
-                    global_step=self.global_step  # Add global_step to checkpoint
+                    global_step=self.global_step
                 )
                 
         except Exception as e:

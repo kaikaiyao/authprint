@@ -9,18 +9,28 @@ class KeyMapper(nn.Module):
     """
     Fixed secret mapping: maps a latent partial vector to a configurable-bit binary key.
     """
-    def __init__(self, input_dim=32, output_dim=4):
+    def __init__(self, input_dim=32, output_dim=4, seed=None):
         """
         Initialize the KeyMapper.
         
         Args:
             input_dim (int): Dimension of the input latent partial vector.
             output_dim (int): Dimension of the output binary key.
+            seed (int, optional): Random seed for reproducible initialization of the weights.
         """
         super(KeyMapper, self).__init__()
-        # Secret parameters (fixed, non-trainable)
-        self.register_buffer('W', torch.randn(input_dim, output_dim))
-        self.register_buffer('b', torch.randn(output_dim))
+        
+        # Set seed for reproducibility if provided
+        if seed is not None:
+            # Use a local generator to avoid affecting global PyTorch seed
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+            self.register_buffer('W', torch.randn(input_dim, output_dim, generator=generator))
+            self.register_buffer('b', torch.randn(output_dim, generator=generator))
+        else:
+            # Use default random initialization when no seed is provided
+            self.register_buffer('W', torch.randn(input_dim, output_dim))
+            self.register_buffer('b', torch.randn(output_dim))
     
     def forward(self, latent_partial):
         """

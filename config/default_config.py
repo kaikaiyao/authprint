@@ -17,6 +17,7 @@ class ModelConfig:
     # Watermarking configuration
     key_length: int = 4
     selected_indices: List[int] = field(default_factory=lambda: list(range(32)))
+    key_mapper_seed: Optional[int] = None  # Specific seed for KeyMapper initialization
     
 
 @dataclass

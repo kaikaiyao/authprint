@@ -78,8 +78,9 @@ spec:
                       scripts/train.py \
                       --batch_size 16 \
                       --total_iterations 100000 \
-                      --key_length 256 \
+                      --key_length 4 \
                       --lambda_lpips 1.0 \
+                      --checkpoint_path /nfs-user-029/data/new/checkpoint_iter100000.pth \
                       --output_dir results
               
               exit_status=$?

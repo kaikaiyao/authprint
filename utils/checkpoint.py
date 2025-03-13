@@ -17,6 +17,7 @@ def save_checkpoint(
     output_dir: str,
     rank: int,
     optimizer: Optional[torch.optim.Optimizer] = None,
+    global_step: Optional[int] = None,
     **kwargs
 ) -> None:
     """
@@ -29,6 +30,7 @@ def save_checkpoint(
         output_dir (str): Directory to save the checkpoint to.
         rank (int): Process rank in distributed training.
         optimizer (torch.optim.Optimizer, optional): Optimizer to save.
+        global_step (int, optional): Global step counter for training progress.
         **kwargs: Additional items to save in the checkpoint.
     """
     if rank != 0:
@@ -43,12 +45,13 @@ def save_checkpoint(
     
     checkpoint = {
         'iteration': iteration,
-        'watermarked_model': w_model.state_dict(),
-        'decoder': dec.state_dict(),
+        'watermarked_model_state': w_model.state_dict(),
+        'decoder_state': dec.state_dict(),
+        'global_step': global_step
     }
     
     if optimizer is not None:
-        checkpoint['optimizer'] = optimizer.state_dict()
+        checkpoint['optimizer_state'] = optimizer.state_dict()
     
     # Add any additional items
     checkpoint.update(kwargs)
@@ -83,11 +86,11 @@ def load_checkpoint(
     w_model = watermarked_model.module if hasattr(watermarked_model, 'module') else watermarked_model
     dec = decoder.module if hasattr(decoder, 'module') else decoder
     
-    w_model.load_state_dict(checkpoint['watermarked_model'])
-    dec.load_state_dict(checkpoint['decoder'])
+    w_model.load_state_dict(checkpoint['watermarked_model_state'])
+    dec.load_state_dict(checkpoint['decoder_state'])
     
-    if optimizer is not None and 'optimizer' in checkpoint:
-        optimizer.load_state_dict(checkpoint['optimizer'])
+    if optimizer is not None and 'optimizer_state' in checkpoint:
+        optimizer.load_state_dict(checkpoint['optimizer_state'])
     
     logging.info(f"Loaded checkpoint from {checkpoint_path} (iteration {checkpoint.get('iteration', 'unknown')})")
     

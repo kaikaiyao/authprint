@@ -61,6 +61,7 @@ class WatermarkTrainer:
         
         # Track training progress
         self.global_step = 0
+        self.start_iteration = 1  # Track starting iteration for resuming
         
         # Parse latent indices for partial vector
         if isinstance(self.config.model.selected_indices, str):
@@ -208,20 +209,57 @@ class WatermarkTrainer:
             'match_rate': match_rate
         }
     
+    def load_checkpoint(self, checkpoint_path: str) -> None:
+        """
+        Load training state from a checkpoint.
+        
+        Args:
+            checkpoint_path (str): Path to the checkpoint file.
+        """
+        # Setup models first if they haven't been initialized
+        if self.gan_model is None:
+            self.setup_models()
+            self.validate_indices()
+        
+        # Load checkpoint
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        
+        # Load model states
+        if isinstance(self.watermarked_model, DDP):
+            self.watermarked_model.module.load_state_dict(checkpoint['watermarked_model_state'])
+        else:
+            self.watermarked_model.load_state_dict(checkpoint['watermarked_model_state'])
+            
+        if isinstance(self.decoder, DDP):
+            self.decoder.module.load_state_dict(checkpoint['decoder_state'])
+        else:
+            self.decoder.load_state_dict(checkpoint['decoder_state'])
+        
+        # Load optimizer state
+        self.optimizer.load_state_dict(checkpoint['optimizer_state'])
+        
+        # Load training state
+        self.global_step = checkpoint['global_step']
+        self.start_iteration = checkpoint['iteration'] + 1  # Start from next iteration
+        
+        if self.rank == 0:
+            logging.info(f"Successfully loaded checkpoint from iteration {checkpoint['iteration']}")
+            logging.info(f"Resuming training from iteration {self.start_iteration}")
+    
     def train(self) -> None:
         """
         Run the training loop.
         """
         try:
-            # Setup models, losses, and optimizer
-            self.setup_models()
-            self.validate_indices()
+            # Setup models if not already done (in case of checkpoint loading)
+            if self.gan_model is None:
+                self.setup_models()
+                self.validate_indices()
             
             start_time = time.time()
-            self.global_step = 0
             
-            # Main training loop
-            for iteration in range(1, self.config.training.total_iterations + 1):
+            # Main training loop - start from self.start_iteration for resuming
+            for iteration in range(self.start_iteration, self.config.training.total_iterations + 1):
                 # Run training iteration
                 metrics = self.train_iteration()
                 self.global_step += 1
@@ -245,7 +283,8 @@ class WatermarkTrainer:
                         output_dir=self.config.output_dir,
                         rank=self.rank,
                         optimizer=self.optimizer,
-                        metrics=metrics
+                        metrics=metrics,
+                        global_step=self.global_step  # Add global_step to checkpoint
                     )
             
             # Final checkpoint if not already saved
@@ -257,7 +296,8 @@ class WatermarkTrainer:
                     output_dir=self.config.output_dir,
                     rank=self.rank,
                     optimizer=self.optimizer,
-                    metrics=metrics
+                    metrics=metrics,
+                    global_step=self.global_step  # Add global_step to checkpoint
                 )
                 
         except Exception as e:

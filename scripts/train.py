@@ -27,6 +27,8 @@ def parse_args():
     parser.add_argument("--stylegan2_local_path", type=str,
                         default="ffhq70k-paper256-ada.pkl",
                         help="Local path to store/load the StyleGAN2 model")
+    parser.add_argument("--checkpoint_path", type=str, default=None,
+                        help="Path to checkpoint to resume training from")
     parser.add_argument("--img_size", type=int, default=256, help="Image resolution")
     parser.add_argument("--key_length", type=int, default=4, help="Length of the binary key (output dimension)")
     parser.add_argument("--selected_indices", type=str, default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31",
@@ -71,6 +73,12 @@ def main():
     try:
         # Initialize trainer
         trainer = WatermarkTrainer(config, local_rank, rank, world_size, device)
+        
+        # Load checkpoint if specified
+        if config.checkpoint_path:
+            if rank == 0:
+                logging.info(f"Resuming training from checkpoint: {config.checkpoint_path}")
+            trainer.load_checkpoint(config.checkpoint_path)
         
         # Run training
         trainer.train()

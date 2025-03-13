@@ -247,6 +247,7 @@ if __name__ == "__main__":
     parser.add_argument("--z_indices", type=str, default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31",
                         help="Comma-separated list of indices to select for z_partial (should total 32 indices)")
     parser.add_argument("--output_dir", type=str, default="results", help="Directory to save logs and checkpoints")
+    parser.add_argument("--log_interval", type=int, default=10, help="Interval for logging training progress")
     args = parser.parse_args()
     
     main(args)

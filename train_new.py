@@ -107,23 +107,36 @@ class Decoder(nn.Module):
 # Logging Setup
 # --------------
 def setup_logging(output_dir, rank):
-    os.makedirs(output_dir, exist_ok=True)
-    log_file = os.path.join(output_dir, f"train_rank{rank}.log")
-    logging.basicConfig(
-        level=logging.INFO if rank == 0 else logging.WARNING,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler() if rank == 0 else logging.NullHandler()
-        ]
-    )
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        log_file = os.path.join(output_dir, f"train_rank{rank}.log")
+        logging.basicConfig(
+            level=logging.INFO if rank == 0 else logging.WARNING,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler() if rank == 0 else logging.NullHandler()
+            ]
+        )
+    except Exception as e:
+        # Fallback to console logging if file logging fails
+        print(f"Warning: Failed to setup file logging: {str(e)}")
+        logging.basicConfig(
+            level=logging.INFO if rank == 0 else logging.WARNING,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler() if rank == 0 else logging.NullHandler()]
+        )
 
 def save_checkpoint(epoch, watermarked_model, decoder, output_dir, rank):
     if rank == 0:
         ckpt_path = os.path.join(output_dir, f"checkpoint_epoch{epoch}.pth")
+        # Handle DDP-wrapped models by accessing .module if needed
+        w_model = watermarked_model.module if hasattr(watermarked_model, 'module') else watermarked_model
+        dec = decoder.module if hasattr(decoder, 'module') else decoder
+        
         torch.save({
-            'watermarked_model': watermarked_model.state_dict(),
-            'decoder': decoder.state_dict()
+            'watermarked_model': w_model.state_dict(),
+            'decoder': dec.state_dict()
         }, ckpt_path)
         logging.info(f"Saved checkpoint at epoch {epoch} to {ckpt_path}")
 
@@ -131,104 +144,116 @@ def save_checkpoint(epoch, watermarked_model, decoder, output_dir, rank):
 # Main Training Function
 # --------------
 def main(args):
-    # Distributed setup
-    dist.init_process_group(backend='nccl', init_method='env://')
-    local_rank = int(os.environ['LOCAL_RANK'])
-    torch.cuda.set_device(local_rank)
-    device = torch.device('cuda', local_rank)
-    world_size = dist.get_world_size()
-    rank = dist.get_rank()
+    try:
+        # Distributed setup
+        dist.init_process_group(backend='nccl', init_method='env://')
+        local_rank = int(os.environ['LOCAL_RANK'])
+        torch.cuda.set_device(local_rank)
+        device = torch.device('cuda', local_rank)
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    setup_logging(args.output_dir, rank)
-    logging.info(f"Rank: {rank}, World Size: {world_size}, Device: {device}")
+        setup_logging(args.output_dir, rank)
+        logging.info(f"Rank: {rank}, World Size: {world_size}, Device: {device}")
 
-    # ------------------------------
-    # Load Pretrained StyleGAN2 Model
-    # ------------------------------
-    gan_model = load_stylegan2_model(args.stylegan2_url, args.stylegan2_local_path, device)
-    latent_dim = gan_model.z_dim
-    logging.info(f"Pretrained model loaded with z_dim={latent_dim}")
+        # ------------------------------
+        # Load Pretrained StyleGAN2 Model
+        # ------------------------------
+        gan_model = load_stylegan2_model(args.stylegan2_url, args.stylegan2_local_path, device)
+        latent_dim = gan_model.z_dim
+        logging.info(f"Pretrained model loaded with z_dim={latent_dim}")
 
-    # Freeze the pretrained model (for LPIPS computation)
-    gan_model.eval()
-    for param in gan_model.parameters():
-        param.requires_grad = False
+        # Freeze the pretrained model (for LPIPS computation)
+        gan_model.eval()
+        for param in gan_model.parameters():
+            param.requires_grad = False
 
-    # ------------------------------
-    # Initialize Watermarked Model
-    # ------------------------------
-    # Clone the pretrained model to obtain a trainable watermarked model
-    watermarked_model = clone_model(gan_model)
-    watermarked_model.to(device)
-    watermarked_model.train()
-
-    if world_size > 1:
-        watermarked_model = DDP(watermarked_model, device_ids=[rank])
-
-    # ------------------------------
-    # Initialize Decoder and KeyMapper
-    # ------------------------------
-    decoder = Decoder(image_size=args.img_size, channels=3, output_dim=4).to(device)
-    if world_size > 1:
-        decoder = DDP(decoder, device_ids=[rank])
-
-    # Fixed indices for z_partial (passed as comma-separated string)
-    z_indices = [int(idx) for idx in args.z_indices.split(',')]
-    logging.info(f"Using z_partial indices: {z_indices}")
-
-    key_mapper = KeyMapper(input_dim=len(z_indices), output_dim=4).to(device)
-
-    # Loss functions
-    bce_loss_fn = nn.BCEWithLogitsLoss()
-    lpips_loss_fn = lpips.LPIPS(net='alex').to(device)
-
-    # Optimizer (jointly train watermarked model and decoder)
-    optimizer = optim.Adam(list(watermarked_model.parameters()) + list(decoder.parameters()), lr=args.lr)
-
-    global_step = 0
-    for epoch in range(1, args.epochs + 1):
+        # ------------------------------
+        # Initialize Watermarked Model
+        # ------------------------------
+        # Clone the pretrained model to obtain a trainable watermarked model
+        watermarked_model = clone_model(gan_model)
+        watermarked_model.to(device)
         watermarked_model.train()
-        decoder.train()
 
-        for iteration in range(args.iterations_per_epoch):
-            optimizer.zero_grad()
-            # Sample a batch of latent vectors z: shape (batch_size, latent_dim)
-            z = torch.randn(args.batch_size, latent_dim, device=device)
+        if world_size > 1:
+            watermarked_model = DDP(watermarked_model, device_ids=[rank])
 
-            # Generate watermarked image from watermarked model
-            # Using the StyleGAN2-ADA API: pass z and other arguments as needed.
-            # Here, noise_mode is set to "const" for consistency.
-            x_water = watermarked_model(z, None, truncation_psi=1.0, noise_mode="const")
-            # Compute the original image using the frozen pretrained model for LPIPS loss
-            with torch.no_grad():
-                x_orig = gan_model(z, None, truncation_psi=1.0, noise_mode="const")
+        # ------------------------------
+        # Initialize Decoder and KeyMapper
+        # ------------------------------
+        decoder = Decoder(image_size=args.img_size, channels=3, output_dim=4).to(device)
+        if world_size > 1:
+            decoder = DDP(decoder, device_ids=[rank])
 
-            # Extract z_partial using fixed indices
-            z_partial = z[:, z_indices]  # shape: (batch_size, len(z_indices))
-            true_key = key_mapper(z_partial)  # shape: (batch_size, 4) with binary values
+        # Fixed indices for z_partial (passed as comma-separated string)
+        z_indices = [int(idx) for idx in args.z_indices.split(',')]
+        logging.info(f"Using z_partial indices: {z_indices}")
+        
+        # Validate z_indices
+        if max(z_indices) >= latent_dim:
+            raise ValueError(f"z_indices contains indices >= latent_dim ({latent_dim}). Max index: {max(z_indices)}")
+        if len(z_indices) != len(set(z_indices)):
+            logging.warning("z_indices contains duplicate indices which may not be intended")
+        
+        key_mapper = KeyMapper(input_dim=len(z_indices), output_dim=4).to(device)
 
-            # Predict key from watermarked image using the decoder (raw logits)
-            pred_key_logits = decoder(x_water)
+        # Loss functions
+        bce_loss_fn = nn.BCEWithLogitsLoss()
+        lpips_loss_fn = lpips.LPIPS(net='alex').to(device)
 
-            # Compute key loss (BCE with logits)
-            key_loss = bce_loss_fn(pred_key_logits, true_key)
-            # Compute LPIPS loss between original and watermarked images
-            lpips_loss = lpips_loss_fn(x_orig, x_water).mean()
-            total_loss = key_loss + args.lambda_lpips * lpips_loss
+        # Optimizer (jointly train watermarked model and decoder)
+        optimizer = optim.Adam(list(watermarked_model.parameters()) + list(decoder.parameters()), lr=args.lr)
 
-            total_loss.backward()
-            optimizer.step()
-            global_step += 1
+        global_step = 0
+        for epoch in range(1, args.epochs + 1):
+            watermarked_model.train()
+            decoder.train()
 
-            if global_step % args.log_interval == 0 and rank == 0:
-                logging.info(f"Epoch [{epoch}/{args.epochs}] Step [{global_step}] "
-                             f"Key Loss: {key_loss.item():.4f}, LPIPS Loss: {lpips_loss.item():.4f}, Total Loss: {total_loss.item():.4f}")
+            for iteration in range(args.iterations_per_epoch):
+                optimizer.zero_grad()
+                # Sample a batch of latent vectors z: shape (batch_size, latent_dim)
+                z = torch.randn(args.batch_size, latent_dim, device=device)
 
-        save_checkpoint(epoch, watermarked_model, decoder, args.output_dir, rank)
+                # Generate watermarked image from watermarked model
+                # Using the StyleGAN2-ADA API: pass z and other arguments as needed.
+                # Here, noise_mode is set to "const" for consistency.
+                x_water = watermarked_model(z, None, truncation_psi=1.0, noise_mode="const")
+                # Compute the original image using the frozen pretrained model for LPIPS loss
+                with torch.no_grad():
+                    x_orig = gan_model(z, None, truncation_psi=1.0, noise_mode="const")
 
-    if world_size > 1:
-        dist.destroy_process_group()
+                # Extract z_partial using fixed indices
+                z_partial = z[:, z_indices]  # shape: (batch_size, len(z_indices))
+                true_key = key_mapper(z_partial)  # shape: (batch_size, 4) with binary values
+
+                # Predict key from watermarked image using the decoder (raw logits)
+                pred_key_logits = decoder(x_water)
+
+                # Compute key loss (BCE with logits)
+                key_loss = bce_loss_fn(pred_key_logits, true_key)
+                # Compute LPIPS loss between original and watermarked images
+                lpips_loss = lpips_loss_fn(x_orig, x_water).mean()
+                total_loss = key_loss + args.lambda_lpips * lpips_loss
+
+                total_loss.backward()
+                optimizer.step()
+                global_step += 1
+
+                if global_step % args.log_interval == 0 and rank == 0:
+                    logging.info(f"Epoch [{epoch}/{args.epochs}] Step [{global_step}] "
+                                 f"Key Loss: {key_loss.item():.4f}, LPIPS Loss: {lpips_loss.item():.4f}, Total Loss: {total_loss.item():.4f}")
+
+            save_checkpoint(epoch, watermarked_model, decoder, args.output_dir, rank)
+
+        if world_size > 1:
+            dist.destroy_process_group()
+            
+    except Exception as e:
+        logging.error(f"Error in training: {str(e)}", exc_info=True)
+        if 'world_size' in locals() and world_size > 1:
+            dist.destroy_process_group()
+        raise
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Watermarking Training Pipeline for StyleGAN2-ADA")

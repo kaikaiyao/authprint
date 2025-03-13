@@ -57,8 +57,6 @@ def parse_args():
     # Output configuration
     parser.add_argument("--output_dir", type=str, default="evaluation_results", 
                         help="Directory to save evaluation results")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
-                        help="Device to run evaluation on")
     
     return parser.parse_args()
 
@@ -385,7 +383,7 @@ def main():
     
     try:
         # Run evaluation
-        metrics = evaluate_watermark(config, local_rank, rank, world_size, device, config.evaluation_mode)
+        metrics = evaluate_watermark(config, local_rank, rank, world_size, device, config.evaluate.evaluation_mode)
         
         # Save metrics - only on rank 0
         if rank == 0:

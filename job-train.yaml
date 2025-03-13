@@ -82,6 +82,7 @@ spec:
                       --random_smooth \
                       --random_smooth_type="both" \
                       --random_smooth_std=0.1 \
+                      --resume_checkpoint="/nfs-user-029/data/baseline/RS/checkpoint_final_20250312181624590226.pt" \
                       --saving_path=results
               exit_status=$?
               echo "Python script finished with exit status $exit_status, sleeping indefinitely"

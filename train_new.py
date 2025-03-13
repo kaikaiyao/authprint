@@ -132,13 +132,12 @@ def save_checkpoint(epoch, watermarked_model, decoder, output_dir, rank):
 # --------------
 def main(args):
     # Distributed setup
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        rank = int(os.environ['RANK'])
-        world_size = int(os.environ['WORLD_SIZE'])
-        dist.init_process_group(backend='nccl')
-    else:
-        rank = 0
-        world_size = 1
+    dist.init_process_group(backend='nccl', init_method='env://')
+    local_rank = int(os.environ['LOCAL_RANK'])
+    torch.cuda.set_device(local_rank)
+    device = torch.device('cuda', local_rank)
+    world_size = dist.get_world_size()
+    rank = dist.get_rank()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     setup_logging(args.output_dir, rank)

@@ -51,6 +51,9 @@ class Config:
     # Output path
     output_dir: str = "results"
     
+    # Checkpoint path for resuming training
+    checkpoint_path: Optional[str] = None
+    
     # Sub-configurations
     model: ModelConfig = field(default_factory=ModelConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)

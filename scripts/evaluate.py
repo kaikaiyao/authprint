@@ -241,9 +241,9 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
     # Batch evaluation
     if evaluation_mode in ['batch', 'both']:
         if rank == 0:
-            logging.info(f"Running batch evaluation with {config.num_samples} samples...")
+            logging.info(f"Running batch evaluation with {config.evaluate.num_samples} samples...")
         
-        num_batches = (config.num_samples + config.batch_size - 1) // config.batch_size
+        num_batches = (config.evaluate.num_samples + config.evaluate.batch_size - 1) // config.evaluate.batch_size
         watermarked_correct = 0
         original_correct = 0
         total_samples = 0
@@ -252,7 +252,7 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
         batch_iterator = tqdm(range(num_batches), desc="Evaluating batches") if rank == 0 else range(num_batches)
         
         for _ in batch_iterator:
-            current_batch_size = min(config.batch_size, config.num_samples - total_samples)
+            current_batch_size = min(config.evaluate.batch_size, config.evaluate.num_samples - total_samples)
             if current_batch_size <= 0:
                 break
                 
@@ -318,11 +318,11 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
     
     # Visual evaluation - only perform on rank 0
     if evaluation_mode in ['visual', 'both'] and rank == 0:
-        logging.info(f"Running visual evaluation with {config.num_vis_samples} samples...")
+        logging.info(f"Running visual evaluation with {config.evaluate.num_vis_samples} samples...")
         
         with torch.no_grad():
             # Sample latent vectors
-            z_vis = torch.randn(config.num_vis_samples, latent_dim, device=device)
+            z_vis = torch.randn(config.evaluate.num_vis_samples, latent_dim, device=device)
             
             # Generate original images
             w_orig_vis = gan_model.mapping(z_vis, None)
@@ -352,7 +352,7 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
             pred_keys_orig_vis = torch.sigmoid(decoder(x_orig_vis)) > 0.5
             
             # Save key comparison to log
-            for i in range(config.num_vis_samples):
+            for i in range(config.evaluate.num_vis_samples):
                 logging.info(f"Sample {i}:")
                 logging.info(f"  True key: {true_keys_vis[i].cpu().numpy().astype(int)}")
                 logging.info(f"  Watermarked pred: {pred_keys_water_vis[i].cpu().numpy().astype(int)}")
@@ -370,10 +370,6 @@ def main():
     # Load default configuration and update with args
     config = get_default_config()
     config.update_from_args(args)
-    config.checkpoint_path = args.checkpoint_path
-    config.num_samples = args.num_samples
-    config.num_vis_samples = args.num_vis_samples
-    config.evaluation_mode = args.evaluation_mode
     
     # Setup distributed training
     local_rank, rank, world_size, device = setup_distributed()

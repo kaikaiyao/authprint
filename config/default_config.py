@@ -47,6 +47,15 @@ class DistributedConfig:
 
 
 @dataclass
+class EvaluateConfig:
+    """Configuration for evaluation."""
+    batch_size: int = 16
+    num_samples: int = 1000
+    num_vis_samples: int = 10
+    evaluation_mode: str = 'both'
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     # Output path
@@ -60,6 +69,7 @@ class Config:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
     distributed: DistributedConfig = field(default_factory=DistributedConfig)
+    evaluate: EvaluateConfig = field(default_factory=EvaluateConfig)
     
     # Meta configuration
     seed: Optional[int] = None
@@ -77,6 +87,8 @@ class Config:
                 setattr(self.decoder, key, value)
             elif hasattr(self.distributed, key):
                 setattr(self.distributed, key, value)
+            elif hasattr(self.evaluate, key):
+                setattr(self.evaluate, key, value)
 
 
 def get_default_config() -> Config:

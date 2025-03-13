@@ -77,10 +77,11 @@ spec:
                       --master_port=12345 \
                       scripts/train.py \
                       --batch_size 16 \
-                      --total_iterations 1000 \
+                      --total_iterations 199000 \
                       --checkpoint_interval 1000 \
                       --key_length 4 \
                       --lambda_lpips 1.0 \
+                      --checkpoint_path "/nfs-user-029/data/new/checkpoint_iter1000.pth" \
                       --output_dir results
               
               exit_status=$?

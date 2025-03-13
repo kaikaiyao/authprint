@@ -27,7 +27,7 @@ class TrainingConfig:
     total_iterations: int = 100000
     lr: float = 1e-4
     lambda_lpips: float = 1.0
-    log_interval: int = 100
+    log_interval: int = 1
     checkpoint_interval: int = 10000
 
 

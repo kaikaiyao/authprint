@@ -79,7 +79,7 @@ spec:
                       --batch_size 16 \
                       --total_iterations 100000 \
                       --key_length 4 \
-                      --lambda_lpips 1.0 \
+                      --lambda_lpips 0.1 \
                       --output_dir results
               
               exit_status=$?

@@ -281,6 +281,12 @@ def main(args):
             # Predict key from watermarked image using the decoder (raw logits)
             pred_key_logits = decoder(x_water)
 
+            # Convert predicted logits to binary for match rate calculation
+            pred_key_binary = (torch.sigmoid(pred_key_logits) > 0.5).float()
+            # Calculate exact match rate (percentage of samples where all bits match)
+            key_matches = (pred_key_binary == true_key).all(dim=1).float().mean().item()
+            match_rate = key_matches * 100  # Convert to percentage
+
             # Compute key loss (BCE with logits)
             key_loss = bce_loss_fn(pred_key_logits, true_key)
             # Compute LPIPS loss between original and watermarked images
@@ -293,7 +299,8 @@ def main(args):
 
             if global_step % args.log_interval == 0 and rank == 0:
                 logging.info(f"Iteration [{iteration}/{args.total_iterations}] "
-                             f"Key Loss: {key_loss.item():.4f}, LPIPS Loss: {lpips_loss.item():.4f}, Total Loss: {total_loss.item():.4f}")
+                             f"Key Loss: {key_loss.item():.4f}, LPIPS Loss: {lpips_loss.item():.4f}, "
+                             f"Total Loss: {total_loss.item():.4f}, Match Rate: {match_rate:.2f}%")
             
             # Save checkpoint at regular intervals
             if iteration % args.checkpoint_interval == 0:

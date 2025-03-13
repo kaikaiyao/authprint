@@ -173,7 +173,11 @@ def main(args):
     if world_size > 1:
         decoder = DDP(decoder, device_ids=[rank])
 
-    key_mapper = KeyMapper(input_dim=len(args.z_indices), output_dim=4).to(device)
+    # Fixed indices for z_partial (passed as comma-separated string)
+    z_indices = [int(idx) for idx in args.z_indices.split(',')]
+    logging.info(f"Using z_partial indices: {z_indices}")
+
+    key_mapper = KeyMapper(input_dim=len(z_indices), output_dim=4).to(device)
 
     # Loss functions
     bce_loss_fn = nn.BCEWithLogitsLoss()
@@ -181,10 +185,6 @@ def main(args):
 
     # Optimizer (jointly train watermarked model and decoder)
     optimizer = optim.Adam(list(watermarked_model.parameters()) + list(decoder.parameters()), lr=args.lr)
-
-    # Fixed indices for z_partial (passed as comma-separated string)
-    z_indices = [int(idx) for idx in args.z_indices.split(',')]
-    logging.info(f"Using z_partial indices: {z_indices}")
 
     global_step = 0
     for epoch in range(1, args.epochs + 1):

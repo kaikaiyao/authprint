@@ -304,7 +304,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
     parser.add_argument("--total_iterations", type=int, default=100000, help="Total number of training iterations")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--lambda_lpips", type=float, default=0.5, help="Weight for LPIPS loss")
+    parser.add_argument("--lambda_lpips", type=float, default=0, help="Weight for LPIPS loss")
     parser.add_argument("--key_length", type=int, default=4, help="Length of the binary key (output dimension)")
     parser.add_argument("--z_indices", type=str, default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31",
                         help="Comma-separated list of indices to select for z_partial (should total 32 indices)")

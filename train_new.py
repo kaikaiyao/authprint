@@ -80,28 +80,58 @@ class KeyMapper(nn.Module):
 class Decoder(nn.Module):
     """
     Decoder network that predicts 4-bit key logits from an input image.
+    With increased capacity for better convergence.
     """
     def __init__(self, image_size=256, channels=3, output_dim=4):
         super(Decoder, self).__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(channels, 64, kernel_size=4, stride=2, padding=1),  # 256 -> 128
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),         # 128 -> 64
+        # Increase number of filters and add more layers
+        self.features = nn.Sequential(
+            # Initial layer: 256 -> 128
+            nn.Conv2d(channels, 64, kernel_size=4, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # 128 -> 64
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),         # 64 -> 32
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # 64 -> 32
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),         # 32 -> 16
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # 32 -> 16
+            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # 16 -> 8
+            nn.Conv2d(512, 768, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(768),
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # 8 -> 4
+            nn.Conv2d(768, 1024, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(1024),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+        
+        # Global pooling and deeper classifier
+        self.classifier = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Linear(512, output_dim)
+            nn.Linear(1024, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(256, output_dim)
         )
     
     def forward(self, x):
-        return self.net(x)
+        features = self.features(x)
+        return self.classifier(features)
 
 # --------------
 # Logging Setup

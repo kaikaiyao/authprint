@@ -381,7 +381,7 @@ def main():
     # Setup logging - only on rank 0
     if rank == 0:
         os.makedirs(config.output_dir, exist_ok=True)
-        setup_logging(config.output_dir)
+        setup_logging(config.output_dir, rank)
         
         # Log configuration
         logging.info(f"Configuration:\n{config}")

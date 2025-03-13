@@ -247,7 +247,12 @@ def main(args):
             z = torch.randn(args.batch_size, latent_dim, device=device)
             
             # Obtain w latent vector using the mapping network of the watermarked model
-            w = watermarked_model.mapping(z, None)
+            # Access through .module if it's a DDP-wrapped model
+            if hasattr(watermarked_model, 'module'):
+                w = watermarked_model.module.mapping(z, None)
+            else:
+                w = watermarked_model.mapping(z, None)
+                
             # If w is replicated for each synthesis layer (shape: [batch_size, num_ws, w_dim]), take the first as representative
             if w.ndim == 3:
                 w_single = w[:, 0, :]
@@ -255,7 +260,10 @@ def main(args):
                 w_single = w
 
             # Generate watermarked image using the synthesis network with the full w vector
-            x_water = watermarked_model.synthesis(w, noise_mode="const")
+            if hasattr(watermarked_model, 'module'):
+                x_water = watermarked_model.module.synthesis(w, noise_mode="const")
+            else:
+                x_water = watermarked_model.synthesis(w, noise_mode="const")
 
             # Compute the original image using the frozen pretrained model for LPIPS loss
             with torch.no_grad():

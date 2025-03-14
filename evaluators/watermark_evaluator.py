@@ -69,12 +69,13 @@ class WatermarkEvaluator:
         if hasattr(config.evaluate, 'evaluate_pretrained') and config.evaluate.evaluate_pretrained:
             self.pretrained_models = load_pretrained_models(config, device, rank)
         
-        # Setup quantized model if needed
+        # Setup the quantized model if we're evaluating quantization
         self.quantized_model = None
-        if hasattr(config.evaluate, 'evaluate_quantization') and config.evaluate.evaluate_quantization:
+        if getattr(self.config.evaluate, 'evaluate_quantization', False):
+            # Setup quantized version of the original model
             if self.rank == 0:
                 logging.info("Setting up quantized model...")
-            self.quantized_model = quantize_model_weights(self.watermarked_model)
+            self.quantized_model = quantize_model_weights(self.gan_model)
             self.quantized_model.eval()
     
     def setup_models(self):
@@ -136,7 +137,7 @@ class WatermarkEvaluator:
         Args:
             z (torch.Tensor): Batch of latent vectors.
             model_name (str, optional): Name of the pretrained model to use. If None, uses the watermarked model.
-            transformation (str, optional): Name of the transformation to apply. If None, no transformation is applied.
+            transformation (str, optional): Name of the transformation to apply to the original model/images.
         
         Returns:
             dict: Dictionary containing evaluation results.
@@ -159,39 +160,47 @@ class WatermarkEvaluator:
                         watermarked_model = self.pretrained_models[model_name]
                         original_model = self.pretrained_models[model_name]
                 
-                # Generate original images
-                w_orig = original_model.mapping(z, None)
-                x_orig = original_model.synthesis(w_orig, noise_mode="const")
-                
-                # Generate watermarked images (or other model images)
+                # Generate watermarked images (unchanged)
                 w_water = watermarked_model.mapping(z, None)
+                x_water = watermarked_model.synthesis(w_water, noise_mode="const")
                 
-                # Apply transformations if needed
+                # For original model - handle differently based on transformation
+                w_orig = None
+                x_orig = None
+                
+                # Handle transformations to the original model/images
                 if transformation == 'truncation':
-                    # For truncation, we need to regenerate with truncation
+                    # For truncation, we regenerate with truncation and get new w
                     truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
-                    x_water = apply_truncation(watermarked_model, z, truncation_psi)
+                    x_orig, w_orig = apply_truncation(original_model, z, truncation_psi, return_w=True)
                 elif transformation == 'quantization':
-                    # For quantization, use the quantized model
+                    # For quantization, use the quantized model (which affects w calculation)
                     if self.quantized_model is None:
                         if self.rank == 0:
-                            logging.warning("Quantized model not initialized. Using watermarked model instead.")
-                        x_water = watermarked_model.synthesis(w_water, noise_mode="const")
+                            logging.warning("Quantized model not initialized. Using original model instead.")
+                        w_orig = original_model.mapping(z, None)
+                        x_orig = original_model.synthesis(w_orig, noise_mode="const")
                     else:
-                        x_water = self.quantized_model.synthesis(w_water, noise_mode="const")
+                        # When using quantized model, w is calculated with quantized weights
+                        w_orig = self.quantized_model.mapping(z, None)
+                        x_orig = self.quantized_model.synthesis(w_orig, noise_mode="const")
                 else:
-                    # Normal synthesis
-                    x_water = watermarked_model.synthesis(w_water, noise_mode="const")
+                    # Standard case: get w from original model first
+                    w_orig = original_model.mapping(z, None)
+                    x_orig = original_model.synthesis(w_orig, noise_mode="const")
                 
-                # Apply post-processing transformations if needed
+                # Apply post-processing transformations to original images
+                # These don't affect w since they operate on the image after generation
                 if transformation == 'downsample':
                     downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
-                    x_water = downsample_and_upsample(x_water, downsample_size)
+                    x_orig = downsample_and_upsample(x_orig, downsample_size)
                 elif transformation == 'jpeg':
                     jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 55)
-                    x_water = apply_jpeg_compression(x_water, jpeg_quality)
+                    x_orig = apply_jpeg_compression(x_orig, jpeg_quality)
                 
                 # Extract latent partial and compute true key
+                # For image transformations (downsample, jpeg), use w from the original model
+                # For model transformations (truncation, quantization), use the transformed w
                 if w_orig.ndim == 3:
                     w_orig_single = w_orig[:, 0, :]
                     w_water_single = w_water[:, 0, :]
@@ -199,7 +208,14 @@ class WatermarkEvaluator:
                     w_orig_single = w_orig
                     w_water_single = w_water
                 
-                w_partial = w_water_single[:, self.latent_indices]
+                # Use the correct w for w_partial based on transformation type
+                if transformation in ['truncation', 'quantization']:
+                    # For model transformations, use the transformed w
+                    w_partial = w_orig_single[:, self.latent_indices]
+                else:
+                    # For image transformations or no transformation, use watermarked w
+                    w_partial = w_water_single[:, self.latent_indices]
+                
                 true_key = self.key_mapper(w_partial)
                 
                 # Compute key from watermarked image
@@ -207,7 +223,7 @@ class WatermarkEvaluator:
                 pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
                 pred_key_water = (pred_key_water_probs > 0.5).float()
                 
-                # Compute key from original image
+                # Compute key from original image (with transformations applied)
                 pred_key_orig_logits = self.decoder(x_orig)
                 pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
                 pred_key_orig = (pred_key_orig_probs > 0.5).float()

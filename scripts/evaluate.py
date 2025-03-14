@@ -79,7 +79,7 @@ def parse_args():
                         help="Evaluate on downsampled and upsampled images")
     parser.add_argument("--downsample_size", type=int, default=128,
                         help="Size to downsample to before upsampling back")
-    parser.add_argument("--evaluate_jpeg", action="store_true", default=True,
+    parser.add_argument("--evaluate_jpeg", action="store_true", default=False,
                         help="Evaluate on JPEG compressed images")
     parser.add_argument("--jpeg_quality", type=int, default=55,
                         help="JPEG compression quality (0-100)")

@@ -10,24 +10,36 @@ from PIL import Image
 from torchvision import transforms
 
 
-def apply_truncation(model, z, truncation_psi=2.0):
-    """Generate images with specified truncation level.
+def apply_truncation(model, z, truncation_psi=2.0, return_w=False):
+    """
+    Apply truncation trick to latent vectors and generate images.
     
     Args:
         model: StyleGAN2 model
-        z: Input latent vectors
-        truncation_psi: Truncation level (lower = more average looking, less variation)
-    
+        z (torch.Tensor): Batch of latent vectors
+        truncation_psi (float): Truncation psi value
+        return_w (bool): Whether to also return the W latent vectors
+        
     Returns:
-        Generated images with specified truncation
+        torch.Tensor: Generated images
+        or
+        (torch.Tensor, torch.Tensor): Generated images and W latent vectors if return_w is True
     """
     try:
+        # Generate with truncation
         with torch.no_grad():
+            # Apply truncation
             w = model.mapping(z, None, truncation_psi=truncation_psi)
-            return model.synthesis(w, noise_mode="const")
+            x = model.synthesis(w, noise_mode="const")
+        
+        if return_w:
+            return x, w
+        return x
     except Exception as e:
-        logging.error(f"Error applying truncation: {str(e)}")
-        # Return original z reshaped as image as fallback
+        logging.error(f"Error in apply_truncation: {str(e)}")
+        # Return zeros for both image and w if requested
+        if return_w:
+            return torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, 256, 256)), z.unsqueeze(1)
         return torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, 256, 256))
 
 

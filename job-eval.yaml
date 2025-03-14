@@ -81,7 +81,7 @@ spec:
                       --num_vis_samples 12 \
                       --batch_size 16 \
                       --key_length 4 \
-                      --key_mapper_seed 2028
+                      --key_mapper_seed 2025
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

@@ -77,7 +77,7 @@ spec:
                       scripts/evaluate.py \
                       --checkpoint_path "/nfs-user-029/key_length_8/checkpoint_iter500000.pth" \
                       --evaluation_mode "both" \
-                      --num_samples 10000 \
+                      --num_samples 1000 \
                       --num_vis_samples 16 \
                       --batch_size 128 \
                       --key_length 8 \

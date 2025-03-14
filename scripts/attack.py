@@ -337,6 +337,9 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         # Average the loss across all surrogate decoders
         surrogate_loss /= len(surrogate_decoders)
         
+        # Compute gradients
+        surrogate_loss.backward()
+
         # Update the attacked images
         optimizer.step()
         

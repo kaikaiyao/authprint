@@ -60,7 +60,7 @@ class AttackConfig:
     """Configuration for attacks against the watermarking."""
     # General attack settings
     batch_size: int = 16
-    num_samples: int = 1000
+    num_samples: int = 100
     
     # PGD attack parameters
     pgd_alpha: float = 0.01  # Step size
@@ -70,9 +70,9 @@ class AttackConfig:
     # Surrogate training parameters
     surrogate_lr: float = 1e-4
     surrogate_batch_size: int = 32
-    surrogate_epochs: int = 10
-    surrogate_num_samples: int = 1000
-    num_surrogate_models: int = 3
+    surrogate_epochs: int = 1
+    surrogate_num_samples: int = 10000
+    num_surrogate_models: int = 5
     
     # Attack evaluation
     log_interval: int = 10

@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """
 Attack script for StyleGAN watermarking.
+This implements a forging attack that aims to modify original non-watermarked images
+so that the real decoder extracts the correct watermark keys from them.
 """
 import argparse
 import logging
@@ -33,7 +35,7 @@ from utils.distributed import setup_distributed, cleanup_distributed
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Attack against StyleGAN2 Watermarking")
+    parser = argparse.ArgumentParser(description="Forging Attack against StyleGAN2 Watermarking - Modifies original images to extract correct watermarks")
     
     # Model configuration
     parser.add_argument("--stylegan2_url", type=str,
@@ -53,7 +55,7 @@ def parse_args():
     
     # Attack configuration
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for attack")
-    parser.add_argument("--num_samples", type=int, default=1000, help="Number of samples to attack")
+    parser.add_argument("--num_samples", type=int, default=100, help="Number of samples to attack")
     
     # PGD attack parameters
     parser.add_argument("--pgd_alpha", type=float, default=0.01, help="PGD step size")
@@ -63,8 +65,8 @@ def parse_args():
     # Surrogate training parameters
     parser.add_argument("--surrogate_lr", type=float, default=1e-4, help="Learning rate for surrogate decoder")
     parser.add_argument("--surrogate_batch_size", type=int, default=32, help="Batch size for surrogate training")
-    parser.add_argument("--surrogate_epochs", type=int, default=10, help="Number of epochs for surrogate training")
-    parser.add_argument("--surrogate_num_samples", type=int, default=1000, help="Number of samples for surrogate training")
+    parser.add_argument("--surrogate_epochs", type=int, default=1, help="Number of epochs for surrogate training")
+    parser.add_argument("--surrogate_num_samples", type=int, default=10000, help="Number of samples for surrogate training")
     parser.add_argument("--num_surrogate_models", type=int, default=3, help="Number of surrogate decoders to train")
     
     # Output configuration
@@ -277,6 +279,8 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
 def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper, config, device):
     """
     Perform PGD attack on the images using surrogate decoders to guide the attack.
+    This is a FORGING attack that aims to make the real decoder extract the correct watermark keys
+    from the modified original images.
     
     Args:
         images: Original images to attack
@@ -332,9 +336,6 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         
         # Average the loss across all surrogate decoders
         surrogate_loss /= len(surrogate_decoders)
-        
-        # Minimize the loss
-        surrogate_loss.backward()
         
         # Update the attacked images
         optimizer.step()
@@ -545,7 +546,7 @@ def run_attack(config, local_rank, rank, world_size, device):
                     pred_key = batch_results['predicted_keys'][i]
                     key_match = true_key == pred_key
                     
-                    plt.suptitle(f"Image {global_idx}\nTrue Key: {true_key}\nPredicted Key: {pred_key}\nMatch: {key_match}")
+                    plt.suptitle(f"Image {global_idx}\nTrue Key: {true_key}\nPredicted Key: {pred_key}\nForging Success: {key_match}")
                     plt.tight_layout()
                     
                     # Save figure
@@ -579,7 +580,7 @@ def run_attack(config, local_rank, rank, world_size, device):
         logging.info(f"Number of samples: {attack_metrics['num_samples']}")
         logging.info(f"Initial match rate: {attack_metrics['initial_match_rate']:.2f}%")
         logging.info(f"Final match rate after attack: {attack_metrics['final_match_rate']:.2f}%")
-        logging.info(f"Attack success rate: {100 - attack_metrics['final_match_rate']:.2f}%")
+        logging.info(f"Attack success rate: {attack_metrics['final_match_rate']:.2f}%")
         
         for i, rate in enumerate(attack_metrics['surrogate_classifications']):
             logging.info(f"Surrogate decoder {i+1} classification rate: {rate:.2f}%")
@@ -594,7 +595,7 @@ def run_attack(config, local_rank, rank, world_size, device):
             f.write(f"Number of samples: {attack_metrics['num_samples']}\n")
             f.write(f"Initial match rate: {attack_metrics['initial_match_rate']:.2f}%\n")
             f.write(f"Final match rate after attack: {attack_metrics['final_match_rate']:.2f}%\n")
-            f.write(f"Attack success rate: {100 - attack_metrics['final_match_rate']:.2f}%\n")
+            f.write(f"Attack success rate: {attack_metrics['final_match_rate']:.2f}%\n")
             
             for i, rate in enumerate(attack_metrics['surrogate_classifications']):
                 f.write(f"Surrogate decoder {i+1} classification rate: {rate:.2f}%\n")

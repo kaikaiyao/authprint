@@ -103,6 +103,7 @@ class Config:
         """Update a specific sub-configuration with matching arguments."""
         for key, value in args_dict.items():
             if hasattr(config_obj, key):
+                print(f"[DEBUG] Updating {type(config_obj).__name__}.{key} = {value}")
                 setattr(config_obj, key, value)
     
     def update_from_args(self, args, mode=None):
@@ -114,6 +115,7 @@ class Config:
                  If None, will try to infer from the arguments.
         """
         args_dict = vars(args)
+        print(f"[DEBUG] Updating config with mode={mode}, args={args_dict}")
         
         # Update main config first
         self._update_subconfig(self, args_dict)
@@ -126,6 +128,7 @@ class Config:
             self._update_subconfig(self.training, args_dict)
         
         if mode == 'attack' or ('pgd_alpha' in args_dict):
+            print(f"[DEBUG] Updating attack config with args={args_dict}")
             self._update_subconfig(self.attack, args_dict)
         
         if mode == 'evaluate' or ('evaluation_mode' in args_dict):

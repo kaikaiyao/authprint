@@ -612,15 +612,16 @@ def run_attack(config, local_rank, rank, world_size, device):
 def main():
     """Main entry point for attack."""
     args = parse_args()
+    print(f"[DEBUG] Args - surrogate_epochs = {args.surrogate_epochs}")
     
     # Setup distributed training first
     local_rank, rank, world_size, device = setup_distributed()
     
     # Load default configuration and update with args
     config = get_default_config()
-    print(f"[DEBUG] Before update - num_samples = {config.attack.num_samples}")
+    print(f"[DEBUG] Before update - num_samples = {config.attack.num_samples}, surrogate_epochs = {config.attack.surrogate_epochs}")
     config.update_from_args(args, mode='attack')  # Explicitly specify we're in attack mode
-    print(f"[DEBUG] After update - num_samples = {config.attack.num_samples}")
+    print(f"[DEBUG] After update - num_samples = {config.attack.num_samples}, surrogate_epochs = {config.attack.surrogate_epochs}")
     
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)

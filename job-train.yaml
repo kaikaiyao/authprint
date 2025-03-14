@@ -76,9 +76,9 @@ spec:
                       --master_port=12345 \
                       scripts/train.py \
                       --batch_size 128 \
-                      --total_iterations 500000 \
-                      --checkpoint_interval 10000 \
-                      --key_length 8 \
+                      --total_iterations 50000000 \
+                      --checkpoint_interval 100000 \
+                      --key_length 32 \
                       --lambda_lpips 1.0
               
               exit_status=$?
@@ -89,7 +89,7 @@ spec:
             limits:
               nvidia.com/gpu: "4"
               cpu: "8"
-              memory: "32Gi"
+              memory: "64Gi"
           volumeMounts:
             - name: nfs-user-107
               mountPath: /nfs-user-107

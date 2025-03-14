@@ -2,6 +2,7 @@
 Evaluator for StyleGAN watermarking.
 """
 import logging
+import os
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
@@ -16,6 +17,13 @@ from models.model_utils import clone_model, load_stylegan2_model
 from utils.checkpoint import load_checkpoint
 from utils.metrics import calculate_metrics, save_metrics_plots, save_metrics_text
 from utils.visualization import save_visualization
+from utils.image_transforms import (
+    apply_truncation, 
+    quantize_model_weights, 
+    downsample_and_upsample, 
+    apply_jpeg_compression
+)
+from utils.model_loading import load_pretrained_models
 
 
 class WatermarkEvaluator:
@@ -54,6 +62,19 @@ class WatermarkEvaluator:
         
         # Setup models
         self.setup_models()
+        
+        # Load additional pretrained models if needed
+        self.pretrained_models = {}
+        if hasattr(config.evaluate, 'evaluate_pretrained') and config.evaluate.evaluate_pretrained:
+            self.pretrained_models = load_pretrained_models(config, device, rank)
+        
+        # Setup quantized model if needed
+        self.quantized_model = None
+        if hasattr(config.evaluate, 'evaluate_quantization') and config.evaluate.evaluate_quantization:
+            if self.rank == 0:
+                logging.info("Setting up quantized model...")
+            self.quantized_model = quantize_model_weights(self.watermarked_model)
+            self.quantized_model.eval()
     
     def setup_models(self):
         """
@@ -107,47 +128,67 @@ class WatermarkEvaluator:
         # Initialize LPIPS loss with the same network as in training
         self.lpips_loss_fn = lpips.LPIPS(net='alex').to(self.device)
     
-    def evaluate_batch(self) -> Dict[str, float]:
+    def process_batch(self, z, model_name=None, transformation=None):
         """
-        Perform batch evaluation on multiple samples.
+        Process a batch of latent vectors for evaluation.
+        
+        Args:
+            z (torch.Tensor): Batch of latent vectors.
+            model_name (str, optional): Name of the pretrained model to use. If None, uses the watermarked model.
+            transformation (str, optional): Name of the transformation to apply. If None, no transformation is applied.
         
         Returns:
-            dict: Evaluation metrics.
+            dict: Dictionary containing evaluation results.
         """
-        if self.rank == 0:
-            logging.info(f"Running batch evaluation with {self.config.evaluate.num_samples} samples...")
-        
-        # Initialize metrics collection
-        all_lpips_losses = []
-        all_watermarked_mse_distances = []
-        all_original_mse_distances = []
-        all_watermarked_mae_distances = []
-        all_original_mae_distances = []
-        
-        num_batches = (self.config.evaluate.num_samples + self.config.evaluate.batch_size - 1) // self.config.evaluate.batch_size
-        watermarked_correct = 0
-        original_correct = 0
-        total_samples = 0
-        
-        # Only use tqdm progress bar on rank 0
-        batch_iterator = tqdm(range(num_batches), desc="Evaluating batches") if self.rank == 0 else range(num_batches)
-        
-        for _ in batch_iterator:
-            current_batch_size = min(self.config.evaluate.batch_size, self.config.evaluate.num_samples - total_samples)
-            if current_batch_size <= 0:
-                break
-                
-            with torch.no_grad():
-                # Sample latent vectors
-                z = torch.randn(current_batch_size, self.latent_dim, device=self.device)
+        with torch.no_grad():
+            try:
+                # Select the model to use
+                if model_name is None:
+                    # Use watermarked model for watermarked images and original model for original images
+                    watermarked_model = self.watermarked_model
+                    original_model = self.gan_model
+                else:
+                    # For pretrained models, use the pretrained model for both
+                    if model_name not in self.pretrained_models:
+                        if self.rank == 0:
+                            logging.warning(f"Pretrained model '{model_name}' not found. Falling back to watermarked model.")
+                        watermarked_model = self.watermarked_model
+                        original_model = self.gan_model
+                    else:
+                        watermarked_model = self.pretrained_models[model_name]
+                        original_model = self.pretrained_models[model_name]
                 
                 # Generate original images
-                w_orig = self.gan_model.mapping(z, None)
-                x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
+                w_orig = original_model.mapping(z, None)
+                x_orig = original_model.synthesis(w_orig, noise_mode="const")
                 
-                # Generate watermarked images
-                w_water = self.watermarked_model.mapping(z, None)
-                x_water = self.watermarked_model.synthesis(w_water, noise_mode="const")
+                # Generate watermarked images (or other model images)
+                w_water = watermarked_model.mapping(z, None)
+                
+                # Apply transformations if needed
+                if transformation == 'truncation':
+                    # For truncation, we need to regenerate with truncation
+                    truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
+                    x_water = apply_truncation(watermarked_model, z, truncation_psi)
+                elif transformation == 'quantization':
+                    # For quantization, use the quantized model
+                    if self.quantized_model is None:
+                        if self.rank == 0:
+                            logging.warning("Quantized model not initialized. Using watermarked model instead.")
+                        x_water = watermarked_model.synthesis(w_water, noise_mode="const")
+                    else:
+                        x_water = self.quantized_model.synthesis(w_water, noise_mode="const")
+                else:
+                    # Normal synthesis
+                    x_water = watermarked_model.synthesis(w_water, noise_mode="const")
+                
+                # Apply post-processing transformations if needed
+                if transformation == 'downsample':
+                    downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
+                    x_water = downsample_and_upsample(x_water, downsample_size)
+                elif transformation == 'jpeg':
+                    jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 55)
+                    x_water = apply_jpeg_compression(x_water, jpeg_quality)
                 
                 # Extract latent partial and compute true key
                 if w_orig.ndim == 3:
@@ -178,64 +219,239 @@ class WatermarkEvaluator:
                 original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
                 original_mae_distance = torch.mean(torch.abs(pred_key_orig_probs - true_key), dim=1)
                 
-                # Store distances for ROC-AUC calculation
-                all_watermarked_mse_distances.extend(watermarked_mse_distance.cpu().numpy())
-                all_original_mse_distances.extend(original_mse_distance.cpu().numpy())
-                all_watermarked_mae_distances.extend(watermarked_mae_distance.cpu().numpy())
-                all_original_mae_distances.extend(original_mae_distance.cpu().numpy())
-                
                 # Calculate match rates (all bits must match)
                 water_matches = (pred_key_water == true_key).all(dim=1).sum().item()
                 orig_matches = (pred_key_orig == true_key).all(dim=1).sum().item()
                 
-                watermarked_correct += water_matches
-                original_correct += orig_matches
-                total_samples += current_batch_size
-                
                 # Calculate LPIPS loss between original and watermarked images
                 lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze().cpu().numpy()
-                all_lpips_losses.extend(lpips_losses)
+                
+                # Return all metrics data
+                return {
+                    'watermarked_mse_distances': watermarked_mse_distance.cpu().numpy(),
+                    'original_mse_distances': original_mse_distance.cpu().numpy(),
+                    'watermarked_mae_distances': watermarked_mae_distance.cpu().numpy(),
+                    'original_mae_distances': original_mae_distance.cpu().numpy(),
+                    'watermarked_matches': water_matches,
+                    'original_matches': orig_matches,
+                    'batch_size': z.size(0),
+                    'lpips_losses': lpips_losses,
+                    'x_orig': x_orig,
+                    'x_water': x_water
+                }
+            except Exception as e:
+                if self.rank == 0:
+                    logging.error(f"Error processing batch with model_name={model_name}, transformation={transformation}: {str(e)}")
+                    logging.error(str(e), exc_info=True)
+                # Return empty results with same shape as expected
+                batch_size = z.size(0)
+                return {
+                    'watermarked_mse_distances': np.ones(batch_size) * 0.5,
+                    'original_mse_distances': np.ones(batch_size) * 0.5,
+                    'watermarked_mae_distances': np.ones(batch_size) * 0.5,
+                    'original_mae_distances': np.ones(batch_size) * 0.5,
+                    'watermarked_matches': 0,
+                    'original_matches': 0,
+                    'batch_size': batch_size,
+                    'lpips_losses': np.ones(batch_size) * 0.5,
+                    'x_orig': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size)),
+                    'x_water': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size))
+                }
+    
+    def evaluate_batch(self) -> Dict[str, float]:
+        """
+        Perform batch evaluation on multiple samples.
         
-        # Calculate metrics
-        metrics, y_data = calculate_metrics(
-            all_watermarked_mse_distances,
-            all_original_mse_distances,
-            all_watermarked_mae_distances,
-            all_original_mae_distances,
-            watermarked_correct,
-            original_correct,
-            total_samples,
-            all_lpips_losses
-        )
-        
-        # Generate plots and visualizations - only on rank 0
+        Returns:
+            dict: Evaluation metrics.
+        """
         if self.rank == 0:
-            # Log metrics
-            logging.info(f"Watermarked match rate: {metrics['watermarked_match_rate']:.2f}%")
-            logging.info(f"Original match rate: {metrics['original_match_rate']:.2f}%")
-            logging.info(f"LPIPS loss avg: {metrics['watermarked_lpips_loss_avg']:.6f}, std: {metrics['watermarked_lpips_loss_std']:.6f}")
-            logging.info(f"Watermarked MSE distance: {metrics['watermarked_mse_distance_avg']:.6f}±{metrics['watermarked_mse_distance_std']:.6f}")
-            logging.info(f"Original MSE distance: {metrics['original_mse_distance_avg']:.6f}±{metrics['original_mse_distance_std']:.6f}")
-            logging.info(f"Watermarked MAE distance: {metrics['watermarked_mae_distance_avg']:.6f}±{metrics['watermarked_mae_distance_std']:.6f}")
-            logging.info(f"Original MAE distance: {metrics['original_mae_distance_avg']:.6f}±{metrics['original_mae_distance_std']:.6f}")
-            logging.info(f"ROC-AUC score (MSE): {metrics['roc_auc_score_mse']:.6f}")
-            logging.info(f"ROC-AUC score (MAE): {metrics['roc_auc_score_mae']:.6f}")
+            logging.info(f"Running batch evaluation with {self.config.evaluate.num_samples} samples...")
+        
+        # Initialize metrics collection
+        results = {}
+        
+        # First, evaluate original and watermarked models
+        results['original'] = self.evaluate_model_batch(None, None)
+        
+        # Evaluate negative samples if needed
+        if hasattr(self.config.evaluate, 'evaluate_neg_samples') and self.config.evaluate.evaluate_neg_samples:
+            # Evaluate pretrained models
+            if hasattr(self.config.evaluate, 'evaluate_pretrained') and self.config.evaluate.evaluate_pretrained:
+                for model_name in self.pretrained_models:
+                    results[f'pretrained_{model_name}'] = self.evaluate_model_batch(model_name, None)
             
-            # Save plots
-            save_metrics_plots(
-                metrics,
-                y_data,
+            # Evaluate transformations
+            if hasattr(self.config.evaluate, 'evaluate_transforms') and self.config.evaluate.evaluate_transforms:
+                # Evaluate truncation
+                if hasattr(self.config.evaluate, 'evaluate_truncation') and self.config.evaluate.evaluate_truncation:
+                    results['truncation'] = self.evaluate_model_batch(None, 'truncation')
+                
+                # Evaluate quantization
+                if hasattr(self.config.evaluate, 'evaluate_quantization') and self.config.evaluate.evaluate_quantization:
+                    results['quantization'] = self.evaluate_model_batch(None, 'quantization')
+                
+                # Evaluate downsample/upsample
+                if hasattr(self.config.evaluate, 'evaluate_downsample') and self.config.evaluate.evaluate_downsample:
+                    results['downsample'] = self.evaluate_model_batch(None, 'downsample')
+                
+                # Evaluate JPEG compression
+                if hasattr(self.config.evaluate, 'evaluate_jpeg') and self.config.evaluate.evaluate_jpeg:
+                    results['jpeg'] = self.evaluate_model_batch(None, 'jpeg')
+        
+        # Generate combined metrics summary
+        if self.rank == 0:
+            logging.info("=== Evaluation Summary ===")
+            
+            for result_name, metrics in results.items():
+                logging.info(f"\n--- Results for {result_name} ---")
+                logging.info(f"Watermarked match rate: {metrics['watermarked_match_rate']:.2f}%")
+                logging.info(f"Original match rate: {metrics['original_match_rate']:.2f}%")
+                logging.info(f"LPIPS loss avg: {metrics['watermarked_lpips_loss_avg']:.6f}, std: {metrics['watermarked_lpips_loss_std']:.6f}")
+                logging.info(f"ROC-AUC score (MSE): {metrics['roc_auc_score_mse']:.6f}")
+                logging.info(f"ROC-AUC score (MAE): {metrics['roc_auc_score_mae']:.6f}")
+                
+                # Save individual metric files
+                output_dir = os.path.join(self.config.output_dir, result_name)
+                os.makedirs(output_dir, exist_ok=True)
+                save_metrics_text(metrics, output_dir)
+                
+                # Save plots for each evaluation
+                y_data = {
+                    'watermarked_mse_distances': metrics['all_watermarked_mse_distances'],
+                    'original_mse_distances': metrics['all_original_mse_distances'],
+                    'watermarked_mae_distances': metrics['all_watermarked_mae_distances'],
+                    'original_mae_distances': metrics['all_original_mae_distances']
+                }
+                save_metrics_plots(
+                    metrics,
+                    y_data,
+                    metrics['all_watermarked_mse_distances'],
+                    metrics['all_original_mse_distances'],
+                    metrics['all_watermarked_mae_distances'],
+                    metrics['all_original_mae_distances'],
+                    output_dir
+                )
+        
+        return results['original']  # Return original results for backward compatibility
+    
+    def evaluate_model_batch(self, model_name=None, transformation=None):
+        """
+        Evaluate a specific model or transformation on batch of samples.
+        
+        Args:
+            model_name (str, optional): Name of the pretrained model to evaluate.
+            transformation (str, optional): Name of the transformation to apply.
+            
+        Returns:
+            dict: Evaluation metrics.
+        """
+        name_str = model_name if model_name else "watermarked model"
+        if transformation:
+            name_str = f"{name_str} with {transformation} transformation"
+            
+        if self.rank == 0:
+            logging.info(f"Evaluating {name_str}...")
+        
+        try:
+            # Initialize metrics collection
+            all_watermarked_mse_distances = []
+            all_original_mse_distances = []
+            all_watermarked_mae_distances = []
+            all_original_mae_distances = []
+            
+            num_batches = (self.config.evaluate.num_samples + self.config.evaluate.batch_size - 1) // self.config.evaluate.batch_size
+            watermarked_correct = 0
+            original_correct = 0
+            total_samples = 0
+            all_lpips_losses = []
+            
+            # Only use tqdm progress bar on rank 0
+            batch_iterator = tqdm(range(num_batches), desc=f"Evaluating {name_str}") if self.rank == 0 else range(num_batches)
+            
+            for batch_idx in batch_iterator:
+                try:
+                    current_batch_size = min(self.config.evaluate.batch_size, self.config.evaluate.num_samples - total_samples)
+                    if current_batch_size <= 0:
+                        break
+                        
+                    # Sample latent vectors
+                    z = torch.randn(current_batch_size, self.latent_dim, device=self.device)
+                    
+                    # Process batch
+                    batch_results = self.process_batch(z, model_name, transformation)
+                    
+                    # Accumulate metrics
+                    all_watermarked_mse_distances.extend(batch_results['watermarked_mse_distances'])
+                    all_original_mse_distances.extend(batch_results['original_mse_distances'])
+                    all_watermarked_mae_distances.extend(batch_results['watermarked_mae_distances'])
+                    all_original_mae_distances.extend(batch_results['original_mae_distances'])
+                    watermarked_correct += batch_results['watermarked_matches']
+                    original_correct += batch_results['original_matches']
+                    total_samples += batch_results['batch_size']
+                    all_lpips_losses.extend(batch_results['lpips_losses'])
+                    
+                except Exception as e:
+                    if self.rank == 0:
+                        logging.error(f"Error processing batch {batch_idx} for {name_str}: {str(e)}")
+                    # Continue with next batch
+                    continue
+            
+            # Check if we have enough data to calculate metrics
+            if total_samples == 0:
+                if self.rank == 0:
+                    logging.error(f"No valid samples were processed for {name_str}. Returning empty metrics.")
+                # Return empty metrics
+                return self._create_empty_metrics()
+            
+            # Calculate metrics
+            metrics, y_data = calculate_metrics(
                 all_watermarked_mse_distances,
                 all_original_mse_distances,
                 all_watermarked_mae_distances,
                 all_original_mae_distances,
-                self.config.output_dir
+                watermarked_correct,
+                original_correct,
+                total_samples,
+                all_lpips_losses
             )
             
-            # Save metrics to file
-            save_metrics_text(metrics, self.config.output_dir)
-        
-        return metrics
+            # Store raw distances for later plotting
+            metrics['all_watermarked_mse_distances'] = all_watermarked_mse_distances
+            metrics['all_original_mse_distances'] = all_original_mse_distances
+            metrics['all_watermarked_mae_distances'] = all_watermarked_mae_distances
+            metrics['all_original_mae_distances'] = all_original_mae_distances
+            
+            return metrics
+            
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error evaluating {name_str}: {str(e)}")
+            # Return empty metrics
+            return self._create_empty_metrics()
+    
+    def _create_empty_metrics(self):
+        """Create empty metrics for error cases."""
+        return {
+            'watermarked_match_rate': 0.0,
+            'original_match_rate': 0.0,
+            'watermarked_mse_distance_avg': 0.5,
+            'watermarked_mse_distance_std': 0.0,
+            'original_mse_distance_avg': 0.5,
+            'original_mse_distance_std': 0.0,
+            'watermarked_mae_distance_avg': 0.5,
+            'watermarked_mae_distance_std': 0.0,
+            'original_mae_distance_avg': 0.5,
+            'original_mae_distance_std': 0.0,
+            'roc_auc_score_mse': 0.5,
+            'roc_auc_score_mae': 0.5,
+            'watermarked_lpips_loss_avg': 0.5,
+            'watermarked_lpips_loss_std': 0.0,
+            'all_watermarked_mse_distances': [0.5],
+            'all_original_mse_distances': [0.5],
+            'all_watermarked_mae_distances': [0.5],
+            'all_original_mae_distances': [0.5]
+        }
     
     def visualize_samples(self):
         """
@@ -247,25 +463,78 @@ class WatermarkEvaluator:
             
         logging.info(f"Running visual evaluation with {self.config.evaluate.num_vis_samples} samples...")
         
+        # First visualize original vs. watermarked
+        self.visualize_model_samples(None, None, "watermarked")
+        
+        # Visualize negative samples if needed
+        if hasattr(self.config.evaluate, 'evaluate_neg_samples') and self.config.evaluate.evaluate_neg_samples:
+            # Visualize pretrained models
+            if hasattr(self.config.evaluate, 'evaluate_pretrained') and self.config.evaluate.evaluate_pretrained:
+                for model_name in self.pretrained_models:
+                    self.visualize_model_samples(model_name, None, f"pretrained_{model_name}")
+            
+            # Visualize transformations
+            if hasattr(self.config.evaluate, 'evaluate_transforms') and self.config.evaluate.evaluate_transforms:
+                # Visualize truncation
+                if hasattr(self.config.evaluate, 'evaluate_truncation') and self.config.evaluate.evaluate_truncation:
+                    self.visualize_model_samples(None, 'truncation', "truncation")
+                
+                # Visualize quantization
+                if hasattr(self.config.evaluate, 'evaluate_quantization') and self.config.evaluate.evaluate_quantization:
+                    self.visualize_model_samples(None, 'quantization', "quantization")
+                
+                # Visualize downsample/upsample
+                if hasattr(self.config.evaluate, 'evaluate_downsample') and self.config.evaluate.evaluate_downsample:
+                    self.visualize_model_samples(None, 'downsample', "downsample")
+                
+                # Visualize JPEG compression
+                if hasattr(self.config.evaluate, 'evaluate_jpeg') and self.config.evaluate.evaluate_jpeg:
+                    self.visualize_model_samples(None, 'jpeg', "jpeg")
+    
+    def visualize_model_samples(self, model_name=None, transformation=None, output_subdir="watermarked"):
+        """
+        Generate and visualize samples for a specific model or transformation.
+        
+        Args:
+            model_name (str, optional): Name of the pretrained model to visualize.
+            transformation (str, optional): Name of the transformation to apply.
+            output_subdir (str): Subdirectory to save visualization results.
+        """
+        name_str = model_name if model_name else "watermarked model"
+        if transformation:
+            name_str = f"{name_str} with {transformation} transformation"
+            
+        logging.info(f"Visualizing {name_str}...")
+        
         with torch.no_grad():
             # Sample latent vectors
             z_vis = torch.randn(self.config.evaluate.num_vis_samples, self.latent_dim, device=self.device)
             
-            # Generate original images
-            w_orig_vis = self.gan_model.mapping(z_vis, None)
-            x_orig_vis = self.gan_model.synthesis(w_orig_vis, noise_mode="const")
+            # Process batch for visualization
+            batch_results = self.process_batch(z_vis, model_name, transformation)
             
-            # Generate watermarked images
-            w_water_vis = self.watermarked_model.mapping(z_vis, None)
-            x_water_vis = self.watermarked_model.synthesis(w_water_vis, noise_mode="const")
+            # Extract results
+            x_orig_vis = batch_results['x_orig']
+            x_water_vis = batch_results['x_water']
             
             # Compute difference
             diff_vis = x_water_vis - x_orig_vis
             
+            # Create output directory
+            output_dir = os.path.join(self.config.output_dir, output_subdir)
+            os.makedirs(output_dir, exist_ok=True)
+            
             # Save visualizations
-            save_visualization(x_orig_vis, x_water_vis, diff_vis, self.config.output_dir)
+            save_visualization(x_orig_vis, x_water_vis, diff_vis, output_dir)
             
             # Extract latent partial and compute true key for each sample
+            if model_name is None:
+                # For watermarked model, extract w from watermarked model
+                w_water_vis = self.watermarked_model.mapping(z_vis, None)
+            else:
+                # For pretrained models, extract w from the pretrained model
+                w_water_vis = self.pretrained_models[model_name].mapping(z_vis, None)
+            
             if w_water_vis.ndim == 3:
                 w_water_single_vis = w_water_vis[:, 0, :]
             else:
@@ -292,7 +561,7 @@ class WatermarkEvaluator:
             
             # Save key comparison to log
             for i in range(self.config.evaluate.num_vis_samples):
-                logging.info(f"Sample {i}:")
+                logging.info(f"Sample {i} ({output_subdir}):")
                 logging.info(f"  True key: {true_keys_vis[i].cpu().numpy().astype(int)}")
                 logging.info(f"  Watermarked pred: {pred_keys_water_vis[i].cpu().numpy().astype(int)}")
                 logging.info(f"  Original pred: {pred_keys_orig_vis[i].cpu().numpy().astype(int)}")

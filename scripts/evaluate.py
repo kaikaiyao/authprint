@@ -50,7 +50,43 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, default="evaluation_results", 
                         help="Directory to save evaluation results")
     
-    return parser.parse_args()
+    # Additional evaluation options for negative samples - enabled by default
+    parser.add_argument("--evaluate_neg_samples", action="store_true", default=True,
+                        help="Whether to evaluate on negative samples")
+    
+    # Pre-trained model options - enabled by default
+    parser.add_argument("--evaluate_pretrained", action="store_true", default=True,
+                        help="Whether to evaluate on additional pretrained models")
+    parser.add_argument("--evaluate_ffhq1k", action="store_true", default=True,
+                        help="Evaluate on ffhq1k model")
+    parser.add_argument("--evaluate_ffhq30k", action="store_true", default=True,
+                        help="Evaluate on ffhq30k model")
+    parser.add_argument("--evaluate_ffhq70k_bcr", action="store_true", default=True,
+                        help="Evaluate on ffhq70k-bcr model")
+    parser.add_argument("--evaluate_ffhq70k_noaug", action="store_true", default=True,
+                        help="Evaluate on ffhq70k-noaug model")
+    
+    # Image transformation options - enabled by default
+    parser.add_argument("--evaluate_transforms", action="store_true", default=True,
+                        help="Whether to evaluate on transformed images")
+    parser.add_argument("--evaluate_truncation", action="store_true", default=True,
+                        help="Evaluate on truncated images")
+    parser.add_argument("--truncation_psi", type=float, default=2.0,
+                        help="Truncation psi parameter")
+    parser.add_argument("--evaluate_quantization", action="store_true", default=True,
+                        help="Evaluate on images from quantized model")
+    parser.add_argument("--evaluate_downsample", action="store_true", default=True,
+                        help="Evaluate on downsampled and upsampled images")
+    parser.add_argument("--downsample_size", type=int, default=128,
+                        help="Size to downsample to before upsampling back")
+    parser.add_argument("--evaluate_jpeg", action="store_true", default=True,
+                        help="Evaluate on JPEG compressed images")
+    parser.add_argument("--jpeg_quality", type=int, default=55,
+                        help="JPEG compression quality (0-100)")
+    
+    # Parse args and handle boolean flags properly
+    args = parser.parse_args()
+    return args
 
 
 def main():

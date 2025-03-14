@@ -144,78 +144,33 @@ class WatermarkEvaluator:
         """
         with torch.no_grad():
             try:
-                # Select the model to use
-                if model_name is None:
-                    # Use watermarked model for watermarked images and original model for original images
-                    watermarked_model = self.watermarked_model
-                    original_model = self.gan_model
-                else:
-                    # For pretrained models, use the pretrained model for both
-                    if model_name not in self.pretrained_models:
-                        if self.rank == 0:
-                            logging.warning(f"Pretrained model '{model_name}' not found. Falling back to watermarked model.")
-                        watermarked_model = self.watermarked_model
-                        original_model = self.gan_model
-                    else:
-                        watermarked_model = self.pretrained_models[model_name]
-                        original_model = self.pretrained_models[model_name]
+                # Determine if this is a comparison case (original evaluation) or a negative sample case
+                is_comparison_case = model_name is None and transformation is None
                 
-                # Generate watermarked images (unchanged)
+                # For negative cases, we only need to evaluate the specific model/transformation
+                if not is_comparison_case:
+                    return self._process_negative_sample_batch(z, model_name, transformation)
+                
+                # This is the comparison case (original evaluation)
+                # Use watermarked model for watermarked images and original model for original images
+                watermarked_model = self.watermarked_model
+                original_model = self.gan_model
+                
+                # Generate watermarked images
                 w_water = watermarked_model.mapping(z, None)
                 x_water = watermarked_model.synthesis(w_water, noise_mode="const")
                 
-                # For original model - handle differently based on transformation
-                w_orig = None
-                x_orig = None
-                
-                # Handle transformations to the original model/images
-                if transformation == 'truncation':
-                    # For truncation, we regenerate with truncation and get new w
-                    truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
-                    x_orig, w_orig = apply_truncation(original_model, z, truncation_psi, return_w=True)
-                elif transformation == 'quantization':
-                    # For quantization, use the quantized model (which affects w calculation)
-                    if self.quantized_model is None:
-                        if self.rank == 0:
-                            logging.warning("Quantized model not initialized. Using original model instead.")
-                        w_orig = original_model.mapping(z, None)
-                        x_orig = original_model.synthesis(w_orig, noise_mode="const")
-                    else:
-                        # When using quantized model, w is calculated with quantized weights
-                        w_orig = self.quantized_model.mapping(z, None)
-                        x_orig = self.quantized_model.synthesis(w_orig, noise_mode="const")
-                else:
-                    # Standard case: get w from original model first
-                    w_orig = original_model.mapping(z, None)
-                    x_orig = original_model.synthesis(w_orig, noise_mode="const")
-                
-                # Apply post-processing transformations to original images
-                # These don't affect w since they operate on the image after generation
-                if transformation == 'downsample':
-                    downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
-                    x_orig = downsample_and_upsample(x_orig, downsample_size)
-                elif transformation == 'jpeg':
-                    jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 55)
-                    x_orig = apply_jpeg_compression(x_orig, jpeg_quality)
+                # Generate original images
+                w_orig = original_model.mapping(z, None)
+                x_orig = original_model.synthesis(w_orig, noise_mode="const")
                 
                 # Extract latent partial and compute true key
-                # For image transformations (downsample, jpeg), use w from the original model
-                # For model transformations (truncation, quantization), use the transformed w
-                if w_orig.ndim == 3:
-                    w_orig_single = w_orig[:, 0, :]
+                if w_water.ndim == 3:
                     w_water_single = w_water[:, 0, :]
                 else:
-                    w_orig_single = w_orig
                     w_water_single = w_water
                 
-                # Use the correct w for w_partial based on transformation type
-                if transformation in ['truncation', 'quantization']:
-                    # For model transformations, use the transformed w
-                    w_partial = w_orig_single[:, self.latent_indices]
-                else:
-                    # For image transformations or no transformation, use watermarked w
-                    w_partial = w_water_single[:, self.latent_indices]
-                
+                w_partial = w_water_single[:, self.latent_indices]
                 true_key = self.key_mapper(w_partial)
                 
                 # Compute key from watermarked image
@@ -223,7 +178,7 @@ class WatermarkEvaluator:
                 pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
                 pred_key_water = (pred_key_water_probs > 0.5).float()
                 
-                # Compute key from original image (with transformations applied)
+                # Compute key from original image
                 pred_key_orig_logits = self.decoder(x_orig)
                 pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
                 pred_key_orig = (pred_key_orig_probs > 0.5).float()
@@ -275,6 +230,135 @@ class WatermarkEvaluator:
                     'x_water': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size))
                 }
     
+    def _process_negative_sample_batch(self, z, model_name=None, transformation=None):
+        """
+        Process a batch specifically for negative sample evaluation (pretrained models or transformations).
+        This function avoids redundant computation by only evaluating the negative samples themselves.
+        
+        Args:
+            z (torch.Tensor): Batch of latent vectors.
+            model_name (str, optional): Name of the pretrained model to use.
+            transformation (str, optional): Name of the transformation to apply.
+            
+        Returns:
+            dict: Dictionary containing evaluation results.
+        """
+        try:
+            # Select the negative model to use
+            if model_name is not None:
+                # Use the pretrained model
+                if model_name not in self.pretrained_models:
+                    if self.rank == 0:
+                        logging.warning(f"Pretrained model '{model_name}' not found. Falling back to original model.")
+                    negative_model = self.gan_model
+                else:
+                    negative_model = self.pretrained_models[model_name]
+                    
+                # Generate images from the negative model
+                w_neg = negative_model.mapping(z, None)
+                x_neg = negative_model.synthesis(w_neg, noise_mode="const")
+                
+            else:  # transformation is not None
+                # Use the original model with transformation
+                original_model = self.gan_model
+                
+                # Handle transformations
+                if transformation == 'truncation':
+                    # For truncation, apply truncation to the image generation
+                    truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
+                    x_neg, w_neg = apply_truncation(original_model, z, truncation_psi, return_w=True)
+                    
+                elif transformation == 'quantization':
+                    # For quantization, use the quantized model
+                    if self.quantized_model is None:
+                        if self.rank == 0:
+                            logging.warning("Quantized model not initialized. Using original model instead.")
+                        w_neg = original_model.mapping(z, None)
+                        x_neg = original_model.synthesis(w_neg, noise_mode="const")
+                    else:
+                        w_neg = self.quantized_model.mapping(z, None)
+                        x_neg = self.quantized_model.synthesis(w_neg, noise_mode="const")
+                        
+                else:
+                    # First generate image with original model
+                    w_neg = original_model.mapping(z, None)
+                    x_neg = original_model.synthesis(w_neg, noise_mode="const")
+                    
+                    # Then apply post-processing transformations
+                    if transformation == 'downsample':
+                        downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
+                        x_neg = downsample_and_upsample(x_neg, downsample_size)
+                    elif transformation == 'jpeg':
+                        jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 55)
+                        x_neg = apply_jpeg_compression(x_neg, jpeg_quality)
+            
+            # Extract latent partial and compute true key
+            if w_neg.ndim == 3:
+                w_neg_single = w_neg[:, 0, :]
+            else:
+                w_neg_single = w_neg
+            
+            # Use the correct w for partial
+            if transformation in ['truncation', 'quantization']:
+                # For model transformations, use the transformed w
+                w_partial = w_neg_single[:, self.latent_indices]
+            else:
+                # For pretrained models and image transformations, use the negative model's w
+                w_partial = w_neg_single[:, self.latent_indices]
+            
+            true_key = self.key_mapper(w_partial)
+            
+            # Compute key from negative sample image
+            pred_key_neg_logits = self.decoder(x_neg)
+            pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
+            pred_key_neg = (pred_key_neg_probs > 0.5).float()
+            
+            # Calculate distance metrics
+            neg_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
+            neg_mae_distance = torch.mean(torch.abs(pred_key_neg_probs - true_key), dim=1)
+            
+            # Calculate match rate
+            neg_matches = (pred_key_neg == true_key).all(dim=1).sum().item()
+            
+            # Use dummy values for watermarked measurements to maintain API compatibility
+            batch_size = z.size(0)
+            dummy_distances = np.ones(batch_size) * 0.5
+            
+            # Create a dummy tensor of the same shape as x_neg for the watermarked image placeholder
+            dummy_image = torch.zeros_like(x_neg)
+            
+            # Return metrics data in the same format as the original function for compatibility
+            return {
+                'watermarked_mse_distances': dummy_distances,  # Dummy value
+                'original_mse_distances': neg_mse_distance.cpu().numpy(),  # Actual negative sample distances
+                'watermarked_mae_distances': dummy_distances,  # Dummy value
+                'original_mae_distances': neg_mae_distance.cpu().numpy(),  # Actual negative sample distances
+                'watermarked_matches': 0,  # Dummy value
+                'original_matches': neg_matches,  # Actual negative sample matches
+                'batch_size': batch_size,
+                'lpips_losses': np.zeros(batch_size),  # Zero LPIPS since we're not comparing
+                'x_orig': x_neg,  # Store the negative sample image as the "original"
+                'x_water': dummy_image  # Dummy image for compatibility
+            }
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error processing negative batch with model_name={model_name}, transformation={transformation}: {str(e)}")
+                logging.error(str(e), exc_info=True)
+            # Return empty results with same shape as expected
+            batch_size = z.size(0)
+            return {
+                'watermarked_mse_distances': np.ones(batch_size) * 0.5,
+                'original_mse_distances': np.ones(batch_size) * 0.5,
+                'watermarked_mae_distances': np.ones(batch_size) * 0.5,
+                'original_mae_distances': np.ones(batch_size) * 0.5,
+                'watermarked_matches': 0,
+                'original_matches': 0,
+                'batch_size': batch_size,
+                'lpips_losses': np.zeros(batch_size),
+                'x_orig': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size)),
+                'x_water': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size))
+            }
+    
     def evaluate_batch(self) -> Dict[str, float]:
         """
         Perform batch evaluation on multiple samples.
@@ -322,33 +406,40 @@ class WatermarkEvaluator:
             
             for result_name, metrics in results.items():
                 logging.info(f"\n--- Results for {result_name} ---")
-                logging.info(f"Watermarked match rate: {metrics['watermarked_match_rate']:.2f}%")
-                logging.info(f"Original match rate: {metrics['original_match_rate']:.2f}%")
-                logging.info(f"LPIPS loss avg: {metrics['watermarked_lpips_loss_avg']:.6f}, std: {metrics['watermarked_lpips_loss_std']:.6f}")
-                logging.info(f"ROC-AUC score (MSE): {metrics['roc_auc_score_mse']:.6f}")
-                logging.info(f"ROC-AUC score (MAE): {metrics['roc_auc_score_mae']:.6f}")
+                
+                if result_name == 'original':
+                    # For original evaluation, show both watermarked and original match rates plus comparison metrics
+                    logging.info(f"Watermarked match rate: {metrics['watermarked_match_rate']:.2f}%")
+                    logging.info(f"Original match rate: {metrics['original_match_rate']:.2f}%")
+                    logging.info(f"LPIPS loss avg: {metrics['watermarked_lpips_loss_avg']:.6f}, std: {metrics['watermarked_lpips_loss_std']:.6f}")
+                    logging.info(f"ROC-AUC score (MSE): {metrics['roc_auc_score_mse']:.6f}")
+                    logging.info(f"ROC-AUC score (MAE): {metrics['roc_auc_score_mae']:.6f}")
+                else:
+                    # For negative sample groups, just show their match rate
+                    logging.info(f"Negative samples match rate: {metrics['original_match_rate']:.2f}%")
                 
                 # Save individual metric files
                 output_dir = os.path.join(self.config.output_dir, result_name)
                 os.makedirs(output_dir, exist_ok=True)
                 save_metrics_text(metrics, output_dir)
                 
-                # Save plots for each evaluation
-                # Get ROC data from metrics or create a fallback
-                if 'roc_data' in metrics:
-                    y_data = metrics['roc_data']
-                else:
-                    y_data = self._create_fallback_roc_data(metrics)
-                
-                save_metrics_plots(
-                    metrics,
-                    y_data,
-                    metrics['all_watermarked_mse_distances'],
-                    metrics['all_original_mse_distances'],
-                    metrics['all_watermarked_mae_distances'],
-                    metrics['all_original_mae_distances'],
-                    output_dir
-                )
+                # Save plots only for original evaluation
+                if result_name == 'original':
+                    # Get ROC data from metrics or create a fallback
+                    if 'roc_data' in metrics:
+                        y_data = metrics['roc_data']
+                    else:
+                        y_data = self._create_fallback_roc_data(metrics)
+                    
+                    save_metrics_plots(
+                        metrics,
+                        y_data,
+                        metrics['all_watermarked_mse_distances'],
+                        metrics['all_original_mse_distances'],
+                        metrics['all_watermarked_mae_distances'],
+                        metrics['all_original_mae_distances'],
+                        output_dir
+                    )
         
         return results['original']  # Return original results for backward compatibility
     
@@ -363,9 +454,13 @@ class WatermarkEvaluator:
         Returns:
             dict: Evaluation metrics.
         """
-        name_str = model_name if model_name else "watermarked model"
-        if transformation:
-            name_str = f"{name_str} with {transformation} transformation"
+        # Create appropriate description for what's being evaluated
+        if model_name is None and transformation is None:
+            name_str = "watermarked vs. original models"
+        elif model_name is not None:
+            name_str = f"pretrained model '{model_name}'"
+        elif transformation is not None:
+            name_str = f"{transformation} transformation"
             
         if self.rank == 0:
             logging.info(f"Evaluating {name_str}...")
@@ -613,9 +708,13 @@ class WatermarkEvaluator:
             transformation (str, optional): Name of the transformation to apply.
             output_subdir (str): Subdirectory to save visualization results.
         """
-        name_str = model_name if model_name else "watermarked model"
-        if transformation:
-            name_str = f"{name_str} with {transformation} transformation"
+        # Create appropriate description for what's being visualized
+        if model_name is None and transformation is None:
+            name_str = "watermarked vs. original models"
+        elif model_name is not None:
+            name_str = f"pretrained model '{model_name}'"
+        elif transformation is not None:
+            name_str = f"{transformation} transformation"
             
         logging.info(f"Visualizing {name_str}...")
         

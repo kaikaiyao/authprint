@@ -75,7 +75,7 @@ spec:
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
                       scripts/train.py \
-                      --batch_size 16 \
+                      --batch_size 128 \
                       --total_iterations 500000 \
                       --checkpoint_interval 10000 \
                       --key_length 8 \

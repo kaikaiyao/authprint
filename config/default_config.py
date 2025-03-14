@@ -56,6 +56,30 @@ class EvaluateConfig:
 
 
 @dataclass
+class AttackConfig:
+    """Configuration for attacks against the watermarking."""
+    # General attack settings
+    batch_size: int = 16
+    num_samples: int = 1000
+    
+    # PGD attack parameters
+    pgd_alpha: float = 0.01  # Step size
+    pgd_steps: int = 100     # Number of PGD iterations
+    pgd_epsilon: float = 1.0  # Maximum perturbation
+    
+    # Surrogate training parameters
+    surrogate_lr: float = 1e-4
+    surrogate_batch_size: int = 32
+    surrogate_epochs: int = 10
+    surrogate_num_samples: int = 1000
+    num_surrogate_models: int = 3
+    
+    # Attack evaluation
+    log_interval: int = 10
+    visualization_samples: int = 5
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     # Output path
@@ -70,6 +94,7 @@ class Config:
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
     distributed: DistributedConfig = field(default_factory=DistributedConfig)
     evaluate: EvaluateConfig = field(default_factory=EvaluateConfig)
+    attack: AttackConfig = field(default_factory=AttackConfig)
     
     # Meta configuration
     seed: Optional[int] = None
@@ -89,6 +114,8 @@ class Config:
                 setattr(self.distributed, key, value)
             elif hasattr(self.evaluate, key):
                 setattr(self.evaluate, key, value)
+            elif hasattr(self.attack, key):
+                setattr(self.attack, key, value)
 
 
 def get_default_config() -> Config:

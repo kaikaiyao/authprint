@@ -1,0 +1,116 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${USER}-job-attack-${JOB_SUFFIX}
+  labels:
+    eidf/user: ${USER}
+    kueue.x-k8s.io/queue-name: ${QUEUE_NAME}
+    kueue.x-k8s.io/priority-class: batch-workload-priority
+spec:
+  completions: 1
+  parallelism: 1
+  completionMode: Indexed
+  backoffLimit: 2147483647
+  activeDeadlineSeconds: 864000
+  template:
+    metadata:
+      labels:
+        eidf/user: ${USER}
+    spec:
+      restartPolicy: OnFailure
+      # Replace nodeSelector with affinity to allow multiple GPU types.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A100-SXM4-40GB
+      # Add tolerations to allow scheduling on nodes with specific taints.
+      tolerations:
+        - key: "eidf098"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+        - key: "eidf107"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+      containers:
+        - name: stylegan-watermark-attack
+          image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
+          workingDir: "/workspace/kubernets"
+          env:
+            - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+              value: "1"
+            - name: NCCL_DEBUG
+              value: "INFO"
+            - name: NCCL_IB_DISABLE
+              value: "1"
+            - name: MAX_DELTA
+              value: "${MAX_DELTA}"
+            - name: NCCL_IB_HCA
+              value: "^mlx5"
+            - name: PYTHONPATH
+              value: "/workspace/kubernets"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "Setting up environment..."
+              mkdir -p /workspace/kubernets/attack_results
+              
+              # Download pretrained models
+              echo "Downloading pretrained models..."
+              curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
+              
+              # Run attack with torchrun for distributed processing
+              echo "Starting attack..."
+              export PYTHONPATH=$PYTHONPATH:/workspace/kubernets
+              
+              torchrun --nproc_per_node=4 \
+                      --nnodes=1 \
+                      --node_rank=0 \
+                      --master_addr=127.0.0.1 \
+                      --master_port=12345 \
+                      scripts/attack.py \
+                      --checkpoint_path ${CHECKPOINT_PATH} \
+                      --pgd_alpha 0.01 \
+                      --pgd_steps 100 \
+                      --pgd_epsilon 1.0 \
+                      --num_surrogate_models 3 \
+                      --surrogate_epochs 50 \
+                      --key_length 8 \
+                      --key_mapper_seed 2025 \
+                      --output_dir "attack_results"
+              
+              exit_status=$?
+              echo "Attack finished with exit status $exit_status"
+              
+              sleep infinity
+          resources:
+            limits:
+              nvidia.com/gpu: "4"
+              cpu: "8"
+              memory: "32Gi"
+          volumeMounts:
+            - name: nfs-user-107
+              mountPath: /nfs-user-107
+            - name: nfs-user-029
+              mountPath: /nfs-user-029
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: nfs-user-107
+          nfs:
+            server: 10.24.6.77
+            path: /user/s2470447-eidf107
+        - name: nfs-user-029
+          nfs:
+            server: 10.24.1.255
+            path: /user/s2470447-infk8s
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi 

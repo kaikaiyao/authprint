@@ -9,6 +9,7 @@ import torch
 import lpips
 import numpy as np
 from tqdm import tqdm
+import sklearn.metrics as skmetrics
 
 from config.default_config import Config
 from models.decoder import Decoder
@@ -317,12 +318,12 @@ class WatermarkEvaluator:
                 save_metrics_text(metrics, output_dir)
                 
                 # Save plots for each evaluation
-                y_data = {
-                    'watermarked_mse_distances': metrics['all_watermarked_mse_distances'],
-                    'original_mse_distances': metrics['all_original_mse_distances'],
-                    'watermarked_mae_distances': metrics['all_watermarked_mae_distances'],
-                    'original_mae_distances': metrics['all_original_mae_distances']
-                }
+                # Get ROC data from metrics or create a fallback
+                if 'roc_data' in metrics:
+                    y_data = metrics['roc_data']
+                else:
+                    y_data = self._create_fallback_roc_data(metrics)
+                
                 save_metrics_plots(
                     metrics,
                     y_data,
@@ -404,23 +405,85 @@ class WatermarkEvaluator:
                 # Return empty metrics
                 return self._create_empty_metrics()
             
-            # Calculate metrics
-            metrics, y_data = calculate_metrics(
-                all_watermarked_mse_distances,
-                all_original_mse_distances,
-                all_watermarked_mae_distances,
-                all_original_mae_distances,
-                watermarked_correct,
-                original_correct,
-                total_samples,
-                all_lpips_losses
-            )
+            # Calculate ROC data
+            try:
+                # Prepare data for ROC curve calculation
+                y_true = np.concatenate([
+                    np.ones(len(all_watermarked_mse_distances)), 
+                    np.zeros(len(all_original_mse_distances))
+                ])
+                
+                # Negate distances since lower is better for watermarked images
+                y_score_mse = np.concatenate([
+                    -np.array(all_watermarked_mse_distances), 
+                    -np.array(all_original_mse_distances)
+                ])
+                
+                y_score_mae = np.concatenate([
+                    -np.array(all_watermarked_mae_distances), 
+                    -np.array(all_original_mae_distances)
+                ])
+                
+                # Calculate ROC-AUC
+                roc_auc_mse = skmetrics.roc_auc_score(y_true, y_score_mse)
+                roc_auc_mae = skmetrics.roc_auc_score(y_true, y_score_mae)
+                roc_auc_score = roc_auc_mse  # Use MSE as primary metric
+            except Exception as e:
+                if self.rank == 0:
+                    logging.error(f"Error calculating ROC metrics for {name_str}: {str(e)}")
+                # Use fallback values
+                roc_auc_mse = 0.5
+                roc_auc_mae = 0.5
+                roc_auc_score = 0.5
+                y_true = np.array([1, 0])
+                y_score_mse = np.array([-0.4, -0.6])
+                y_score_mae = np.array([-0.4, -0.6])
             
-            # Store raw distances for later plotting
-            metrics['all_watermarked_mse_distances'] = all_watermarked_mse_distances
-            metrics['all_original_mse_distances'] = all_original_mse_distances
-            metrics['all_watermarked_mae_distances'] = all_watermarked_mae_distances
-            metrics['all_original_mae_distances'] = all_original_mae_distances
+            # Calculate metrics (without using calculate_metrics function to avoid duplication)
+            watermarked_match_rate = (watermarked_correct / total_samples) * 100
+            original_match_rate = (original_correct / total_samples) * 100
+            
+            # Calculate distance statistics
+            watermarked_mse_distance_avg = np.mean(all_watermarked_mse_distances)
+            watermarked_mse_distance_std = np.std(all_watermarked_mse_distances)
+            watermarked_mae_distance_avg = np.mean(all_watermarked_mae_distances)
+            watermarked_mae_distance_std = np.std(all_watermarked_mae_distances)
+            
+            original_mse_distance_avg = np.mean(all_original_mse_distances)
+            original_mse_distance_std = np.std(all_original_mse_distances)
+            original_mae_distance_avg = np.mean(all_original_mae_distances)
+            original_mae_distance_std = np.std(all_original_mae_distances)
+            
+            # Calculate LPIPS statistics
+            lpips_loss_avg = np.mean(all_lpips_losses)
+            lpips_loss_std = np.std(all_lpips_losses)
+            
+            # Create metrics dictionary
+            metrics = {
+                'watermarked_match_rate': watermarked_match_rate,
+                'original_match_rate': original_match_rate,
+                'watermarked_lpips_loss_avg': lpips_loss_avg,
+                'watermarked_lpips_loss_std': lpips_loss_std,
+                'watermarked_mse_distance_avg': watermarked_mse_distance_avg,
+                'watermarked_mse_distance_std': watermarked_mse_distance_std,
+                'watermarked_mae_distance_avg': watermarked_mae_distance_avg,
+                'watermarked_mae_distance_std': watermarked_mae_distance_std,
+                'original_mse_distance_avg': original_mse_distance_avg,
+                'original_mse_distance_std': original_mse_distance_std,
+                'original_mae_distance_avg': original_mae_distance_avg,
+                'original_mae_distance_std': original_mae_distance_std,
+                'roc_auc_score_mse': roc_auc_mse,
+                'roc_auc_score_mae': roc_auc_mae,
+                'roc_auc_score': roc_auc_score,
+                'num_samples_processed': total_samples,
+                # Store raw data for plotting
+                'all_watermarked_mse_distances': all_watermarked_mse_distances,
+                'all_original_mse_distances': all_original_mse_distances,
+                'all_watermarked_mae_distances': all_watermarked_mae_distances,
+                'all_original_mae_distances': all_original_mae_distances,
+                # Store ROC data
+                'roc_data': (y_true, y_score_mse, y_score_mae)
+            }
             
             return metrics
             
@@ -432,6 +495,11 @@ class WatermarkEvaluator:
     
     def _create_empty_metrics(self):
         """Create empty metrics for error cases."""
+        # Create minimal fallback ROC data
+        y_true = np.array([1, 0])
+        y_score_mse = np.array([-0.4, -0.6])
+        y_score_mae = np.array([-0.4, -0.6])
+        
         return {
             'watermarked_match_rate': 0.0,
             'original_match_rate': 0.0,
@@ -445,13 +513,42 @@ class WatermarkEvaluator:
             'original_mae_distance_std': 0.0,
             'roc_auc_score_mse': 0.5,
             'roc_auc_score_mae': 0.5,
+            'roc_auc_score': 0.5,
             'watermarked_lpips_loss_avg': 0.5,
             'watermarked_lpips_loss_std': 0.0,
             'all_watermarked_mse_distances': [0.5],
             'all_original_mse_distances': [0.5],
             'all_watermarked_mae_distances': [0.5],
-            'all_original_mae_distances': [0.5]
+            'all_original_mae_distances': [0.5],
+            'num_samples_processed': 1,
+            'roc_data': (y_true, y_score_mse, y_score_mae)
         }
+    
+    def _create_fallback_roc_data(self, metrics):
+        """Create fallback ROC data when metrics might be incomplete."""
+        try:
+            # Try to create ROC data from metrics
+            y_true = np.concatenate([
+                np.ones(len(metrics['all_watermarked_mse_distances'])), 
+                np.zeros(len(metrics['all_original_mse_distances']))
+            ])
+            
+            y_score_mse = np.concatenate([
+                -np.array(metrics['all_watermarked_mse_distances']), 
+                -np.array(metrics['all_original_mse_distances'])
+            ])
+            
+            y_score_mae = np.concatenate([
+                -np.array(metrics['all_watermarked_mae_distances']), 
+                -np.array(metrics['all_original_mae_distances'])
+            ])
+            
+            return (y_true, y_score_mse, y_score_mae)
+        except (KeyError, ValueError) as e:
+            if self.rank == 0:
+                logging.warning(f"Error creating ROC data: {str(e)}. Using fallback data.")
+            # Return fallback data
+            return (np.array([1, 0]), np.array([-0.4, -0.6]), np.array([-0.4, -0.6]))
     
     def visualize_samples(self):
         """

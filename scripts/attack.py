@@ -157,7 +157,6 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
     # Calculate the number of batches
     batch_size = config.attack.surrogate_batch_size
     num_batches = config.attack.surrogate_num_samples // batch_size
-    print(f"[DEBUG] Training setup: batch_size={batch_size}, surrogate_num_samples={config.attack.surrogate_num_samples}, num_batches={num_batches}")
     
     if rank == 0:
         logging.info(f"Training {config.attack.num_surrogate_models} surrogate decoders...")
@@ -210,9 +209,7 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
         
         # Train the surrogate decoder
         surrogate_decoder.train()
-        print(f"[DEBUG] Training surrogate decoder {model_idx+1} for {config.attack.surrogate_epochs} epochs")
         for epoch in range(config.attack.surrogate_epochs):
-            print(f"[DEBUG] Starting epoch {epoch+1}/{config.attack.surrogate_epochs}")
             total_loss = 0.0
             correct = 0
             total = 0
@@ -359,6 +356,7 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         surrogate_classifications = []
         for surrogate in surrogate_decoders:
             output = surrogate(attacked_images)
+            # Calculate percentage of images classified as watermarked (class 1)
             pred = (torch.sigmoid(output) > 0.5).float().mean().item() * 100.0
             surrogate_classifications.append(pred)
         
@@ -398,9 +396,6 @@ def run_attack(config, local_rank, rank, world_size, device):
     Returns:
         dict: Attack results
     """
-    # Add debug logging at start of attack
-    print(f"[DEBUG] Starting attack on rank {rank} with num_samples = {config.attack.num_samples}")
-    
     # Parse latent indices for partial vector
     if isinstance(config.model.selected_indices, str):
         latent_indices = [int(idx) for idx in config.model.selected_indices.split(',')]
@@ -589,7 +584,7 @@ def run_attack(config, local_rank, rank, world_size, device):
         logging.info(f"Attack success rate: {attack_metrics['final_match_rate']:.2f}%")
         
         for i, rate in enumerate(attack_metrics['surrogate_classifications']):
-            logging.info(f"Surrogate decoder {i+1} classification rate: {rate:.2f}%")
+            logging.info(f"Surrogate decoder {i+1} watermark fooling rate: {rate:.2f}%")
         
         logging.info(f"L2 distance between original and attacked images: {attack_metrics['l2_distance']:.4f}")
         logging.info(f"LPIPS perceptual distance: {attack_metrics['perceptual_distance']:.4f}")
@@ -604,7 +599,7 @@ def run_attack(config, local_rank, rank, world_size, device):
             f.write(f"Attack success rate: {attack_metrics['final_match_rate']:.2f}%\n")
             
             for i, rate in enumerate(attack_metrics['surrogate_classifications']):
-                f.write(f"Surrogate decoder {i+1} classification rate: {rate:.2f}%\n")
+                f.write(f"Surrogate decoder {i+1} watermark fooling rate: {rate:.2f}%\n")
             
             f.write(f"L2 distance between original and attacked images: {attack_metrics['l2_distance']:.4f}\n")
             f.write(f"LPIPS perceptual distance: {attack_metrics['perceptual_distance']:.4f}\n")
@@ -615,16 +610,13 @@ def run_attack(config, local_rank, rank, world_size, device):
 def main():
     """Main entry point for attack."""
     args = parse_args()
-    print(f"[DEBUG] Args - surrogate_epochs = {args.surrogate_epochs}")
     
     # Setup distributed training first
     local_rank, rank, world_size, device = setup_distributed()
     
     # Load default configuration and update with args
     config = get_default_config()
-    print(f"[DEBUG] Before update - num_samples = {config.attack.num_samples}, surrogate_epochs = {config.attack.surrogate_epochs}")
     config.update_from_args(args, mode='attack')  # Explicitly specify we're in attack mode
-    print(f"[DEBUG] After update - num_samples = {config.attack.num_samples}, surrogate_epochs = {config.attack.surrogate_epochs}")
     
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)

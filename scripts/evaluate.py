@@ -71,6 +71,8 @@ def save_image_grid(images, filename, nrow=None, scale=True):
         filename (str): Output filename
         nrow (int): Number of images per row
         scale (bool): Whether to scale pixel values to [0, 255]
+                     If True: assumes input is in [-1,1] range
+                     If False: assumes input is in [0,1] range
     """
     if nrow is None:
         nrow = int(np.sqrt(images.shape[0]))
@@ -80,7 +82,11 @@ def save_image_grid(images, filename, nrow=None, scale=True):
     
     # Scale to [0, 255] if needed
     if scale:
+        # Scale from [-1,1] to [0,255]
         images_np = ((images_np + 1) * 127.5).clip(0, 255).astype(np.uint8)
+    else:
+        # Scale from [0,1] to [0,255]
+        images_np = (images_np * 255).clip(0, 255).astype(np.uint8)
     
     # Create grid
     h, w = images_np.shape[1:3]

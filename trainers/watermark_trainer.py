@@ -186,12 +186,26 @@ class WatermarkTrainer:
 
         # Predict key from watermarked image using the decoder (raw logits)
         pred_key_logits = self.decoder(x_water)
+        
+        # Get predicted probabilities (before thresholding)
+        pred_key_probs = torch.sigmoid(pred_key_logits)
 
         # Convert predicted logits to binary for match rate calculation
-        pred_key_binary = (torch.sigmoid(pred_key_logits) > 0.5).float()
+        pred_key_binary = (pred_key_probs > 0.5).float()
         # Calculate exact match rate (percentage of samples where all bits match)
         key_matches = (pred_key_binary == true_key).all(dim=1).float().mean().item()
         match_rate = key_matches * 100  # Convert to percentage
+        
+        # Calculate distance metrics between true key and predicted probabilities
+        # Mean squared error (MSE) distance - range [0, 1]
+        mse_distance = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1)
+        mse_distance_mean = mse_distance.mean().item()
+        mse_distance_std = mse_distance.std().item()
+        
+        # Mean absolute error (MAE) distance - range [0, 1]
+        mae_distance = torch.mean(torch.abs(pred_key_probs - true_key), dim=1)
+        mae_distance_mean = mae_distance.mean().item()
+        mae_distance_std = mae_distance.std().item()
 
         # Compute key loss (BCE with logits)
         key_loss = self.bce_loss_fn(pred_key_logits, true_key)
@@ -207,7 +221,11 @@ class WatermarkTrainer:
             'key_loss': key_loss.item(),
             'lpips_loss': lpips_loss.item(),
             'total_loss': total_loss.item(),
-            'match_rate': match_rate
+            'match_rate': match_rate,
+            'mse_distance_mean': mse_distance_mean,
+            'mse_distance_std': mse_distance_std,
+            'mae_distance_mean': mae_distance_mean,
+            'mae_distance_std': mae_distance_std
         }
     
     def load_checkpoint(self, checkpoint_path: str) -> None:
@@ -265,6 +283,8 @@ class WatermarkTrainer:
                         f"Iteration [{iteration}/{self.config.training.total_iterations}] "
                         f"Key Loss: {metrics['key_loss']:.4f}, LPIPS Loss: {metrics['lpips_loss']:.4f}, "
                         f"Total Loss: {metrics['total_loss']:.4f}, Match Rate: {metrics['match_rate']:.2f}%, "
+                        f"MSE Dist: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}, "
+                        f"MAE Dist: {metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f}, "
                         f"Time: {elapsed:.2f}s"
                     )
                 

@@ -12,6 +12,7 @@ import torch
 import matplotlib.pyplot as plt
 from PIL import Image
 import lpips
+from sklearn import metrics as skmetrics  # Import scikit-learn metrics for ROC-AUC
 
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -236,12 +237,27 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
         'original_match_rate': 0.0,
         'watermarked_lpips_loss_avg': 0.0,
         'watermarked_lpips_loss_std': 0.0,
+        'watermarked_mse_distance_avg': 0.0,
+        'watermarked_mse_distance_std': 0.0,
+        'watermarked_mae_distance_avg': 0.0,
+        'watermarked_mae_distance_std': 0.0,
+        'original_mse_distance_avg': 0.0,
+        'original_mse_distance_std': 0.0,
+        'original_mae_distance_avg': 0.0,
+        'original_mae_distance_std': 0.0,
+        'roc_auc_score': 0.0,
         'num_samples_processed': 0
     }
     
     # Initialize LPIPS loss with the same network as in training
     lpips_loss_fn = lpips.LPIPS(net='alex').to(device)
     all_lpips_losses = []
+    
+    # For ROC-AUC calculation
+    all_watermarked_mse_distances = []
+    all_original_mse_distances = []
+    all_watermarked_mae_distances = []
+    all_original_mae_distances = []
     
     # Batch evaluation
     if evaluation_mode in ['batch', 'both']:
@@ -286,11 +302,27 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
                 
                 # Compute key from watermarked image
                 pred_key_water_logits = decoder(x_water)
-                pred_key_water = (torch.sigmoid(pred_key_water_logits) > 0.5).float()
+                pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
+                pred_key_water = (pred_key_water_probs > 0.5).float()
                 
                 # Compute key from original image
                 pred_key_orig_logits = decoder(x_orig)
-                pred_key_orig = (torch.sigmoid(pred_key_orig_logits) > 0.5).float()
+                pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
+                pred_key_orig = (pred_key_orig_probs > 0.5).float()
+                
+                # Calculate distance metrics for watermarked images
+                watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
+                watermarked_mae_distance = torch.mean(torch.abs(pred_key_water_probs - true_key), dim=1)
+                
+                # Calculate distance metrics for original images
+                original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
+                original_mae_distance = torch.mean(torch.abs(pred_key_orig_probs - true_key), dim=1)
+                
+                # Store distances for ROC-AUC calculation
+                all_watermarked_mse_distances.extend(watermarked_mse_distance.cpu().numpy())
+                all_original_mse_distances.extend(original_mse_distance.cpu().numpy())
+                all_watermarked_mae_distances.extend(watermarked_mae_distance.cpu().numpy())
+                all_original_mae_distances.extend(original_mae_distance.cpu().numpy())
                 
                 # Calculate match rates (all bits must match)
                 water_matches = (pred_key_water == true_key).all(dim=1).sum().item()
@@ -310,16 +342,128 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
         lpips_loss_avg = np.mean(all_lpips_losses)
         lpips_loss_std = np.std(all_lpips_losses)
         
-        metrics['watermarked_match_rate'] = watermarked_match_rate
-        metrics['original_match_rate'] = original_match_rate
-        metrics['watermarked_lpips_loss_avg'] = lpips_loss_avg
-        metrics['watermarked_lpips_loss_std'] = lpips_loss_std
-        metrics['num_samples_processed'] = total_samples
+        # Calculate distance statistics
+        watermarked_mse_distance_avg = np.mean(all_watermarked_mse_distances)
+        watermarked_mse_distance_std = np.std(all_watermarked_mse_distances)
+        watermarked_mae_distance_avg = np.mean(all_watermarked_mae_distances)
+        watermarked_mae_distance_std = np.std(all_watermarked_mae_distances)
         
+        original_mse_distance_avg = np.mean(all_original_mse_distances)
+        original_mse_distance_std = np.std(all_original_mse_distances)
+        original_mae_distance_avg = np.mean(all_original_mae_distances)
+        original_mae_distance_std = np.std(all_original_mae_distances)
+        
+        # Calculate ROC-AUC scores
+        # For watermarked vs original detection based on distance:
+        # Lower distance is better for watermarked images, so we need to negate the distances
+        # 1 = watermarked (positive class), 0 = original (negative class)
+        y_true = np.concatenate([
+            np.ones(len(all_watermarked_mse_distances)), 
+            np.zeros(len(all_original_mse_distances))
+        ])
+        
+        # Negate distances since lower is better for watermarked images
+        # (ROC-AUC expects higher scores for positive class)
+        y_score_mse = np.concatenate([
+            -np.array(all_watermarked_mse_distances), 
+            -np.array(all_original_mse_distances)
+        ])
+        
+        y_score_mae = np.concatenate([
+            -np.array(all_watermarked_mae_distances), 
+            -np.array(all_original_mae_distances)
+        ])
+        
+        # Calculate ROC-AUC
+        roc_auc_mse = skmetrics.roc_auc_score(y_true, y_score_mse)
+        roc_auc_mae = skmetrics.roc_auc_score(y_true, y_score_mae)
+        
+        # Use MSE as the primary ROC-AUC metric
+        roc_auc_score = roc_auc_mse
+        
+        # Update metrics dictionary
+        metrics.update({
+            'watermarked_match_rate': watermarked_match_rate,
+            'original_match_rate': original_match_rate,
+            'watermarked_lpips_loss_avg': lpips_loss_avg,
+            'watermarked_lpips_loss_std': lpips_loss_std,
+            'watermarked_mse_distance_avg': watermarked_mse_distance_avg,
+            'watermarked_mse_distance_std': watermarked_mse_distance_std,
+            'watermarked_mae_distance_avg': watermarked_mae_distance_avg,
+            'watermarked_mae_distance_std': watermarked_mae_distance_std,
+            'original_mse_distance_avg': original_mse_distance_avg,
+            'original_mse_distance_std': original_mse_distance_std,
+            'original_mae_distance_avg': original_mae_distance_avg,
+            'original_mae_distance_std': original_mae_distance_std,
+            'roc_auc_score_mse': roc_auc_mse,
+            'roc_auc_score_mae': roc_auc_mae,
+            'roc_auc_score': roc_auc_score,
+            'num_samples_processed': total_samples
+        })
+        
+        # Generate plots and visualizations - only on rank 0
         if rank == 0:
             logging.info(f"Watermarked match rate: {watermarked_match_rate:.2f}%")
             logging.info(f"Original match rate: {original_match_rate:.2f}%")
             logging.info(f"LPIPS loss avg: {lpips_loss_avg:.6f}, std: {lpips_loss_std:.6f}")
+            logging.info(f"Watermarked MSE distance: {watermarked_mse_distance_avg:.6f}±{watermarked_mse_distance_std:.6f}")
+            logging.info(f"Original MSE distance: {original_mse_distance_avg:.6f}±{original_mse_distance_std:.6f}")
+            logging.info(f"Watermarked MAE distance: {watermarked_mae_distance_avg:.6f}±{watermarked_mae_distance_std:.6f}")
+            logging.info(f"Original MAE distance: {original_mae_distance_avg:.6f}±{original_mae_distance_std:.6f}")
+            logging.info(f"ROC-AUC score (MSE): {roc_auc_mse:.6f}")
+            logging.info(f"ROC-AUC score (MAE): {roc_auc_mae:.6f}")
+            
+            # Create plots directory
+            plots_dir = os.path.join(config.output_dir, "plots")
+            os.makedirs(plots_dir, exist_ok=True)
+            
+            # Plot ROC curves
+            plt.figure(figsize=(10, 8))
+            
+            # ROC curve for MSE distance
+            fpr_mse, tpr_mse, _ = skmetrics.roc_curve(y_true, y_score_mse)
+            plt.plot(fpr_mse, tpr_mse, label=f'MSE Distance (AUC = {roc_auc_mse:.4f})')
+            
+            # ROC curve for MAE distance
+            fpr_mae, tpr_mae, _ = skmetrics.roc_curve(y_true, y_score_mae)
+            plt.plot(fpr_mae, tpr_mae, label=f'MAE Distance (AUC = {roc_auc_mae:.4f})')
+            
+            # Plot diagonal line
+            plt.plot([0, 1], [0, 1], 'k--')
+            plt.xlabel('False Positive Rate')
+            plt.ylabel('True Positive Rate')
+            plt.title('ROC Curve for Watermark Detection')
+            plt.legend(loc='lower right')
+            plt.grid(True)
+            plt.savefig(os.path.join(plots_dir, 'roc_curve.png'), dpi=300)
+            plt.close()
+            
+            # Plot histograms of distances
+            plt.figure(figsize=(12, 10))
+            
+            # MSE distance histogram
+            plt.subplot(2, 1, 1)
+            plt.hist(all_watermarked_mse_distances, bins=50, alpha=0.5, label='Watermarked')
+            plt.hist(all_original_mse_distances, bins=50, alpha=0.5, label='Original')
+            plt.xlabel('MSE Distance')
+            plt.ylabel('Count')
+            plt.title('Histogram of MSE Distances')
+            plt.legend()
+            plt.grid(True)
+            
+            # MAE distance histogram
+            plt.subplot(2, 1, 2)
+            plt.hist(all_watermarked_mae_distances, bins=50, alpha=0.5, label='Watermarked')
+            plt.hist(all_original_mae_distances, bins=50, alpha=0.5, label='Original')
+            plt.xlabel('MAE Distance')
+            plt.ylabel('Count')
+            plt.title('Histogram of MAE Distances')
+            plt.legend()
+            plt.grid(True)
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(plots_dir, 'distance_histograms.png'), dpi=300)
+            plt.close()
     
     # Visual evaluation - only perform on rank 0
     if evaluation_mode in ['visual', 'both'] and rank == 0:
@@ -352,9 +496,21 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
             w_partial_vis = w_water_single_vis[:, latent_indices]
             true_keys_vis = key_mapper(w_partial_vis)
             
-            # Predict keys for both original and watermarked images
-            pred_keys_water_vis = torch.sigmoid(decoder(x_water_vis)) > 0.5
-            pred_keys_orig_vis = torch.sigmoid(decoder(x_orig_vis)) > 0.5
+            # Predict keys and probabilities for both original and watermarked images
+            pred_keys_water_logits_vis = decoder(x_water_vis)
+            pred_keys_water_probs_vis = torch.sigmoid(pred_keys_water_logits_vis)
+            pred_keys_water_vis = pred_keys_water_probs_vis > 0.5
+            
+            pred_keys_orig_logits_vis = decoder(x_orig_vis)
+            pred_keys_orig_probs_vis = torch.sigmoid(pred_keys_orig_logits_vis)
+            pred_keys_orig_vis = pred_keys_orig_probs_vis > 0.5
+            
+            # Calculate distance metrics for each sample
+            watermarked_mse_distances_vis = torch.mean(torch.pow(pred_keys_water_probs_vis - true_keys_vis, 2), dim=1)
+            watermarked_mae_distances_vis = torch.mean(torch.abs(pred_keys_water_probs_vis - true_keys_vis), dim=1)
+            
+            original_mse_distances_vis = torch.mean(torch.pow(pred_keys_orig_probs_vis - true_keys_vis, 2), dim=1)
+            original_mae_distances_vis = torch.mean(torch.abs(pred_keys_orig_probs_vis - true_keys_vis), dim=1)
             
             # Save key comparison to log
             for i in range(config.evaluate.num_vis_samples):
@@ -364,6 +520,10 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
                 logging.info(f"  Original pred: {pred_keys_orig_vis[i].cpu().numpy().astype(int)}")
                 logging.info(f"  Watermarked match: {(pred_keys_water_vis[i] == true_keys_vis[i]).all().item()}")
                 logging.info(f"  Original match: {(pred_keys_orig_vis[i] == true_keys_vis[i]).all().item()}")
+                logging.info(f"  Watermarked MSE distance: {watermarked_mse_distances_vis[i].item():.6f}")
+                logging.info(f"  Original MSE distance: {original_mse_distances_vis[i].item():.6f}")
+                logging.info(f"  Watermarked MAE distance: {watermarked_mae_distances_vis[i].item():.6f}")
+                logging.info(f"  Original MAE distance: {original_mae_distances_vis[i].item():.6f}")
     
     return metrics
 

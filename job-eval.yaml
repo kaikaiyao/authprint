@@ -75,7 +75,7 @@ spec:
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
                       scripts/evaluate.py \
-                      --checkpoint_path "/nfs-user-029/data/new/key_length_8/checkpoint_iter50000.pth" \
+                      --checkpoint_path "/nfs-user-029/data/new/key_length_8/checkpoint_iter200000.pth" \
                       --evaluation_mode "both" \
                       --num_samples 1000 \
                       --num_vis_samples 12 \

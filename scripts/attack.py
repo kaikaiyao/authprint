@@ -157,6 +157,7 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
     # Calculate the number of batches
     batch_size = config.attack.surrogate_batch_size
     num_batches = config.attack.surrogate_num_samples // batch_size
+    print(f"[DEBUG] Training setup: batch_size={batch_size}, surrogate_num_samples={config.attack.surrogate_num_samples}, num_batches={num_batches}")
     
     if rank == 0:
         logging.info(f"Training {config.attack.num_surrogate_models} surrogate decoders...")
@@ -209,13 +210,15 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
         
         # Train the surrogate decoder
         surrogate_decoder.train()
+        print(f"[DEBUG] Training surrogate decoder {model_idx+1} for {config.attack.surrogate_epochs} epochs")
         for epoch in range(config.attack.surrogate_epochs):
+            print(f"[DEBUG] Starting epoch {epoch+1}/{config.attack.surrogate_epochs}")
             total_loss = 0.0
             correct = 0
             total = 0
             
             # Only use tqdm on rank 0
-            iterator = tqdm(range(num_batches)) if rank == 0 else range(num_batches)
+            iterator = tqdm(range(num_batches), desc=f"Epoch {epoch+1}/{config.attack.surrogate_epochs}") if rank == 0 else range(num_batches)
             for _ in iterator:
                 # Generate a batch
                 x, labels = generate_batch()
@@ -246,7 +249,7 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             accuracy = 100.0 * correct / total
             
             # Log metrics - only on rank 0
-            if rank == 0 and (epoch + 1) % config.attack.log_interval == 0:
+            if rank == 0:
                 logging.info(f"Surrogate {model_idx+1} - Epoch {epoch+1}/{config.attack.surrogate_epochs}, "
                              f"Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
         

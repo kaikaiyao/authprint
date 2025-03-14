@@ -80,7 +80,7 @@ spec:
                       --pgd_alpha 0.1 \
                       --pgd_steps 200 \
                       --pgd_epsilon 1.0 \
-                      --num_surrogate_models 1 \
+                      --num_surrogate_models 10 \
                       --surrogate_epochs 1 \
                       --surrogate_num_samples 10000 \
                       --key_length 8 \

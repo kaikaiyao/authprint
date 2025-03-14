@@ -395,6 +395,9 @@ def run_attack(config, local_rank, rank, world_size, device):
     Returns:
         dict: Attack results
     """
+    # Add debug logging at start of attack
+    print(f"[DEBUG] Starting attack on rank {rank} with num_samples = {config.attack.num_samples}")
+    
     # Parse latent indices for partial vector
     if isinstance(config.model.selected_indices, str):
         latent_indices = [int(idx) for idx in config.model.selected_indices.split(',')]
@@ -619,6 +622,9 @@ def main():
     
     # Setup distributed training
     local_rank, rank, world_size, device = setup_distributed()
+    
+    # Add debug logging for all ranks
+    print(f"[DEBUG] Rank {rank}: num_samples = {config.attack.num_samples}")
     
     # Setup logging - only on rank 0
     if rank == 0:

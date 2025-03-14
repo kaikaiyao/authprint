@@ -327,14 +327,14 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
             # Target is 1 (watermarked) for all images
             target = torch.ones(batch_size, 1, device=device)
             
-            # Calculate BCE loss (we'll minimize the negative to maximize the original loss)
+            # Calculate BCE loss
             surrogate_loss += F.binary_cross_entropy_with_logits(outputs, target, reduction='mean')
         
         # Average the loss across all surrogate decoders
         surrogate_loss /= len(surrogate_decoders)
         
-        # Minimize the negative loss to maximize the original loss
-        (-surrogate_loss).backward()
+        # Minimize the original loss
+        surrogate_loss.backward()
         
         # Update the attacked images
         optimizer.step()

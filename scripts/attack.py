@@ -320,8 +320,8 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         # Calculate average loss from all surrogate decoders
         surrogate_loss = 0
         for surrogate in surrogate_decoders:
-            # We want to maximize the "watermarked" classification for original images
-            # This means minimizing the negative loss
+            # We want to maximize the "watermarked" classification (labeled 1) for original images (labeled 0)
+            # This means minimizing the loss between "outputs" and "target"
             outputs = surrogate(attacked_images)
             
             # Target is 1 (watermarked) for all images
@@ -333,7 +333,7 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         # Average the loss across all surrogate decoders
         surrogate_loss /= len(surrogate_decoders)
         
-        # Minimize the original loss
+        # Minimize the loss
         surrogate_loss.backward()
         
         # Update the attacked images

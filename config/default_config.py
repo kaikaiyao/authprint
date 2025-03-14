@@ -53,6 +53,26 @@ class EvaluateConfig:
     num_samples: int = 1000
     num_vis_samples: int = 10
     evaluation_mode: str = 'both'
+    
+    # Negative sample evaluation options
+    evaluate_neg_samples: bool = True
+    
+    # Pre-trained model options
+    evaluate_pretrained: bool = True
+    evaluate_ffhq1k: bool = True
+    evaluate_ffhq30k: bool = True
+    evaluate_ffhq70k_bcr: bool = True
+    evaluate_ffhq70k_noaug: bool = True
+    
+    # Image transformation options
+    evaluate_transforms: bool = True
+    evaluate_truncation: bool = True
+    truncation_psi: float = 2.0
+    evaluate_quantization: bool = True
+    evaluate_downsample: bool = True
+    downsample_size: int = 128
+    evaluate_jpeg: bool = True
+    jpeg_quality: int = 55
 
 
 @dataclass
@@ -128,8 +148,24 @@ class Config:
         if mode == 'attack' or ('pgd_alpha' in args_dict):
             self._update_subconfig(self.attack, args_dict)
         
-        if mode == 'evaluate' or ('evaluation_mode' in args_dict):
+        # Handle evaluate mode with special case for negative samples options
+        evaluate_mode = (mode == 'evaluate' or 'evaluation_mode' in args_dict)
+        if evaluate_mode:
+            # Update basic evaluate config
             self._update_subconfig(self.evaluate, args_dict)
+            
+            # Explicitly check for negative sample evaluation options
+            evaluate_options = [
+                'evaluate_neg_samples', 'evaluate_pretrained', 
+                'evaluate_ffhq1k', 'evaluate_ffhq30k', 'evaluate_ffhq70k_bcr', 'evaluate_ffhq70k_noaug',
+                'evaluate_transforms', 'evaluate_truncation', 'truncation_psi',
+                'evaluate_quantization', 'evaluate_downsample', 'downsample_size',
+                'evaluate_jpeg', 'jpeg_quality'
+            ]
+            
+            for option in evaluate_options:
+                if option in args_dict:
+                    setattr(self.evaluate, option, args_dict[option])
         
         # These are shared across modes
         self._update_subconfig(self.decoder, args_dict)

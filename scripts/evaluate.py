@@ -84,8 +84,17 @@ def parse_args():
     parser.add_argument("--jpeg_quality", type=int, default=55,
                         help="JPEG compression quality (0-100)")
     
+    # Disable flags for convenience
+    parser.add_argument("--disable_all_neg_samples", action="store_true", default=False,
+                        help="Disable all negative sample evaluations (overrides individual settings)")
+    
     # Parse args and handle boolean flags properly
     args = parser.parse_args()
+    
+    # Handle disable flag
+    if args.disable_all_neg_samples:
+        args.evaluate_neg_samples = False
+    
     return args
 
 
@@ -107,6 +116,25 @@ def main():
         
         # Log configuration after it's been updated
         logging.info(f"Configuration:\n{config}")
+        
+        # Log explicit evaluation options
+        logging.info("Evaluation Options:")
+        logging.info(f"  Evaluate negative samples: {config.evaluate.evaluate_neg_samples}")
+        if config.evaluate.evaluate_neg_samples:
+            logging.info(f"  Evaluate pretrained models: {config.evaluate.evaluate_pretrained}")
+            if config.evaluate.evaluate_pretrained:
+                logging.info(f"    - FFHQ1K: {config.evaluate.evaluate_ffhq1k}")
+                logging.info(f"    - FFHQ30K: {config.evaluate.evaluate_ffhq30k}")
+                logging.info(f"    - FFHQ70K-BCR: {config.evaluate.evaluate_ffhq70k_bcr}")
+                logging.info(f"    - FFHQ70K-NOAUG: {config.evaluate.evaluate_ffhq70k_noaug}")
+            
+            logging.info(f"  Evaluate transforms: {config.evaluate.evaluate_transforms}")
+            if config.evaluate.evaluate_transforms:
+                logging.info(f"    - Truncation (psi={config.evaluate.truncation_psi}): {config.evaluate.evaluate_truncation}")
+                logging.info(f"    - Quantization: {config.evaluate.evaluate_quantization}")
+                logging.info(f"    - Downsample (size={config.evaluate.downsample_size}): {config.evaluate.evaluate_downsample}")
+                logging.info(f"    - JPEG (quality={config.evaluate.jpeg_quality}): {config.evaluate.evaluate_jpeg}")
+                
         logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
     
     try:

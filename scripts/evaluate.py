@@ -372,19 +372,19 @@ def main():
     """Main entry point for evaluation."""
     args = parse_args()
     
-    # Load default configuration and update with args
-    config = get_default_config()
-    config.update_from_args(args)
-    
-    # Setup distributed training
+    # Setup distributed training first
     local_rank, rank, world_size, device = setup_distributed()
     
-    # Setup logging - only on rank 0
+    # Load default configuration and update with args
+    config = get_default_config()
+    config.update_from_args(args, mode='evaluate')
+    
+    # Create output directory and setup logging
     if rank == 0:
         os.makedirs(config.output_dir, exist_ok=True)
         setup_logging(config.output_dir, rank)
         
-        # Log configuration
+        # Log configuration after it's been updated
         logging.info(f"Configuration:\n{config}")
         logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
     

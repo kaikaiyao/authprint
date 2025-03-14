@@ -57,12 +57,12 @@ def main():
     """Main entry point for training."""
     args = parse_args()
     
+    # Setup distributed training first
+    local_rank, rank, world_size, device = setup_distributed()
+    
     # Load default configuration and update with args
     config = get_default_config()
-    config.update_from_args(args)
-    
-    # Setup distributed training
-    local_rank, rank, world_size, device = setup_distributed()
+    config.update_from_args(args, mode='train')
     
     # Setup logging
     setup_logging(config.output_dir, rank)

@@ -619,7 +619,7 @@ def main():
     # Load default configuration and update with args
     config = get_default_config()
     print(f"[DEBUG] Before update - num_samples = {config.attack.num_samples}")
-    config.update_from_args(args)
+    config.update_from_args(args, mode='attack')  # Explicitly specify we're in attack mode
     print(f"[DEBUG] After update - num_samples = {config.attack.num_samples}")
     
     # Create output directory

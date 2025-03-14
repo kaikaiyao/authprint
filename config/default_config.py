@@ -98,25 +98,42 @@ class Config:
     
     # Meta configuration
     seed: Optional[int] = None
+
+    def _update_subconfig(self, config_obj, args_dict):
+        """Update a specific sub-configuration with matching arguments."""
+        for key, value in args_dict.items():
+            if hasattr(config_obj, key):
+                setattr(config_obj, key, value)
     
-    def update_from_args(self, args):
-        """Update config from command line arguments."""
-        for key, value in vars(args).items():
-            # First check attack config since we're in attack mode
-            if hasattr(self.attack, key):
-                setattr(self.attack, key, value)
-            elif hasattr(self, key):
-                setattr(self, key, value)
-            elif hasattr(self.model, key):
-                setattr(self.model, key, value)
-            elif hasattr(self.training, key):
-                setattr(self.training, key, value)
-            elif hasattr(self.decoder, key):
-                setattr(self.decoder, key, value)
-            elif hasattr(self.distributed, key):
-                setattr(self.distributed, key, value)
-            elif hasattr(self.evaluate, key):
-                setattr(self.evaluate, key, value)
+    def update_from_args(self, args, mode=None):
+        """Update config from command line arguments.
+        
+        Args:
+            args: Parsed command line arguments
+            mode: The mode we're running in ('train', 'attack', 'evaluate'). 
+                 If None, will try to infer from the arguments.
+        """
+        args_dict = vars(args)
+        
+        # Update main config first
+        self._update_subconfig(self, args_dict)
+        
+        # Always update model config as it's shared across modes
+        self._update_subconfig(self.model, args_dict)
+        
+        # Update specific configs based on mode
+        if mode == 'train' or ('total_iterations' in args_dict):
+            self._update_subconfig(self.training, args_dict)
+        
+        if mode == 'attack' or ('pgd_alpha' in args_dict):
+            self._update_subconfig(self.attack, args_dict)
+        
+        if mode == 'evaluate' or ('evaluation_mode' in args_dict):
+            self._update_subconfig(self.evaluate, args_dict)
+        
+        # These are shared across modes
+        self._update_subconfig(self.decoder, args_dict)
+        self._update_subconfig(self.distributed, args_dict)
 
 
 def get_default_config() -> Config:

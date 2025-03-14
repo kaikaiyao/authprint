@@ -613,6 +613,9 @@ def main():
     """Main entry point for attack."""
     args = parse_args()
     
+    # Setup distributed training first
+    local_rank, rank, world_size, device = setup_distributed()
+    
     # Load default configuration and update with args
     config = get_default_config()
     config.update_from_args(args)
@@ -620,17 +623,11 @@ def main():
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)
     
-    # Setup distributed training
-    local_rank, rank, world_size, device = setup_distributed()
-    
-    # Add debug logging for all ranks
-    print(f"[DEBUG] Rank {rank}: num_samples = {config.attack.num_samples}")
-    
     # Setup logging - only on rank 0
     if rank == 0:
         setup_logging(config.output_dir, rank)
         
-        # Log configuration
+        # Log configuration after it's been updated
         logging.info(f"Configuration:\n{config}")
         logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
     

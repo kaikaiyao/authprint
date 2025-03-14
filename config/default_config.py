@@ -102,7 +102,10 @@ class Config:
     def update_from_args(self, args):
         """Update config from command line arguments."""
         for key, value in vars(args).items():
-            if hasattr(self, key):
+            # First check attack config since we're in attack mode
+            if hasattr(self.attack, key):
+                setattr(self.attack, key, value)
+            elif hasattr(self, key):
                 setattr(self, key, value)
             elif hasattr(self.model, key):
                 setattr(self.model, key, value)
@@ -114,8 +117,6 @@ class Config:
                 setattr(self.distributed, key, value)
             elif hasattr(self.evaluate, key):
                 setattr(self.evaluate, key, value)
-            elif hasattr(self.attack, key):
-                setattr(self.attack, key, value)
 
 
 def get_default_config() -> Config:

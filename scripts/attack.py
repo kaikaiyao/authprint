@@ -618,7 +618,9 @@ def main():
     
     # Load default configuration and update with args
     config = get_default_config()
+    print(f"[DEBUG] Before update - num_samples = {config.attack.num_samples}")
     config.update_from_args(args)
+    print(f"[DEBUG] After update - num_samples = {config.attack.num_samples}")
     
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)

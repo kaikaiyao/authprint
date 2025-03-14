@@ -11,6 +11,7 @@ from tqdm import tqdm
 import torch
 import matplotlib.pyplot as plt
 from PIL import Image
+import lpips
 
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -232,8 +233,8 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
         'num_samples_processed': 0
     }
     
-    # Initialize LPIPS loss
-    lpips_loss_fn = torch.nn.functional.mse_loss  # Use MSE as a simpler alternative to LPIPS
+    # Initialize LPIPS loss with the same network as in training
+    lpips_loss_fn = lpips.LPIPS(net='alex').to(device)
     all_lpips_losses = []
     
     # Batch evaluation
@@ -293,9 +294,9 @@ def evaluate_watermark(config, local_rank, rank, world_size, device, evaluation_
                 original_correct += orig_matches
                 total_samples += current_batch_size
                 
-                # Calculate LPIPS (using MSE as proxy)
-                lpips_losses = lpips_loss_fn(x_water, x_orig, reduction='none').mean(dim=[1, 2, 3])
-                all_lpips_losses.extend(lpips_losses.cpu().numpy())
+                # Calculate LPIPS loss between original and watermarked images
+                lpips_losses = lpips_loss_fn(x_orig, x_water).squeeze().cpu().numpy()
+                all_lpips_losses.extend(lpips_losses)
         
         # Calculate final metrics
         watermarked_match_rate = (watermarked_correct / total_samples) * 100

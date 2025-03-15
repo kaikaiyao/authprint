@@ -19,6 +19,11 @@ class ModelConfig:
     selected_indices: List[int] = field(default_factory=lambda: list(range(32)))
     key_mapper_seed: Optional[int] = None  # Specific seed for KeyMapper initialization
     
+    # Image-based watermarking configuration
+    use_image_pixels: bool = False  # Whether to use image pixels instead of latent vectors
+    image_pixel_set_seed: int = 42  # Seed for selecting random pixels
+    image_pixel_count: int = 8192  # Number of pixels to select from the image
+
 
 @dataclass
 class TrainingConfig:

@@ -3,6 +3,7 @@ Trainer for StyleGAN watermarking.
 """
 import logging
 import time
+import numpy as np
 from typing import Dict, List, Optional, Tuple, Union
 
 import lpips
@@ -63,13 +64,22 @@ class WatermarkTrainer:
         self.global_step = 0
         self.start_iteration = 1  # Track starting iteration for resuming
         
-        # Parse latent indices for partial vector
-        if isinstance(self.config.model.selected_indices, str):
-            self.latent_indices = [int(idx) for idx in self.config.model.selected_indices.split(',')]
-        else:
-            self.latent_indices = self.config.model.selected_indices
+        # Handle selected indices based on the approach
+        self.use_image_pixels = self.config.model.use_image_pixels
         
-        logging.info(f"Using latent partial indices: {self.latent_indices}")
+        if self.use_image_pixels:
+            # For image-based approach, we'll generate pixel indices later
+            self.image_pixel_indices = None
+            self.image_pixel_count = self.config.model.image_pixel_count
+            self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
+            logging.info(f"Using image-based approach with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
+        else:
+            # For latent-based approach (original method)
+            if isinstance(self.config.model.selected_indices, str):
+                self.latent_indices = [int(idx) for idx in self.config.model.selected_indices.split(',')]
+            else:
+                self.latent_indices = self.config.model.selected_indices
+            logging.info(f"Using latent partial indices: {self.latent_indices}")
     
     def setup_models(self) -> None:
         """
@@ -108,9 +118,16 @@ class WatermarkTrainer:
         if self.world_size > 1:
             self.decoder = DDP(self.decoder, device_ids=[self.local_rank])
         
-        # Initialize key mapper
+        # Initialize key mapper based on the approach
+        if self.use_image_pixels:
+            # Generate pixel indices if using image-based approach
+            self._generate_pixel_indices()
+            input_dim = self.image_pixel_count  # Number of selected pixels
+        else:
+            input_dim = len(self.latent_indices)  # Number of selected latent dimensions
+            
         self.key_mapper = KeyMapper(
-            input_dim=len(self.latent_indices),
+            input_dim=input_dim,
             output_dim=self.config.model.key_length,
             seed=self.config.model.key_mapper_seed
         ).to(self.device)
@@ -124,18 +141,64 @@ class WatermarkTrainer:
             lr=self.config.training.lr
         )
     
+    def _generate_pixel_indices(self) -> None:
+        """
+        Generate random pixel indices for image-based approach.
+        """
+        # Set seed for reproducibility
+        np.random.seed(self.image_pixel_set_seed)
+        
+        # Calculate total number of pixels
+        img_size = self.config.model.img_size
+        channels = 3  # RGB image
+        total_pixels = channels * img_size * img_size
+        
+        # Generate random indices (without replacement)
+        if self.image_pixel_count > total_pixels:
+            logging.warning(f"Requested {self.image_pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
+            self.image_pixel_count = total_pixels
+            self.image_pixel_indices = np.arange(total_pixels)
+        else:
+            self.image_pixel_indices = np.random.choice(
+                total_pixels, 
+                size=self.image_pixel_count, 
+                replace=False
+            )
+        logging.info(f"Generated {len(self.image_pixel_indices)} pixel indices with seed {self.image_pixel_set_seed}")
+    
     def validate_indices(self) -> None:
         """
         Validate latent indices to ensure they are valid.
         """
-        latent_dim = self.gan_model.z_dim
+        if not self.use_image_pixels:
+            latent_dim = self.gan_model.z_dim
+            
+            if max(self.latent_indices) >= latent_dim:
+                raise ValueError(f"latent_indices contains indices >= latent_dim ({latent_dim}). "
+                                f"Max index: {max(self.latent_indices)}")
+            
+            if len(self.latent_indices) != len(set(self.latent_indices)):
+                logging.warning("latent_indices contains duplicate indices which may not be intended")
+    
+    def extract_image_partial(self, images: torch.Tensor) -> torch.Tensor:
+        """
+        Extract partial image using selected pixel indices.
         
-        if max(self.latent_indices) >= latent_dim:
-            raise ValueError(f"latent_indices contains indices >= latent_dim ({latent_dim}). "
-                             f"Max index: {max(self.latent_indices)}")
+        Args:
+            images (torch.Tensor): Batch of images [batch_size, channels, height, width]
+            
+        Returns:
+            torch.Tensor: Batch of flattened pixel values at selected indices
+        """
+        batch_size = images.shape[0]
         
-        if len(self.latent_indices) != len(set(self.latent_indices)):
-            logging.warning("latent_indices contains duplicate indices which may not be intended")
+        # Flatten the spatial dimensions: [batch_size, channels*height*width]
+        flattened = images.reshape(batch_size, -1)
+        
+        # Get values at selected indices: [batch_size, pixel_count]
+        image_partial = flattened[:, self.image_pixel_indices]
+        
+        return image_partial
     
     def train_iteration(self) -> Dict[str, float]:
         """
@@ -152,37 +215,33 @@ class WatermarkTrainer:
         # Sample a batch of latent vectors z: shape (batch_size, latent_dim)
         z = torch.randn(self.config.training.batch_size, latent_dim, device=self.device)
         
-        # Obtain w latent vector using the mapping network of the watermarked model
-        # Access through .module if it's a DDP-wrapped model
+        # Generate watermarked image
         if hasattr(self.watermarked_model, 'module'):
             w = self.watermarked_model.module.mapping(z, None)
-        else:
-            w = self.watermarked_model.mapping(z, None)
-            
-        # If w is replicated for each synthesis layer (shape: [batch_size, num_ws, w_dim]), take the first as representative
-        if w.ndim == 3:
-            w_single = w[:, 0, :]
-        else:
-            w_single = w
-
-        # Generate watermarked image using the synthesis network with the full w vector
-        if hasattr(self.watermarked_model, 'module'):
             x_water = self.watermarked_model.module.synthesis(w, noise_mode="const")
         else:
+            w = self.watermarked_model.mapping(z, None)
             x_water = self.watermarked_model.synthesis(w, noise_mode="const")
 
         # Compute the original image using the frozen pretrained model for LPIPS loss
         with torch.no_grad():
             w_orig = self.gan_model.mapping(z, None)
-            if w_orig.ndim == 3:
-                w_orig_single = w_orig[:, 0, :]
-            else:
-                w_orig_single = w_orig
             x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
 
-        # Extract a partial w vector using the fixed indices from w_single
-        w_partial = w_single[:, self.latent_indices]  # shape: (batch_size, len(latent_indices))
-        true_key = self.key_mapper(w_partial)  # shape: (batch_size, key_length) with binary values
+        # Extract features based on the approach
+        if self.use_image_pixels:
+            # Extract pixel values from the watermarked image
+            features = self.extract_image_partial(x_water)
+        else:
+            # Extract latent features from w (original approach)
+            if w.ndim == 3:
+                w_single = w[:, 0, :]
+            else:
+                w_single = w
+            features = w_single[:, self.latent_indices]
+        
+        # Generate true key using the key mapper
+        true_key = self.key_mapper(features)  # shape: (batch_size, key_length) with binary values
 
         # Predict key from watermarked image using the decoder (raw logits)
         pred_key_logits = self.decoder(x_water)
@@ -246,7 +305,7 @@ class WatermarkTrainer:
             watermarked_model=self.watermarked_model,
             decoder=self.decoder,
             optimizer=self.optimizer,
-            key_mapper=self.key_mapper,  # Include key_mapper
+            key_mapper=self.key_mapper,
             device=self.device
         )
         
@@ -278,9 +337,10 @@ class WatermarkTrainer:
                 
                 # Log progress
                 if self.global_step % self.config.training.log_interval == 0 and self.rank == 0:
+                    approach = "image-based" if self.use_image_pixels else "latent-based"
                     elapsed = time.time() - start_time
                     logging.info(
-                        f"Iteration [{iteration}/{self.config.training.total_iterations}] "
+                        f"Iteration [{iteration}/{self.config.training.total_iterations}] ({approach}) "
                         f"Key Loss: {metrics['key_loss']:.4f}, LPIPS Loss: {metrics['lpips_loss']:.4f}, "
                         f"Total Loss: {metrics['total_loss']:.4f}, Match Rate: {metrics['match_rate']:.2f}%, "
                         f"MSE Dist: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}, "
@@ -296,7 +356,7 @@ class WatermarkTrainer:
                         decoder=self.decoder,
                         output_dir=self.config.output_dir,
                         rank=self.rank,
-                        key_mapper=self.key_mapper,  # Include key_mapper
+                        key_mapper=self.key_mapper,
                         optimizer=self.optimizer,
                         metrics=metrics,
                         global_step=self.global_step
@@ -310,7 +370,7 @@ class WatermarkTrainer:
                     decoder=self.decoder,
                     output_dir=self.config.output_dir,
                     rank=self.rank,
-                    key_mapper=self.key_mapper,  # Include key_mapper
+                    key_mapper=self.key_mapper,
                     optimizer=self.optimizer,
                     metrics=metrics,
                     global_step=self.global_step

@@ -33,6 +33,12 @@ def parse_args():
     parser.add_argument("--key_length", type=int, default=4, help="Length of the binary key (output dimension)")
     parser.add_argument("--selected_indices", type=str, default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31",
                         help="Comma-separated list of indices to select for latent partial")
+    parser.add_argument("--use_image_pixels", action="store_true", default=False,
+                        help="Use image pixels for watermarking instead of latent vectors")
+    parser.add_argument("--image_pixel_set_seed", type=int, default=42,
+                        help="Random seed for selecting pixel indices from the generated image")
+    parser.add_argument("--image_pixel_count", type=int, default=8192,
+                        help="Number of pixels to select from the image (default: 8192)")
     parser.add_argument("--key_mapper_seed", type=int, default=2025, 
                         help="Specific random seed for KeyMapper initialization for reproducibility")
     

@@ -78,7 +78,7 @@ spec:
                       --batch_size 128 \
                       --total_iterations 50000000 \
                       --checkpoint_interval 100000 \
-                      --key_length 32 \
+                      --key_length 8 \
                       --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
                       --use_image_pixels \

@@ -11,35 +11,64 @@ def parse_log_file(log_file):
     lpips_loss = []
     total_loss = []
     match_rate = []
+    mse_dist = []
+    mae_dist = []
     iterations = []
     
     # Regular expression patterns
     patterns = {
-        'iteration': r'Iteration \[(\d+)/500000\]',
+        'iteration': r'Iteration \[(\d+)/\d+\]',
         'key_loss': r'Key Loss: ([\d.]+)',
         'lpips_loss': r'LPIPS Loss: ([\d.]+)',
         'total_loss': r'Total Loss: ([\d.]+)',
-        'match_rate': r'Match Rate: ([\d.]+)%'
+        'match_rate': r'Match Rate: ([\d.]+)%',
+        'mse_dist': r'MSE Dist: ([\d.]+)',  # Simplified pattern
+        'mae_dist': r'MAE Dist: ([\d.]+)',  # Simplified pattern
     }
     
     print(f"Reading log file: {log_file}")
     
+    # Count successful pattern matches
+    pattern_matches = {k: 0 for k in patterns.keys()}
+    
     with open(log_file, 'r') as f:
-        for line in f:
+        for line_num, line in enumerate(f, 1):
             # Skip lines that don't contain metrics
             if 'Iteration [' not in line:
                 continue
+            
+            # For debugging first few iteration lines
+            if len(iterations) < 2:
+                print(f"Line {line_num}: {line.strip()}")
+                
+                # Extract and print the MSE and MAE sections
+                mse_section_match = re.search(r'MSE Dist:[^,]+', line)
+                mae_section_match = re.search(r'MAE Dist:[^,]+', line)
+                
+                if mse_section_match:
+                    print(f"  MSE section: '{mse_section_match.group(0)}'")
+                if mae_section_match:
+                    print(f"  MAE section: '{mae_section_match.group(0)}'")
+                
+                # Test each pattern on this line
+                for metric, pattern in patterns.items():
+                    match = re.search(pattern, line)
+                    if match:
+                        print(f"  ✓ {metric} matched: {match.group(1)}")
+                    else:
+                        print(f"  ✗ {metric} did not match")
                 
             # Extract iteration
             iter_match = re.search(patterns['iteration'], line)
             if iter_match:
                 iterations.append(int(iter_match.group(1)))
-            
+                
             # Extract metrics
             for metric, pattern in patterns.items():
                 if metric != 'iteration':
                     match = re.search(pattern, line)
                     if match:
+                        pattern_matches[metric] += 1
                         value = float(match.group(1))
                         if metric == 'key_loss':
                             key_loss.append(value)
@@ -49,6 +78,15 @@ def parse_log_file(log_file):
                             total_loss.append(value)
                         elif metric == 'match_rate':
                             match_rate.append(value)
+                        elif metric == 'mse_dist':
+                            mse_dist.append(value)
+                        elif metric == 'mae_dist':
+                            mae_dist.append(value)
+    
+    # Print pattern match statistics
+    print("\nPattern match statistics:")
+    for metric, count in pattern_matches.items():
+        print(f"{metric}: {count} matches")
     
     # Print debugging information
     print(f"Number of iterations found: {len(iterations)}")
@@ -56,6 +94,8 @@ def parse_log_file(log_file):
     print(f"Number of lpips_loss values: {len(lpips_loss)}")
     print(f"Number of total_loss values: {len(total_loss)}")
     print(f"Number of match_rate values: {len(match_rate)}")
+    print(f"Number of mse_dist values: {len(mse_dist)}")
+    print(f"Number of mae_dist values: {len(mae_dist)}")
     
     if len(iterations) == 0:
         print("Warning: No iterations found in the log file!")
@@ -67,7 +107,7 @@ def parse_log_file(log_file):
                 else:
                     break
     
-    return iterations, key_loss, lpips_loss, total_loss, match_rate
+    return iterations, key_loss, lpips_loss, total_loss, match_rate, mse_dist, mae_dist
 
 def average_metrics(iterations, metrics, window_size=100):
     # Convert to numpy arrays for easier manipulation
@@ -133,7 +173,7 @@ def main():
     plots_dir.mkdir(exist_ok=True)
     
     # Parse log file
-    iterations, key_loss, lpips_loss, total_loss, match_rate = parse_log_file(args.log_file)
+    iterations, key_loss, lpips_loss, total_loss, match_rate, mse_dist, mae_dist = parse_log_file(args.log_file)
     
     if len(iterations) == 0:
         print("Error: No data found in the log file. Please check the file path and format.")
@@ -144,13 +184,17 @@ def main():
     _, avg_lpips_loss = average_metrics(iterations, lpips_loss)
     _, avg_total_loss = average_metrics(iterations, total_loss)
     _, avg_match_rate = average_metrics(iterations, match_rate)
+    _, avg_mse_dist = average_metrics(iterations, mse_dist)
+    _, avg_mae_dist = average_metrics(iterations, mae_dist)
     
     # Define colors and create plots
     colors = {
         'key_loss': '#FF6B6B',
         'lpips_loss': '#4ECDC4',
         'total_loss': '#45B7D1',
-        'match_rate': '#96CEB4'
+        'match_rate': '#96CEB4',
+        'mse_dist': '#FFD166',
+        'mae_dist': '#F9A826'
     }
     
     # Create individual plots
@@ -158,12 +202,14 @@ def main():
     create_plot(avg_iterations, avg_lpips_loss, 'LPIPS Loss Over Training', 'LPIPS Loss', colors['lpips_loss'], plots_dir / 'lpips_loss.png')
     create_plot(avg_iterations, avg_total_loss, 'Total Loss Over Training', 'Total Loss', colors['total_loss'], plots_dir / 'total_loss.png')
     create_plot(avg_iterations, avg_match_rate, 'Match Rate Over Training', 'Match Rate (%)', colors['match_rate'], plots_dir / 'match_rate.png')
+    create_plot(avg_iterations, avg_mse_dist, 'MSE Distance Over Training', 'MSE Distance', colors['mse_dist'], plots_dir / 'mse_dist.png')
+    create_plot(avg_iterations, avg_mae_dist, 'MAE Distance Over Training', 'MAE Distance', colors['mae_dist'], plots_dir / 'mae_dist.png')
     
-    # Create subplot
-    plt.figure(figsize=(15, 12))
+    # Create subplot (2x3 grid now to include MSE and MAE)
+    plt.figure(figsize=(18, 12))
     
     # Plot 1: Key Loss
-    plt.subplot(2, 2, 1)
+    plt.subplot(2, 3, 1)
     plt.plot(avg_iterations, avg_key_loss, color=colors['key_loss'], linewidth=2)
     plt.grid(True, linestyle='--', alpha=0.3)
     plt.xlabel('Iterations', fontsize=10)
@@ -171,7 +217,7 @@ def main():
     plt.title('Key Loss', fontsize=12, pad=10)
     
     # Plot 2: LPIPS Loss
-    plt.subplot(2, 2, 2)
+    plt.subplot(2, 3, 2)
     plt.plot(avg_iterations, avg_lpips_loss, color=colors['lpips_loss'], linewidth=2)
     plt.grid(True, linestyle='--', alpha=0.3)
     plt.xlabel('Iterations', fontsize=10)
@@ -179,7 +225,7 @@ def main():
     plt.title('LPIPS Loss', fontsize=12, pad=10)
     
     # Plot 3: Total Loss
-    plt.subplot(2, 2, 3)
+    plt.subplot(2, 3, 3)
     plt.plot(avg_iterations, avg_total_loss, color=colors['total_loss'], linewidth=2)
     plt.grid(True, linestyle='--', alpha=0.3)
     plt.xlabel('Iterations', fontsize=10)
@@ -187,12 +233,28 @@ def main():
     plt.title('Total Loss', fontsize=12, pad=10)
     
     # Plot 4: Match Rate
-    plt.subplot(2, 2, 4)
+    plt.subplot(2, 3, 4)
     plt.plot(avg_iterations, avg_match_rate, color=colors['match_rate'], linewidth=2)
     plt.grid(True, linestyle='--', alpha=0.3)
     plt.xlabel('Iterations', fontsize=10)
     plt.ylabel('Match Rate (%)', fontsize=10)
     plt.title('Match Rate', fontsize=12, pad=10)
+    
+    # Plot 5: MSE Distance
+    plt.subplot(2, 3, 5)
+    plt.plot(avg_iterations, avg_mse_dist, color=colors['mse_dist'], linewidth=2)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    plt.xlabel('Iterations', fontsize=10)
+    plt.ylabel('MSE Distance', fontsize=10)
+    plt.title('MSE Distance', fontsize=12, pad=10)
+    
+    # Plot 6: MAE Distance
+    plt.subplot(2, 3, 6)
+    plt.plot(avg_iterations, avg_mae_dist, color=colors['mae_dist'], linewidth=2)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    plt.xlabel('Iterations', fontsize=10)
+    plt.ylabel('MAE Distance', fontsize=10)
+    plt.title('MAE Distance', fontsize=12, pad=10)
     
     # Adjust layout and save
     plt.tight_layout()

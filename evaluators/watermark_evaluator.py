@@ -55,11 +55,25 @@ class WatermarkEvaluator:
         self.world_size = world_size
         self.device = device
         
-        # Parse latent indices for partial vector
-        if isinstance(config.model.selected_indices, str):
-            self.latent_indices = [int(idx) for idx in config.model.selected_indices.split(',')]
+        # Determine which approach to use
+        self.use_image_pixels = self.config.model.use_image_pixels
+        
+        if self.use_image_pixels:
+            # For image-based approach
+            self.image_pixel_indices = None
+            self.image_pixel_count = self.config.model.image_pixel_count
+            self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
+            if self.rank == 0:
+                logging.info(f"Using image-based approach with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
         else:
-            self.latent_indices = config.model.selected_indices
+            # For latent-based approach (original method)
+            # Parse latent indices for partial vector
+            if isinstance(config.model.selected_indices, str):
+                self.latent_indices = [int(idx) for idx in config.model.selected_indices.split(',')]
+            else:
+                self.latent_indices = config.model.selected_indices
+            if self.rank == 0:
+                logging.info(f"Using latent partial indices: {self.latent_indices}")
         
         # Setup models
         self.setup_models()
@@ -77,6 +91,53 @@ class WatermarkEvaluator:
                 logging.info("Setting up quantized model...")
             self.quantized_model = quantize_model_weights(self.gan_model)
             self.quantized_model.eval()
+    
+    def _generate_pixel_indices(self) -> None:
+        """
+        Generate random pixel indices for image-based approach.
+        """
+        # Set seed for reproducibility
+        np.random.seed(self.image_pixel_set_seed)
+        
+        # Calculate total number of pixels
+        img_size = self.config.model.img_size
+        channels = 3  # RGB image
+        total_pixels = channels * img_size * img_size
+        
+        # Generate random indices (without replacement)
+        if self.image_pixel_count > total_pixels:
+            if self.rank == 0:
+                logging.warning(f"Requested {self.image_pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
+            self.image_pixel_count = total_pixels
+            self.image_pixel_indices = np.arange(total_pixels)
+        else:
+            self.image_pixel_indices = np.random.choice(
+                total_pixels, 
+                size=self.image_pixel_count, 
+                replace=False
+            )
+        if self.rank == 0:
+            logging.info(f"Generated {len(self.image_pixel_indices)} pixel indices with seed {self.image_pixel_set_seed}")
+
+    def extract_image_partial(self, images: torch.Tensor) -> torch.Tensor:
+        """
+        Extract partial image using selected pixel indices.
+        
+        Args:
+            images (torch.Tensor): Batch of images [batch_size, channels, height, width]
+            
+        Returns:
+            torch.Tensor: Batch of flattened pixel values at selected indices
+        """
+        batch_size = images.shape[0]
+        
+        # Flatten the spatial dimensions: [batch_size, channels*height*width]
+        flattened = images.reshape(batch_size, -1)
+        
+        # Get values at selected indices: [batch_size, pixel_count]
+        image_partial = flattened[:, self.image_pixel_indices]
+        
+        return image_partial
     
     def setup_models(self):
         """
@@ -109,8 +170,17 @@ class WatermarkEvaluator:
         # Initialize key mapper with specified seed
         if self.rank == 0:
             logging.info(f"Initializing key mapper with seed {self.config.model.key_mapper_seed}")
+        
+        # Determine key mapper input dimension based on approach
+        if self.use_image_pixels:
+            # Generate pixel indices for image-based approach
+            self._generate_pixel_indices()
+            input_dim = self.image_pixel_count
+        else:
+            input_dim = len(self.latent_indices)
+        
         self.key_mapper = KeyMapper(
-            input_dim=len(self.latent_indices),
+            input_dim=input_dim,
             output_dim=self.config.model.key_length,
             seed=self.config.model.key_mapper_seed
         ).to(self.device)
@@ -164,14 +234,20 @@ class WatermarkEvaluator:
                 w_orig = original_model.mapping(z, None)
                 x_orig = original_model.synthesis(w_orig, noise_mode="const")
                 
-                # Extract latent partial and compute true key
-                if w_water.ndim == 3:
-                    w_water_single = w_water[:, 0, :]
+                # Extract features based on the approach
+                if self.use_image_pixels:
+                    # Extract pixel values from the watermarked image
+                    features = self.extract_image_partial(x_water)
                 else:
-                    w_water_single = w_water
+                    # Extract latent features from w (original approach)
+                    if w_water.ndim == 3:
+                        w_water_single = w_water[:, 0, :]
+                    else:
+                        w_water_single = w_water
+                    features = w_water_single[:, self.latent_indices]
                 
-                w_partial = w_water_single[:, self.latent_indices]
-                true_key = self.key_mapper(w_partial)
+                # Generate true key
+                true_key = self.key_mapper(features)
                 
                 # Compute key from watermarked image
                 pred_key_water_logits = self.decoder(x_water)
@@ -292,21 +368,20 @@ class WatermarkEvaluator:
                         jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 55)
                         x_neg = apply_jpeg_compression(x_neg, jpeg_quality)
             
-            # Extract latent partial and compute true key
-            if w_neg.ndim == 3:
-                w_neg_single = w_neg[:, 0, :]
+            # Extract features based on the approach
+            if self.use_image_pixels:
+                # Extract pixel values from the image
+                features = self.extract_image_partial(x_neg)
             else:
-                w_neg_single = w_neg
+                # Extract latent features from w
+                if w_neg.ndim == 3:
+                    w_neg_single = w_neg[:, 0, :]
+                else:
+                    w_neg_single = w_neg
+                features = w_neg_single[:, self.latent_indices]
             
-            # Use the correct w for partial
-            if transformation in ['truncation', 'quantization']:
-                # For model transformations, use the transformed w
-                w_partial = w_neg_single[:, self.latent_indices]
-            else:
-                # For pretrained models and image transformations, use the negative model's w
-                w_partial = w_neg_single[:, self.latent_indices]
-            
-            true_key = self.key_mapper(w_partial)
+            # Generate true key
+            true_key = self.key_mapper(features)
             
             # Compute key from negative sample image
             pred_key_neg_logits = self.decoder(x_neg)
@@ -739,7 +814,7 @@ class WatermarkEvaluator:
             # Save visualizations
             save_visualization(x_orig_vis, x_water_vis, diff_vis, output_dir)
             
-            # Extract latent partial and compute true key for each sample
+            # Generate images for w extraction
             if model_name is None:
                 # For watermarked model, extract w from watermarked model
                 w_water_vis = self.watermarked_model.mapping(z_vis, None)
@@ -747,13 +822,25 @@ class WatermarkEvaluator:
                 # For pretrained models, extract w from the pretrained model
                 w_water_vis = self.pretrained_models[model_name].mapping(z_vis, None)
             
-            if w_water_vis.ndim == 3:
-                w_water_single_vis = w_water_vis[:, 0, :]
+            # Extract features based on approach
+            if self.use_image_pixels:
+                # Extract features from the image (watermarked or original)
+                if model_name is None and transformation is None:
+                    # Use watermarked image for comparison case
+                    features = self.extract_image_partial(x_water_vis)
+                else:
+                    # Use original/negative image for others
+                    features = self.extract_image_partial(x_orig_vis)
             else:
-                w_water_single_vis = w_water_vis
+                # Extract from w vectors
+                if w_water_vis.ndim == 3:
+                    w_water_single_vis = w_water_vis[:, 0, :]
+                else:
+                    w_water_single_vis = w_water_vis
+                features = w_water_single_vis[:, self.latent_indices]
             
-            w_partial_vis = w_water_single_vis[:, self.latent_indices]
-            true_keys_vis = self.key_mapper(w_partial_vis)
+            # Generate true key
+            true_keys_vis = self.key_mapper(features)
             
             # Predict keys and probabilities for both original and watermarked images
             pred_keys_water_logits_vis = self.decoder(x_water_vis)

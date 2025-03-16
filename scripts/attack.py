@@ -3,6 +3,15 @@
 Attack script for StyleGAN watermarking.
 This implements a forging attack that aims to modify original non-watermarked images
 so that the real decoder extracts the correct watermark keys from them.
+
+The script supports two modes of operation:
+1. Latent vector (w_partial) based approach: Uses selected dimensions from the StyleGAN latent space
+   for key generation. This is the original approach.
+2. Image-pixel based approach: Uses selected pixels from the generated images for key generation.
+   This is an alternative approach that may be more robust in some cases.
+
+The mode is selected using the --use_image_pixels flag. When this flag is set, the script uses
+image pixels instead of latent vectors for key generation.
 """
 import argparse
 import logging
@@ -48,8 +57,18 @@ def parse_args():
                         help="Path to watermarked model checkpoint to attack")
     parser.add_argument("--img_size", type=int, default=256, help="Image resolution")
     parser.add_argument("--key_length", type=int, default=4, help="Length of the binary key (output dimension)")
-    parser.add_argument("--selected_indices", type=str, default="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31",
-                        help="Comma-separated list of indices to select for latent partial")
+    parser.add_argument("--selected_indices", type=str, default=None,
+                        help="Optional: Comma-separated list of indices for latent partial. If not provided, indices will be generated using w_partial_set_seed")
+    parser.add_argument("--w_partial_set_seed", type=int, default=42,
+                        help="Random seed for selecting latent indices from the w vector")
+    parser.add_argument("--w_partial_length", type=int, default=32,
+                        help="Number of dimensions to select from the w vector (default: 32)")
+    parser.add_argument("--use_image_pixels", action="store_true", default=False,
+                        help="Use image pixels for watermarking instead of latent vectors")
+    parser.add_argument("--image_pixel_set_seed", type=int, default=42,
+                        help="Random seed for selecting pixel indices from the generated image")
+    parser.add_argument("--image_pixel_count", type=int, default=8192,
+                        help="Number of pixels to select from the image (default: 8192)")
     parser.add_argument("--key_mapper_seed", type=int, default=2025, 
                         help="Specific random seed for KeyMapper initialization for reproducibility")
     
@@ -133,6 +152,92 @@ class SurrogateDecoder(nn.Module):
         """Forward pass for surrogate decoder."""
         features = self.features(x)
         return self.classifier(features)
+
+
+def generate_latent_indices(latent_dim, w_partial_length, w_partial_set_seed):
+    """
+    Generate random latent indices for latent-based approach.
+    
+    Args:
+        latent_dim (int): Dimension of the latent space.
+        w_partial_length (int): Number of dimensions to select.
+        w_partial_set_seed (int): Random seed for reproducibility.
+        
+    Returns:
+        list: List of selected latent indices.
+    """
+    # Set seed for reproducibility
+    np.random.seed(w_partial_set_seed)
+    
+    # Generate random indices (without replacement)
+    if w_partial_length > latent_dim:
+        logging.warning(f"Requested {w_partial_length} indices exceeds latent dimension {latent_dim}. Using all dimensions.")
+        w_partial_length = latent_dim
+        latent_indices = np.arange(latent_dim)
+    else:
+        latent_indices = np.random.choice(
+            latent_dim, 
+            size=w_partial_length, 
+            replace=False
+        )
+    logging.info(f"Generated {len(latent_indices)} latent indices with seed {w_partial_set_seed}")
+    return latent_indices
+
+
+def generate_pixel_indices(img_size, channels, image_pixel_count, image_pixel_set_seed):
+    """
+    Generate random pixel indices for image-based approach.
+    
+    Args:
+        img_size (int): Image resolution.
+        channels (int): Number of channels in the image.
+        image_pixel_count (int): Number of pixels to select.
+        image_pixel_set_seed (int): Random seed for reproducibility.
+        
+    Returns:
+        np.ndarray: Array of selected pixel indices.
+    """
+    # Set seed for reproducibility
+    np.random.seed(image_pixel_set_seed)
+    
+    # Calculate total number of pixels
+    total_pixels = channels * img_size * img_size
+    
+    # Generate random indices (without replacement)
+    if image_pixel_count > total_pixels:
+        logging.warning(f"Requested {image_pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
+        image_pixel_count = total_pixels
+        pixel_indices = np.arange(total_pixels)
+    else:
+        pixel_indices = np.random.choice(
+            total_pixels, 
+            size=image_pixel_count, 
+            replace=False
+        )
+    logging.info(f"Generated {len(pixel_indices)} pixel indices with seed {image_pixel_set_seed}")
+    return pixel_indices
+
+
+def extract_image_partial(images, pixel_indices):
+    """
+    Extract partial image using selected pixel indices.
+    
+    Args:
+        images (torch.Tensor): Batch of images [batch_size, channels, height, width]
+        pixel_indices (np.ndarray): Array of pixel indices to select
+            
+    Returns:
+        torch.Tensor: Batch of flattened pixel values at selected indices
+    """
+    batch_size = images.shape[0]
+    
+    # Flatten the spatial dimensions: [batch_size, channels*height*width]
+    flattened = images.reshape(batch_size, -1)
+    
+    # Get values at selected indices: [batch_size, pixel_count]
+    image_partial = flattened[:, pixel_indices]
+    
+    return image_partial
 
 
 def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, rank, world_size, device):
@@ -276,7 +381,7 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
     return surrogate_decoders
 
 
-def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper, config, device):
+def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper, config, device, pixel_indices=None):
     """
     Perform PGD attack on the images using surrogate decoders to guide the attack.
     This is a FORGING attack that aims to make the real decoder extract the correct watermark keys
@@ -284,12 +389,13 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     
     Args:
         images: Original images to attack
-        w_partials: Partial latent vectors corresponding to the images
+        w_partials: Partial latent vectors corresponding to the images (used in w-partial mode)
         surrogate_decoders: List of surrogate decoder models
         real_decoder: The real decoder model
         key_mapper: The key mapper model
         config: Configuration object
         device: Device to run the attack on
+        pixel_indices: Array of pixel indices to select (used in image-pixel mode)
         
     Returns:
         dict: Attack results including statistics and attacked images
@@ -298,7 +404,13 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     attacked_images = images.clone().detach().requires_grad_(True)
     
     # Get true keys from key mapper
-    true_keys = key_mapper(w_partials)
+    if config.model.use_image_pixels:
+        # Extract pixel values from images for key generation
+        features = extract_image_partial(images, pixel_indices)
+        true_keys = key_mapper(features)
+    else:
+        # Use w_partials for key generation (original approach)
+        true_keys = key_mapper(w_partials)
     
     # Extract the shape of images
     batch_size = images.shape[0]
@@ -399,11 +511,26 @@ def run_attack(config, local_rank, rank, world_size, device):
     Returns:
         dict: Attack results
     """
-    # Parse latent indices for partial vector
-    if isinstance(config.model.selected_indices, str):
-        latent_indices = [int(idx) for idx in config.model.selected_indices.split(',')]
-    else:
-        latent_indices = config.model.selected_indices
+    # Determine which mode to use
+    use_image_pixels = config.model.use_image_pixels
+    
+    # For latent-based approach
+    latent_indices = None
+    if not use_image_pixels:
+        # Parse latent indices for partial vector if provided
+        if hasattr(config.model, 'selected_indices') and config.model.selected_indices is not None:
+            if isinstance(config.model.selected_indices, str):
+                latent_indices = [int(idx) for idx in config.model.selected_indices.split(',')]
+            else:
+                latent_indices = config.model.selected_indices
+            if rank == 0:
+                logging.info(f"Using manually specified latent indices: {latent_indices}")
+    
+    # For image-based approach
+    pixel_indices = None
+    if use_image_pixels:
+        if rank == 0:
+            logging.info(f"Using image-based approach with {config.model.image_pixel_count} pixels and seed {config.model.image_pixel_set_seed}")
     
     # Load the original StyleGAN2 model
     if rank == 0:
@@ -414,6 +541,26 @@ def run_attack(config, local_rank, rank, world_size, device):
         device
     )
     gan_model.eval()
+    
+    # Generate indices if they weren't specified
+    if not use_image_pixels and latent_indices is None:
+        # Generate latent indices using seed and length
+        latent_dim = gan_model.z_dim
+        latent_indices = generate_latent_indices(
+            latent_dim,
+            config.model.w_partial_length,
+            config.model.w_partial_set_seed
+        )
+    
+    if use_image_pixels:
+        # Generate pixel indices
+        channels = 3  # RGB images
+        pixel_indices = generate_pixel_indices(
+            config.model.img_size,
+            channels,
+            config.model.image_pixel_count,
+            config.model.image_pixel_set_seed
+        )
     
     # Clone it to create watermarked model
     watermarked_model = clone_model(gan_model)
@@ -431,8 +578,15 @@ def run_attack(config, local_rank, rank, world_size, device):
     # Initialize key mapper with specified seed
     if rank == 0:
         logging.info(f"Initializing key mapper with seed {config.model.key_mapper_seed}")
+    
+    # Key mapper input dimension depends on the mode
+    if use_image_pixels:
+        input_dim = len(pixel_indices)
+    else:
+        input_dim = len(latent_indices)
+        
     key_mapper = KeyMapper(
-        input_dim=len(latent_indices),
+        input_dim=input_dim,
         output_dim=config.model.key_length,
         seed=config.model.key_mapper_seed
     ).to(device)
@@ -498,18 +652,22 @@ def run_attack(config, local_rank, rank, world_size, device):
             w = gan_model.mapping(z, None)
             original_images = gan_model.synthesis(w, noise_mode='const')
             
-            # If w is replicated for each synthesis layer, take the first as representative
-            if w.ndim == 3:
-                w_single = w[:, 0, :]
-            else:
-                w_single = w
-            
-            # Extract partial w vector using indices
-            w_partial = w_single[:, latent_indices]
+            # If using latent-based approach, extract w_partial
+            w_partials = None
+            if not use_image_pixels:
+                # If w is replicated for each synthesis layer, take the first as representative
+                if w.ndim == 3:
+                    w_single = w[:, 0, :]
+                else:
+                    w_single = w
+                
+                # Extract partial w vector using indices
+                w_partials = w_single[:, latent_indices]
         
-        # Perform PGD attack
+        # Perform PGD attack - pass both w_partials and pixel_indices, based on mode
         batch_results = pgd_attack(
-            original_images, w_partial, surrogate_decoders, decoder, key_mapper, config, device
+            original_images, w_partials, surrogate_decoders, decoder, key_mapper, config, device,
+            pixel_indices=pixel_indices if use_image_pixels else None
         )
         
         # Update metrics (needs to be aggregated across ranks later)
@@ -619,7 +777,8 @@ def main():
     
     # Load default configuration and update with args
     config = get_default_config()
-    config.update_from_args(args, mode='attack')  # Explicitly specify we're in attack mode
+    # Explicitly specify we're in attack mode and include the new image-pixel and w-partial parameters
+    config.update_from_args(args, mode='attack')
     
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)
@@ -630,6 +789,13 @@ def main():
         
         # Log configuration after it's been updated
         logging.info(f"Configuration:\n{config}")
+        
+        # Log specific approach
+        if config.model.use_image_pixels:
+            logging.info(f"Using image-pixel based approach with {config.model.image_pixel_count} pixels and seed {config.model.image_pixel_set_seed}")
+        else:
+            logging.info(f"Using latent vector (w_partial) based approach")
+            
         logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
     
     try:

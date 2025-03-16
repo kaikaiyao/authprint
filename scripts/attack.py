@@ -464,8 +464,20 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     # Evaluate attack success on real decoder
     with torch.no_grad():
         final_pred = real_decoder(attacked_images)
-        final_bin_pred = (torch.sigmoid(final_pred) > 0.5).float()
+        final_pred_probs = torch.sigmoid(final_pred)
+        final_bin_pred = (final_pred_probs > 0.5).float()
         final_match = (final_bin_pred == true_keys).all(dim=1).float().mean().item() * 100.0
+        
+        # Calculate MSE and MAE distances between predicted probabilities and true keys
+        # Mean squared error (MSE) distance - range [0, 1]
+        mse_distance = torch.mean(torch.pow(final_pred_probs - true_keys, 2), dim=1)
+        mse_distance_mean = mse_distance.mean().item()
+        mse_distance_std = mse_distance.std().item()
+        
+        # Mean absolute error (MAE) distance - range [0, 1]
+        mae_distance = torch.mean(torch.abs(final_pred_probs - true_keys), dim=1)
+        mae_distance_mean = mae_distance.mean().item()
+        mae_distance_std = mae_distance.std().item()
         
         # Binary classification by surrogate decoders
         surrogate_classifications = []
@@ -493,7 +505,11 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         'perceptual_distance': perceptual_dist,
         'key_match_rate': (final_bin_pred == true_keys).float().mean(dim=0).cpu().numpy(),  # Per-bit accuracy
         'true_keys': true_keys.cpu().numpy(),
-        'predicted_keys': final_bin_pred.cpu().numpy()
+        'predicted_keys': final_bin_pred.cpu().numpy(),
+        'mse_distance_mean': mse_distance_mean,
+        'mse_distance_std': mse_distance_std,
+        'mae_distance_mean': mae_distance_mean,
+        'mae_distance_std': mae_distance_std
     }
 
 
@@ -611,6 +627,10 @@ def run_attack(config, local_rank, rank, world_size, device):
         'surrogate_classifications': [],
         'l2_distance': 0.0,
         'perceptual_distance': 0.0,
+        'mse_distance_mean': 0.0,
+        'mse_distance_std': 0.0,
+        'mae_distance_mean': 0.0,
+        'mae_distance_std': 0.0,
         'num_samples': 0
     }
     
@@ -679,6 +699,10 @@ def run_attack(config, local_rank, rank, world_size, device):
             attack_metrics['surrogate_classifications'][i] += batch_results['surrogate_classifications'][i] * actual_batch_size
         attack_metrics['l2_distance'] += batch_results['l2_distance'] * actual_batch_size
         attack_metrics['perceptual_distance'] += batch_results['perceptual_distance'] * actual_batch_size
+        attack_metrics['mse_distance_mean'] += batch_results['mse_distance_mean'] * actual_batch_size
+        attack_metrics['mse_distance_std'] += batch_results['mse_distance_std'] * actual_batch_size
+        attack_metrics['mae_distance_mean'] += batch_results['mae_distance_mean'] * actual_batch_size
+        attack_metrics['mae_distance_std'] += batch_results['mae_distance_std'] * actual_batch_size
         attack_metrics['num_samples'] += actual_batch_size
         
         # Save visualizations (only on rank 0)
@@ -708,7 +732,12 @@ def run_attack(config, local_rank, rank, world_size, device):
                     pred_key = batch_results['predicted_keys'][i]
                     key_match = true_key == pred_key
                     
-                    plt.suptitle(f"Image {global_idx}\nTrue Key: {true_key}\nPredicted Key: {pred_key}\nForging Success: {key_match}")
+                    # Extract metrics for this sample
+                    mse_val = torch.pow(torch.tensor(true_key) - torch.tensor(pred_key), 2).mean().item()
+                    mae_val = torch.abs(torch.tensor(true_key) - torch.tensor(pred_key)).mean().item()
+                    
+                    plt.suptitle(f"Image {global_idx}\nTrue Key: {true_key}\nPredicted Key: {pred_key}\n"
+                                 f"Forging Success: {key_match}\nMSE: {mse_val:.4f}, MAE: {mae_val:.4f}")
                     plt.tight_layout()
                     
                     # Save figure
@@ -719,7 +748,8 @@ def run_attack(config, local_rank, rank, world_size, device):
     
     # Aggregate metrics across ranks in distributed setting
     if world_size > 1:
-        for key in ['initial_match_rate', 'final_match_rate', 'l2_distance', 'perceptual_distance', 'num_samples']:
+        for key in ['initial_match_rate', 'final_match_rate', 'l2_distance', 'perceptual_distance', 
+                   'mse_distance_mean', 'mse_distance_std', 'mae_distance_mean', 'mae_distance_std', 'num_samples']:
             tensor = torch.tensor([attack_metrics[key]], device=device)
             dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
             attack_metrics[key] = tensor.item()
@@ -735,6 +765,10 @@ def run_attack(config, local_rank, rank, world_size, device):
     attack_metrics['surrogate_classifications'] = [s / attack_metrics['num_samples'] for s in attack_metrics['surrogate_classifications']]
     attack_metrics['l2_distance'] /= attack_metrics['num_samples']
     attack_metrics['perceptual_distance'] /= attack_metrics['num_samples']
+    attack_metrics['mse_distance_mean'] /= attack_metrics['num_samples']
+    attack_metrics['mse_distance_std'] /= attack_metrics['num_samples']
+    attack_metrics['mae_distance_mean'] /= attack_metrics['num_samples']
+    attack_metrics['mae_distance_std'] /= attack_metrics['num_samples']
     
     # Print and log metrics (only on rank 0)
     if rank == 0:
@@ -743,6 +777,8 @@ def run_attack(config, local_rank, rank, world_size, device):
         logging.info(f"Initial match rate: {attack_metrics['initial_match_rate']:.2f}%")
         logging.info(f"Final match rate after attack: {attack_metrics['final_match_rate']:.2f}%")
         logging.info(f"Attack success rate: {attack_metrics['final_match_rate']:.2f}%")
+        logging.info(f"MSE Distance: {attack_metrics['mse_distance_mean']:.4f}±{attack_metrics['mse_distance_std']:.4f}")
+        logging.info(f"MAE Distance: {attack_metrics['mae_distance_mean']:.4f}±{attack_metrics['mae_distance_std']:.4f}")
         
         for i, rate in enumerate(attack_metrics['surrogate_classifications']):
             logging.info(f"Surrogate decoder {i+1} watermark fooling rate: {rate:.2f}%")
@@ -758,6 +794,8 @@ def run_attack(config, local_rank, rank, world_size, device):
             f.write(f"Initial match rate: {attack_metrics['initial_match_rate']:.2f}%\n")
             f.write(f"Final match rate after attack: {attack_metrics['final_match_rate']:.2f}%\n")
             f.write(f"Attack success rate: {attack_metrics['final_match_rate']:.2f}%\n")
+            f.write(f"MSE Distance: {attack_metrics['mse_distance_mean']:.4f}±{attack_metrics['mse_distance_std']:.4f}\n")
+            f.write(f"MAE Distance: {attack_metrics['mae_distance_mean']:.4f}±{attack_metrics['mae_distance_std']:.4f}\n")
             
             for i, rate in enumerate(attack_metrics['surrogate_classifications']):
                 f.write(f"Surrogate decoder {i+1} watermark fooling rate: {rate:.2f}%\n")

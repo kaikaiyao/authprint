@@ -164,12 +164,14 @@ def create_plot(iterations, metrics, title, ylabel, color, save_path):
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Plot training metrics from a log file.')
-    parser.add_argument('--log_file', type=str, default='train_rank0.log',
+    parser.add_argument('-i', '--log_file', type=str, default='train_rank0.log',
                         help='Path to the log file (default: train_rank0.log)')
+    parser.add_argument('-o', '--output_dir', type=str, default='plots',
+                        help='Directory to save plots (default: plots)')
     args = parser.parse_args()
     
     # Create plots directory if it doesn't exist
-    plots_dir = Path('plots')
+    plots_dir = Path(args.output_dir)
     plots_dir.mkdir(exist_ok=True)
     
     # Parse log file

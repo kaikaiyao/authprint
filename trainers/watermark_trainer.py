@@ -74,12 +74,23 @@ class WatermarkTrainer:
             self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
             logging.info(f"Using image-based approach with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
         else:
-            # For latent-based approach (original method)
-            if isinstance(self.config.model.selected_indices, str):
-                self.latent_indices = [int(idx) for idx in self.config.model.selected_indices.split(',')]
+            # For latent-based approach
+            self.latent_indices = None
+            
+            # Check if explicit indices are provided
+            if hasattr(self.config.model, 'selected_indices') and self.config.model.selected_indices is not None:
+                if isinstance(self.config.model.selected_indices, str):
+                    self.latent_indices = [int(idx) for idx in self.config.model.selected_indices.split(',')]
+                else:
+                    self.latent_indices = self.config.model.selected_indices
+                logging.info(f"Using manually specified latent indices: {self.latent_indices}")
             else:
-                self.latent_indices = self.config.model.selected_indices
-            logging.info(f"Using latent partial indices: {self.latent_indices}")
+                # We'll generate random indices later once we know the latent dimension
+                # For backward compatibility, default to 32 if w_partial_length not present
+                self.w_partial_length = getattr(self.config.model, 'w_partial_length', 32)
+                # Default seed for backward compatibility
+                self.w_partial_set_seed = getattr(self.config.model, 'w_partial_set_seed', 42)
+                logging.info(f"Will generate {self.w_partial_length} latent indices with seed {self.w_partial_set_seed}")
     
     def setup_models(self) -> None:
         """
@@ -93,6 +104,10 @@ class WatermarkTrainer:
         )
         latent_dim = self.gan_model.z_dim
         logging.info(f"Pretrained model loaded with z_dim={latent_dim}")
+        
+        # Generate latent indices if not provided explicitly
+        if not self.use_image_pixels and self.latent_indices is None:
+            self._generate_latent_indices(latent_dim)
         
         # Freeze the pretrained model (for LPIPS computation)
         self.gan_model.eval()
@@ -166,11 +181,34 @@ class WatermarkTrainer:
             )
         logging.info(f"Generated {len(self.image_pixel_indices)} pixel indices with seed {self.image_pixel_set_seed}")
     
+    def _generate_latent_indices(self, latent_dim: int) -> None:
+        """
+        Generate random latent indices for latent-based approach.
+        
+        Args:
+            latent_dim (int): Dimension of the latent space.
+        """
+        # Set seed for reproducibility
+        np.random.seed(self.w_partial_set_seed)
+        
+        # Generate random indices (without replacement)
+        if self.w_partial_length > latent_dim:
+            logging.warning(f"Requested {self.w_partial_length} indices exceeds latent dimension {latent_dim}. Using all dimensions.")
+            self.w_partial_length = latent_dim
+            self.latent_indices = np.arange(latent_dim)
+        else:
+            self.latent_indices = np.random.choice(
+                latent_dim, 
+                size=self.w_partial_length, 
+                replace=False
+            )
+        logging.info(f"Generated {len(self.latent_indices)} latent indices with seed {self.w_partial_set_seed}")
+    
     def validate_indices(self) -> None:
         """
         Validate latent indices to ensure they are valid.
         """
-        if not self.use_image_pixels:
+        if not self.use_image_pixels and self.latent_indices is not None:
             latent_dim = self.gan_model.z_dim
             
             if max(self.latent_indices) >= latent_dim:

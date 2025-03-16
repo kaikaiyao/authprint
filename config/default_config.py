@@ -16,8 +16,12 @@ class ModelConfig:
     
     # Watermarking configuration
     key_length: int = 4
-    selected_indices: List[int] = field(default_factory=lambda: list(range(32)))
+    selected_indices: Optional[Union[List[int], str]] = None
     key_mapper_seed: Optional[int] = None  # Specific seed for KeyMapper initialization
+    
+    # Latent-based watermarking configuration
+    w_partial_set_seed: int = 42  # Seed for selecting random latent indices
+    w_partial_length: int = 32  # Number of dimensions to select from the latent vector
     
     # Image-based watermarking configuration
     use_image_pixels: bool = False  # Whether to use image pixels instead of latent vectors

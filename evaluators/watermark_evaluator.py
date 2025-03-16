@@ -66,14 +66,25 @@ class WatermarkEvaluator:
             if self.rank == 0:
                 logging.info(f"Using image-based approach with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
         else:
-            # For latent-based approach (original method)
-            # Parse latent indices for partial vector
-            if isinstance(config.model.selected_indices, str):
-                self.latent_indices = [int(idx) for idx in config.model.selected_indices.split(',')]
+            # For latent-based approach
+            self.latent_indices = None
+            
+            # Check if explicit indices are provided
+            if hasattr(self.config.model, 'selected_indices') and self.config.model.selected_indices is not None:
+                if isinstance(self.config.model.selected_indices, str):
+                    self.latent_indices = [int(idx) for idx in self.config.model.selected_indices.split(',')]
+                else:
+                    self.latent_indices = self.config.model.selected_indices
+                if self.rank == 0:
+                    logging.info(f"Using manually specified latent indices: {self.latent_indices}")
             else:
-                self.latent_indices = config.model.selected_indices
-            if self.rank == 0:
-                logging.info(f"Using latent partial indices: {self.latent_indices}")
+                # We'll generate random indices later once we know the latent dimension
+                # For backward compatibility, default to 32 if w_partial_length not present
+                self.w_partial_length = getattr(self.config.model, 'w_partial_length', 32)
+                # Default seed for backward compatibility
+                self.w_partial_set_seed = getattr(self.config.model, 'w_partial_set_seed', 42)
+                if self.rank == 0:
+                    logging.info(f"Will generate {self.w_partial_length} latent indices with seed {self.w_partial_set_seed}")
         
         # Setup models
         self.setup_models()
@@ -139,6 +150,31 @@ class WatermarkEvaluator:
         
         return image_partial
     
+    def _generate_latent_indices(self, latent_dim: int) -> None:
+        """
+        Generate random latent indices for latent-based approach.
+        
+        Args:
+            latent_dim (int): Dimension of the latent space.
+        """
+        # Set seed for reproducibility
+        np.random.seed(self.w_partial_set_seed)
+        
+        # Generate random indices (without replacement)
+        if self.w_partial_length > latent_dim:
+            if self.rank == 0:
+                logging.warning(f"Requested {self.w_partial_length} indices exceeds latent dimension {latent_dim}. Using all dimensions.")
+            self.w_partial_length = latent_dim
+            self.latent_indices = np.arange(latent_dim)
+        else:
+            self.latent_indices = np.random.choice(
+                latent_dim, 
+                size=self.w_partial_length, 
+                replace=False
+            )
+        if self.rank == 0:
+            logging.info(f"Generated {len(self.latent_indices)} latent indices with seed {self.w_partial_set_seed}")
+            
     def setup_models(self):
         """
         Setup models for evaluation.
@@ -153,6 +189,10 @@ class WatermarkEvaluator:
         )
         self.gan_model.eval()
         self.latent_dim = self.gan_model.z_dim
+        
+        # Generate latent indices if not provided explicitly
+        if not self.use_image_pixels and self.latent_indices is None:
+            self._generate_latent_indices(self.latent_dim)
         
         # Clone it to create watermarked model
         self.watermarked_model = clone_model(self.gan_model)
@@ -244,7 +284,14 @@ class WatermarkEvaluator:
                         w_water_single = w_water[:, 0, :]
                     else:
                         w_water_single = w_water
-                    features = w_water_single[:, self.latent_indices]
+                    
+                    # Convert latent_indices to tensor if it's a numpy array
+                    if isinstance(self.latent_indices, np.ndarray):
+                        latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
+                    else:
+                        latent_indices = self.latent_indices
+                        
+                    features = w_water_single[:, latent_indices]
                 
                 # Generate true key
                 true_key = self.key_mapper(features)
@@ -378,7 +425,14 @@ class WatermarkEvaluator:
                     w_neg_single = w_neg[:, 0, :]
                 else:
                     w_neg_single = w_neg
-                features = w_neg_single[:, self.latent_indices]
+                    
+                # Convert latent_indices to tensor if it's a numpy array
+                if isinstance(self.latent_indices, np.ndarray):
+                    latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
+                else:
+                    latent_indices = self.latent_indices
+                    
+                features = w_neg_single[:, latent_indices]
             
             # Generate true key
             true_key = self.key_mapper(features)
@@ -837,7 +891,14 @@ class WatermarkEvaluator:
                     w_water_single_vis = w_water_vis[:, 0, :]
                 else:
                     w_water_single_vis = w_water_vis
-                features = w_water_single_vis[:, self.latent_indices]
+                    
+                # Convert latent_indices to tensor if it's a numpy array
+                if isinstance(self.latent_indices, np.ndarray):
+                    latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
+                else:
+                    latent_indices = self.latent_indices
+                    
+                features = w_water_single_vis[:, latent_indices]
             
             # Generate true key
             true_keys_vis = self.key_mapper(features)

@@ -82,6 +82,8 @@ spec:
                       --batch_size 128 \
                       --key_length 32 \
                       --key_mapper_seed 2025 \
+                      --w_partial_length 128 \
+                      --w_partial_set_seed 42
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

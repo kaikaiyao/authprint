@@ -81,8 +81,9 @@ spec:
                       --key_length 32 \
                       --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
-                      --w_partial_length 4 \
-                      --w_partial_set_seed 42
+                      --use_image_pixels \
+                      --image_pixel_count 128 \
+                      --image_pixel_set_seed 42
 
               # --use_image_pixels 
               # --image_pixel_count 8192 

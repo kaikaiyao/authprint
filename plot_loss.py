@@ -2,6 +2,7 @@ import re
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import argparse
 from pathlib import Path
 
 def parse_log_file(log_file):
@@ -68,7 +69,7 @@ def parse_log_file(log_file):
     
     return iterations, key_loss, lpips_loss, total_loss, match_rate
 
-def average_metrics(iterations, metrics, window_size=1000):
+def average_metrics(iterations, metrics, window_size=100):
     # Convert to numpy arrays for easier manipulation
     iterations = np.array(iterations)
     metrics = np.array(metrics)
@@ -121,12 +122,18 @@ def create_plot(iterations, metrics, title, ylabel, color, save_path):
     print(f"Saved plot to {save_path}")
 
 def main():
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Plot training metrics from a log file.')
+    parser.add_argument('--log_file', type=str, default='train_rank0.log',
+                        help='Path to the log file (default: train_rank0.log)')
+    args = parser.parse_args()
+    
     # Create plots directory if it doesn't exist
     plots_dir = Path('plots')
     plots_dir.mkdir(exist_ok=True)
     
     # Parse log file
-    iterations, key_loss, lpips_loss, total_loss, match_rate = parse_log_file('train_rank0.log')
+    iterations, key_loss, lpips_loss, total_loss, match_rate = parse_log_file(args.log_file)
     
     if len(iterations) == 0:
         print("Error: No data found in the log file. Please check the file path and format.")

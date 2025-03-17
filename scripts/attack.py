@@ -533,13 +533,17 @@ def calculate_asr_at_tpr(watermarked_distances, attack_distances, target_tpr=0.9
         watermarked_distances: Distances for watermarked images
         attack_distances: Distances for attacked images
         target_tpr: Target true positive rate (default: 0.95)
+        We want target_tpr (95%) of watermarked distances to be BELOW the threshold
         
     Returns:
         tuple: (attack success rate, threshold)
     """
     # Sort watermarked distances to find threshold
     sorted_watermarked = np.sort(watermarked_distances)
-    threshold_idx = int((1 - target_tpr) * len(sorted_watermarked))
+    
+    # Calculate the index that will give us the threshold where target_tpr (95%) 
+    # of watermarked distances are BELOW it
+    threshold_idx = int(target_tpr * len(sorted_watermarked))
     threshold = sorted_watermarked[threshold_idx]
     
     # Calculate attack success rate (percentage of attack distances below threshold)

@@ -109,7 +109,7 @@ def parse_log_file(log_file):
     
     return iterations, key_loss, lpips_loss, total_loss, match_rate, mse_dist, mae_dist
 
-def average_metrics(iterations, metrics, window_size=100):
+def average_metrics(iterations, metrics, window_size=1000):
     # Convert to numpy arrays for easier manipulation
     iterations = np.array(iterations)
     metrics = np.array(metrics)

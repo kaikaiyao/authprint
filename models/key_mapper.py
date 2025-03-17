@@ -7,7 +7,7 @@ import torch.nn as nn
 
 class KeyMapper(nn.Module):
     """
-    Fixed secret mapping: maps a latent partial vector to a configurable-bit binary key.
+    Fixed secret mapping: maps a latent partial vector or a vector of selected image pixels to a configurable-bit binary key.
     """
     def __init__(self, input_dim=32, output_dim=4, seed=None):
         """

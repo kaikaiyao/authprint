@@ -78,13 +78,14 @@ spec:
                       --batch_size 128 \
                       --total_iterations 600000 \
                       --checkpoint_interval 20000 \
-                      --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth" \
-                      --key_length 32 \
+                      --key_length 1 \
                       --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
                       --use_image_pixels \
                       --image_pixel_count 8192 \
                       --image_pixel_set_seed 42
+              
+              # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"
 
               # --use_image_pixels 
               # --image_pixel_count 8192 

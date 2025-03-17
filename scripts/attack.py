@@ -29,6 +29,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import matplotlib.pyplot as plt
 from PIL import Image
 import lpips
+import sklearn.metrics as skmetrics
 
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -40,6 +41,13 @@ from utils.checkpoint import load_checkpoint
 from utils.logging_utils import setup_logging
 from models.model_utils import load_stylegan2_model, clone_model
 from utils.distributed import setup_distributed, cleanup_distributed
+from utils.model_loading import load_pretrained_models
+from utils.image_transforms import (
+    apply_truncation, 
+    quantize_model_weights, 
+    downsample_and_upsample, 
+    apply_jpeg_compression
+)
 
 
 def parse_args():
@@ -516,6 +524,29 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     }
 
 
+def calculate_asr_at_tpr(watermarked_distances, attack_distances, target_tpr=0.95):
+    """
+    Calculate attack success rate at a specific true positive rate.
+    
+    Args:
+        watermarked_distances: Distances for watermarked images
+        attack_distances: Distances for attacked images
+        target_tpr: Target true positive rate (default: 0.95)
+        
+    Returns:
+        tuple: (attack success rate, threshold)
+    """
+    # Sort watermarked distances to find threshold
+    sorted_watermarked = np.sort(watermarked_distances)
+    threshold_idx = int((1 - target_tpr) * len(sorted_watermarked))
+    threshold = sorted_watermarked[threshold_idx]
+    
+    # Calculate attack success rate (percentage of attack distances below threshold)
+    asr = np.mean(attack_distances <= threshold) * 100.0
+    
+    return asr, threshold
+
+
 def run_attack(config, local_rank, rank, world_size, device):
     """
     Run attack against watermarked model.
@@ -623,12 +654,25 @@ def run_attack(config, local_rank, rank, world_size, device):
         device=device
     )
     
+    # Load pretrained models if needed
+    pretrained_models = {}
+    if hasattr(config.evaluate, 'evaluate_pretrained') and config.evaluate.evaluate_pretrained:
+        pretrained_models = load_pretrained_models(config, device, rank)
+    
+    # Setup quantized model if needed
+    quantized_model = None
+    if getattr(config.evaluate, 'evaluate_quantization', False):
+        if rank == 0:
+            logging.info("Setting up quantized model...")
+        quantized_model = quantize_model_weights(gan_model)
+        quantized_model.eval()
+    
     # Step 1: Train surrogate decoders
     surrogate_decoders = train_surrogate_decoders(
         gan_model, watermarked_model, config, local_rank, rank, world_size, device
     )
     
-    # Dictionary to store metrics for each alpha value
+    # Dictionary to store metrics for each alpha value and each case
     all_attack_metrics = {}
     
     # Get list of alpha values to try
@@ -641,177 +685,169 @@ def run_attack(config, local_rank, rank, world_size, device):
     if rank == 0:
         logging.info(f"Will test {len(alpha_values)} alpha values: {alpha_values}")
     
-    # Step 2: Perform PGD attack for each alpha value
+    # First collect watermarked image distances for threshold calculation
+    watermarked_mse_distances = []
+    watermarked_mae_distances = []
+    
+    # Generate watermarked images and collect distances
+    num_batches = (config.attack.num_samples + config.attack.batch_size - 1) // config.attack.batch_size
+    for batch_idx in range(num_batches):
+        actual_batch_size = min(config.attack.batch_size, config.attack.num_samples - batch_idx * config.attack.batch_size)
+        if actual_batch_size <= 0:
+            break
+            
+        # Generate random latent vectors
+        z = torch.randn(actual_batch_size, gan_model.z_dim, device=device)
+        
+        # Generate watermarked images
+        with torch.no_grad():
+            w_water = watermarked_model.mapping(z, None)
+            x_water = watermarked_model.synthesis(w_water, noise_mode="const")
+            
+            # Extract features based on approach
+            if use_image_pixels:
+                features = extract_image_partial(x_water, pixel_indices)
+            else:
+                if w_water.ndim == 3:
+                    w_water_single = w_water[:, 0, :]
+                else:
+                    w_water_single = w_water
+                features = w_water_single[:, latent_indices]
+            
+            # Get true keys
+            true_keys = key_mapper(features)
+            
+            # Get predicted keys
+            pred_logits = decoder(x_water)
+            pred_probs = torch.sigmoid(pred_logits)
+            
+            # Calculate distances
+            mse_dist = torch.mean(torch.pow(pred_probs - true_keys, 2), dim=1).cpu().numpy()
+            mae_dist = torch.mean(torch.abs(pred_probs - true_keys), dim=1).cpu().numpy()
+            
+            watermarked_mse_distances.extend(mse_dist)
+            watermarked_mae_distances.extend(mae_dist)
+    
+    # Convert to numpy arrays
+    watermarked_mse_distances = np.array(watermarked_mse_distances)
+    watermarked_mae_distances = np.array(watermarked_mae_distances)
+    
+    # Step 2: Perform PGD attack for each alpha value and each case
     for alpha in alpha_values:
         if rank == 0:
             logging.info(f"\n===== Running attack with alpha={alpha} =====")
         
-        # Initialize attack metrics for this alpha
-        attack_metrics = {
-            'initial_match_rate': 0.0,
-            'final_match_rate': 0.0,
-            'surrogate_classifications': [],
-            'l2_distance': 0.0,
-            'perceptual_distance': 0.0,
-            'mse_distance_mean': 0.0,
-            'mse_distance_std': 0.0,
-            'mae_distance_mean': 0.0,
-            'mae_distance_std': 0.0,
-            'num_samples': 0
-        }
+        # Dictionary to store metrics for each case with this alpha
+        case_metrics = {}
         
-        # Batch attack
-        batch_size = config.attack.batch_size
-        num_batches = (config.attack.num_samples + batch_size - 1) // batch_size
-        
-        # Only use tqdm progress bar on rank 0
-        desc = f"Attacking batches (alpha={alpha})"
-        batch_iterator = tqdm(range(num_batches), desc=desc) if rank == 0 else range(num_batches)
-        
-        # Prepare to save visualizations (only on rank 0)
+        # First attack original images
         if rank == 0:
-            # Create a subdirectory for this alpha value
-            vis_dir = os.path.join(config.output_dir, f"visualizations_alpha_{alpha}")
-            os.makedirs(vis_dir, exist_ok=True)
-            vis_indices = np.random.choice(
-                config.attack.num_samples, 
-                min(config.attack.visualization_samples, config.attack.num_samples), 
-                replace=False
-            )
-            vis_counter = 0
+            logging.info("Attacking original images...")
+        metrics = attack_case(
+            None, None,  # No model_name or transformation
+            gan_model, watermarked_model, decoder, key_mapper,
+            surrogate_decoders, config, device,
+            pixel_indices if use_image_pixels else None,
+            latent_indices if not use_image_pixels else None,
+            alpha, watermarked_mse_distances, watermarked_mae_distances
+        )
+        case_metrics['original'] = metrics
         
-        # Perform PGD attack on batches with current alpha
-        for batch_idx in batch_iterator:
-            actual_batch_size = min(batch_size, config.attack.num_samples - batch_idx * batch_size)
-            if actual_batch_size <= 0:
-                break
-            
-            # Generate random latent vectors
-            z = torch.randn(actual_batch_size, gan_model.z_dim, device=device)
-            
-            # Generate original images
-            with torch.no_grad():
-                w = gan_model.mapping(z, None)
-                original_images = gan_model.synthesis(w, noise_mode='const')
-                
-                # If using latent-based approach, extract w_partial
-                w_partials = None
-                if not use_image_pixels:
-                    # If w is replicated for each synthesis layer, take the first as representative
-                    if w.ndim == 3:
-                        w_single = w[:, 0, :]
-                    else:
-                        w_single = w
-                    
-                    # Extract partial w vector using indices
-                    w_partials = w_single[:, latent_indices]
-            
-            # Perform PGD attack - pass both w_partials and pixel_indices, based on mode
-            # Pass the current alpha value
-            batch_results = pgd_attack(
-                original_images, w_partials, surrogate_decoders, decoder, key_mapper, config, device,
-                pixel_indices=pixel_indices if use_image_pixels else None,
-                alpha=alpha
-            )
-            
-            # Update metrics (needs to be aggregated across ranks later)
-            attack_metrics['initial_match_rate'] += batch_results['initial_match_rate'] * actual_batch_size
-            attack_metrics['final_match_rate'] += batch_results['final_match_rate'] * actual_batch_size
-            if not attack_metrics['surrogate_classifications']:
-                attack_metrics['surrogate_classifications'] = [0] * len(batch_results['surrogate_classifications'])
-            for i in range(len(batch_results['surrogate_classifications'])):
-                attack_metrics['surrogate_classifications'][i] += batch_results['surrogate_classifications'][i] * actual_batch_size
-            attack_metrics['l2_distance'] += batch_results['l2_distance'] * actual_batch_size
-            attack_metrics['perceptual_distance'] += batch_results['perceptual_distance'] * actual_batch_size
-            attack_metrics['mse_distance_mean'] += batch_results['mse_distance_mean'] * actual_batch_size
-            attack_metrics['mse_distance_std'] += batch_results['mse_distance_std'] * actual_batch_size
-            attack_metrics['mae_distance_mean'] += batch_results['mae_distance_mean'] * actual_batch_size
-            attack_metrics['mae_distance_std'] += batch_results['mae_distance_std'] * actual_batch_size
-            attack_metrics['num_samples'] += actual_batch_size
-            
-            # Save visualizations (only on rank 0)
-            if rank == 0:
-                global_indices = np.arange(batch_idx * batch_size, (batch_idx * batch_size) + actual_batch_size)
-                for i, global_idx in enumerate(global_indices):
-                    if global_idx in vis_indices:
-                        # Save original and attacked image pair
-                        orig_img = (batch_results['original_images'][i].permute(1, 2, 0).cpu().numpy() + 1) / 2
-                        orig_img = np.clip(orig_img, 0, 1)
-                        
-                        attacked_img = (batch_results['attacked_images'][i].permute(1, 2, 0).cpu().numpy() + 1) / 2
-                        attacked_img = np.clip(attacked_img, 0, 1)
-                        
-                        # Create a comparison figure
-                        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-                        axs[0].imshow(orig_img)
-                        axs[0].set_title("Original Image")
-                        axs[0].axis('off')
-                        
-                        axs[1].imshow(attacked_img)
-                        axs[1].set_title("Attacked Image")
-                        axs[1].axis('off')
-                        
-                        # Add key information
-                        true_key = batch_results['true_keys'][i]
-                        pred_key = batch_results['predicted_keys'][i]
-                        key_match = true_key == pred_key
-                        
-                        # Extract metrics for this sample
-                        mse_val = torch.pow(torch.tensor(true_key) - torch.tensor(pred_key), 2).mean().item()
-                        mae_val = torch.abs(torch.tensor(true_key) - torch.tensor(pred_key)).mean().item()
-                        
-                        plt.suptitle(f"Image {global_idx} (alpha={alpha})\nTrue Key: {true_key}\nPredicted Key: {pred_key}\n"
-                                    f"Forging Success: {key_match}\nMSE: {mse_val:.4f}, MAE: {mae_val:.4f}")
-                        plt.tight_layout()
-                        
-                        # Save figure
-                        plt.savefig(os.path.join(vis_dir, f"attack_vis_{global_idx}.png"))
-                        plt.close(fig)
-                        
-                        vis_counter += 1
+        # Attack pretrained models if enabled
+        if hasattr(config.evaluate, 'evaluate_pretrained') and config.evaluate.evaluate_pretrained:
+            for model_name in pretrained_models:
+                if rank == 0:
+                    logging.info(f"Attacking pretrained model: {model_name}...")
+                metrics = attack_case(
+                    model_name, None,  # model_name but no transformation
+                    pretrained_models[model_name], watermarked_model, decoder, key_mapper,
+                    surrogate_decoders, config, device,
+                    pixel_indices if use_image_pixels else None,
+                    latent_indices if not use_image_pixels else None,
+                    alpha, watermarked_mse_distances, watermarked_mae_distances
+                )
+                case_metrics[f'pretrained_{model_name}'] = metrics
         
-        # Aggregate metrics across ranks in distributed setting
-        if world_size > 1:
-            for key in ['initial_match_rate', 'final_match_rate', 'l2_distance', 'perceptual_distance', 
-                       'mse_distance_mean', 'mse_distance_std', 'mae_distance_mean', 'mae_distance_std', 'num_samples']:
-                tensor = torch.tensor([attack_metrics[key]], device=device)
-                dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
-                attack_metrics[key] = tensor.item()
+        # Attack transformations if enabled
+        if hasattr(config.evaluate, 'evaluate_transforms') and config.evaluate.evaluate_transforms:
+            # Attack truncation
+            if hasattr(config.evaluate, 'evaluate_truncation') and config.evaluate.evaluate_truncation:
+                if rank == 0:
+                    logging.info("Attacking truncated images...")
+                metrics = attack_case(
+                    None, 'truncation',
+                    gan_model, watermarked_model, decoder, key_mapper,
+                    surrogate_decoders, config, device,
+                    pixel_indices if use_image_pixels else None,
+                    latent_indices if not use_image_pixels else None,
+                    alpha, watermarked_mse_distances, watermarked_mae_distances
+                )
+                case_metrics['truncation'] = metrics
             
-            for i in range(len(attack_metrics['surrogate_classifications'])):
-                tensor = torch.tensor([attack_metrics['surrogate_classifications'][i]], device=device)
-                dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
-                attack_metrics['surrogate_classifications'][i] = tensor.item()
+            # Attack quantization
+            if hasattr(config.evaluate, 'evaluate_quantization') and config.evaluate.evaluate_quantization:
+                if rank == 0:
+                    logging.info("Attacking quantized model...")
+                if quantized_model is not None:
+                    metrics = attack_case(
+                        None, 'quantization',
+                        quantized_model, watermarked_model, decoder, key_mapper,
+                        surrogate_decoders, config, device,
+                        pixel_indices if use_image_pixels else None,
+                        latent_indices if not use_image_pixels else None,
+                        alpha, watermarked_mse_distances, watermarked_mae_distances
+                    )
+                    case_metrics['quantization'] = metrics
+            
+            # Attack downsample
+            if hasattr(config.evaluate, 'evaluate_downsample') and config.evaluate.evaluate_downsample:
+                if rank == 0:
+                    logging.info("Attacking downsampled images...")
+                metrics = attack_case(
+                    None, 'downsample',
+                    gan_model, watermarked_model, decoder, key_mapper,
+                    surrogate_decoders, config, device,
+                    pixel_indices if use_image_pixels else None,
+                    latent_indices if not use_image_pixels else None,
+                    alpha, watermarked_mse_distances, watermarked_mae_distances
+                )
+                case_metrics['downsample'] = metrics
+            
+            # Attack JPEG compression
+            if hasattr(config.evaluate, 'evaluate_jpeg') and config.evaluate.evaluate_jpeg:
+                if rank == 0:
+                    logging.info("Attacking JPEG compressed images...")
+                metrics = attack_case(
+                    None, 'jpeg',
+                    gan_model, watermarked_model, decoder, key_mapper,
+                    surrogate_decoders, config, device,
+                    pixel_indices if use_image_pixels else None,
+                    latent_indices if not use_image_pixels else None,
+                    alpha, watermarked_mse_distances, watermarked_mae_distances
+                )
+                case_metrics['jpeg'] = metrics
         
-        # Normalize metrics
-        attack_metrics['initial_match_rate'] /= attack_metrics['num_samples']
-        attack_metrics['final_match_rate'] /= attack_metrics['num_samples']
-        attack_metrics['surrogate_classifications'] = [s / attack_metrics['num_samples'] for s in attack_metrics['surrogate_classifications']]
-        attack_metrics['l2_distance'] /= attack_metrics['num_samples']
-        attack_metrics['perceptual_distance'] /= attack_metrics['num_samples']
-        attack_metrics['mse_distance_mean'] /= attack_metrics['num_samples']
-        attack_metrics['mse_distance_std'] /= attack_metrics['num_samples']
-        attack_metrics['mae_distance_mean'] /= attack_metrics['num_samples']
-        attack_metrics['mae_distance_std'] /= attack_metrics['num_samples']
-        
-        # Store metrics for this alpha
-        all_attack_metrics[alpha] = attack_metrics
+        # Store all case metrics for this alpha
+        all_attack_metrics[alpha] = case_metrics
         
         # Print and log metrics for this alpha (only on rank 0)
         if rank == 0:
             logging.info(f"\n===== Attack Results for alpha={alpha} =====")
-            logging.info(f"Number of samples: {attack_metrics['num_samples']}")
-            logging.info(f"Initial match rate: {attack_metrics['initial_match_rate']:.2f}%")
-            logging.info(f"Final match rate after attack: {attack_metrics['final_match_rate']:.2f}%")
-            logging.info(f"Attack success rate: {attack_metrics['final_match_rate']:.2f}%")
-            logging.info(f"MSE Distance: {attack_metrics['mse_distance_mean']:.4f}±{attack_metrics['mse_distance_std']:.4f}")
-            logging.info(f"MAE Distance: {attack_metrics['mae_distance_mean']:.4f}±{attack_metrics['mae_distance_std']:.4f}")
-            
-            for i, rate in enumerate(attack_metrics['surrogate_classifications']):
-                logging.info(f"Surrogate decoder {i+1} watermark fooling rate: {rate:.2f}%")
-            
-            logging.info(f"L2 distance between original and attacked images: {attack_metrics['l2_distance']:.4f}")
-            logging.info(f"LPIPS perceptual distance: {attack_metrics['perceptual_distance']:.4f}")
+            for case_name, metrics in case_metrics.items():
+                logging.info(f"\n--- Results for {case_name} ---")
+                logging.info(f"Number of samples: {metrics['num_samples']}")
+                logging.info(f"Initial match rate: {metrics['initial_match_rate']:.2f}%")
+                logging.info(f"Final match rate after attack: {metrics['final_match_rate']:.2f}%")
+                logging.info(f"MSE Distance: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}")
+                logging.info(f"MAE Distance: {metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f}")
+                logging.info(f"ASR@95%TPR (MSE): {metrics['asr_95tpr_mse']:.2f}%")
+                logging.info(f"ASR@95%TPR (MAE): {metrics['asr_95tpr_mae']:.2f}%")
+                
+                for i, rate in enumerate(metrics['surrogate_classifications']):
+                    logging.info(f"Surrogate decoder {i+1} watermark fooling rate: {rate:.2f}%")
+                
+                logging.info(f"L2 distance between original and attacked images: {metrics['l2_distance']:.4f}")
+                logging.info(f"LPIPS perceptual distance: {metrics['perceptual_distance']:.4f}")
     
     # Save all metrics to file (only on rank 0)
     if rank == 0:
@@ -820,34 +856,173 @@ def run_attack(config, local_rank, rank, world_size, device):
             f.write("===== Attack Results Summary =====\n\n")
             
             # Create a summary table
-            f.write("Alpha | Success Rate | MSE Distance | MAE Distance | L2 Dist | LPIPS Dist\n")
-            f.write("----- | ------------ | ------------ | ------------ | ------- | ----------\n")
+            f.write("Alpha | Case | Match Rate | ASR@95%TPR (MSE) | ASR@95%TPR (MAE) | L2 Dist | LPIPS Dist\n")
+            f.write("----- | ---- | ---------- | ---------------- | ---------------- | ------- | ----------\n")
             
-            for alpha, metrics in all_attack_metrics.items():
-                f.write(f"{alpha:.4f} | {metrics['final_match_rate']:.2f}% | "
-                       f"{metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f} | "
-                       f"{metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f} | "
-                       f"{metrics['l2_distance']:.4f} | {metrics['perceptual_distance']:.4f}\n")
+            for alpha, case_metrics in all_attack_metrics.items():
+                for case_name, metrics in case_metrics.items():
+                    f.write(f"{alpha:.4f} | {case_name} | {metrics['final_match_rate']:.2f}% | "
+                           f"{metrics['asr_95tpr_mse']:.2f}% | {metrics['asr_95tpr_mae']:.2f}% | "
+                           f"{metrics['l2_distance']:.4f} | {metrics['perceptual_distance']:.4f}\n")
             
             f.write("\n\n")
             
-            # Detailed results for each alpha
-            for alpha, metrics in all_attack_metrics.items():
+            # Detailed results for each alpha and case
+            for alpha, case_metrics in all_attack_metrics.items():
                 f.write(f"\n===== Detailed Results for alpha={alpha} =====\n")
-                f.write(f"Number of samples: {metrics['num_samples']}\n")
-                f.write(f"Initial match rate: {metrics['initial_match_rate']:.2f}%\n")
-                f.write(f"Final match rate after attack: {metrics['final_match_rate']:.2f}%\n")
-                f.write(f"Attack success rate: {metrics['final_match_rate']:.2f}%\n")
-                f.write(f"MSE Distance: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}\n")
-                f.write(f"MAE Distance: {metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f}\n")
-                
-                for i, rate in enumerate(metrics['surrogate_classifications']):
-                    f.write(f"Surrogate decoder {i+1} watermark fooling rate: {rate:.2f}%\n")
-                
-                f.write(f"L2 distance between original and attacked images: {metrics['l2_distance']:.4f}\n")
-                f.write(f"LPIPS perceptual distance: {metrics['perceptual_distance']:.4f}\n")
+                for case_name, metrics in case_metrics.items():
+                    f.write(f"\n--- Results for {case_name} ---\n")
+                    f.write(f"Number of samples: {metrics['num_samples']}\n")
+                    f.write(f"Initial match rate: {metrics['initial_match_rate']:.2f}%\n")
+                    f.write(f"Final match rate after attack: {metrics['final_match_rate']:.2f}%\n")
+                    f.write(f"MSE Distance: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}\n")
+                    f.write(f"MAE Distance: {metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f}\n")
+                    f.write(f"ASR@95%TPR (MSE): {metrics['asr_95tpr_mse']:.2f}%\n")
+                    f.write(f"ASR@95%TPR (MAE): {metrics['asr_95tpr_mae']:.2f}%\n")
+                    
+                    for i, rate in enumerate(metrics['surrogate_classifications']):
+                        f.write(f"Surrogate decoder {i+1} watermark fooling rate: {rate:.2f}%\n")
+                    
+                    f.write(f"L2 distance between original and attacked images: {metrics['l2_distance']:.4f}\n")
+                    f.write(f"LPIPS perceptual distance: {metrics['perceptual_distance']:.4f}\n")
     
     return all_attack_metrics
+
+
+def attack_case(
+    model_name, transformation,
+    source_model, watermarked_model, decoder, key_mapper,
+    surrogate_decoders, config, device,
+    pixel_indices=None, latent_indices=None,
+    alpha=0.01, watermarked_mse_distances=None, watermarked_mae_distances=None
+):
+    """
+    Attack a specific case (original, pretrained model, or transformation).
+    
+    Args:
+        model_name (str): Name of pretrained model to use (or None)
+        transformation (str): Name of transformation to apply (or None)
+        source_model: Model to generate images from
+        watermarked_model: Watermarked model for comparison
+        decoder: Decoder model
+        key_mapper: Key mapper model
+        surrogate_decoders: List of surrogate decoders
+        config: Configuration object
+        device: Device to run on
+        pixel_indices: Indices for image-pixel approach
+        latent_indices: Indices for latent-based approach
+        alpha: PGD step size
+        watermarked_mse_distances: MSE distances for watermarked images (for threshold)
+        watermarked_mae_distances: MAE distances for watermarked images (for threshold)
+        
+    Returns:
+        dict: Attack metrics for this case
+    """
+    # Initialize metrics
+    attack_metrics = {
+        'initial_match_rate': 0.0,
+        'final_match_rate': 0.0,
+        'surrogate_classifications': [],
+        'l2_distance': 0.0,
+        'perceptual_distance': 0.0,
+        'mse_distance_mean': 0.0,
+        'mse_distance_std': 0.0,
+        'mae_distance_mean': 0.0,
+        'mae_distance_std': 0.0,
+        'num_samples': 0,
+        'all_mse_distances': [],
+        'all_mae_distances': []
+    }
+    
+    # Batch attack
+    batch_size = config.attack.batch_size
+    num_batches = (config.attack.num_samples + batch_size - 1) // batch_size
+    
+    for batch_idx in range(num_batches):
+        actual_batch_size = min(batch_size, config.attack.num_samples - batch_idx * batch_size)
+        if actual_batch_size <= 0:
+            break
+        
+        # Generate random latent vectors
+        z = torch.randn(actual_batch_size, source_model.z_dim, device=device)
+        
+        # Generate images based on case
+        with torch.no_grad():
+            if transformation == 'truncation':
+                # Apply truncation
+                truncation_psi = getattr(config.evaluate, 'truncation_psi', 2.0)
+                original_images, w = apply_truncation(source_model, z, truncation_psi, return_w=True)
+            else:
+                # Normal generation
+                w = source_model.mapping(z, None)
+                original_images = source_model.synthesis(w, noise_mode="const")
+                
+                # Apply post-processing transformations
+                if transformation == 'downsample':
+                    downsample_size = getattr(config.evaluate, 'downsample_size', 128)
+                    original_images = downsample_and_upsample(original_images, downsample_size)
+                elif transformation == 'jpeg':
+                    jpeg_quality = getattr(config.evaluate, 'jpeg_quality', 55)
+                    original_images = apply_jpeg_compression(original_images, jpeg_quality)
+            
+            # Extract w_partial if using latent-based approach
+            w_partials = None
+            if latent_indices is not None:
+                if w.ndim == 3:
+                    w_single = w[:, 0, :]
+                else:
+                    w_single = w
+                w_partials = w_single[:, latent_indices]
+        
+        # Perform PGD attack
+        batch_results = pgd_attack(
+            original_images, w_partials, surrogate_decoders, decoder, key_mapper,
+            config, device, pixel_indices=pixel_indices, alpha=alpha
+        )
+        
+        # Update metrics
+        attack_metrics['initial_match_rate'] += batch_results['initial_match_rate'] * actual_batch_size
+        attack_metrics['final_match_rate'] += batch_results['final_match_rate'] * actual_batch_size
+        if not attack_metrics['surrogate_classifications']:
+            attack_metrics['surrogate_classifications'] = [0] * len(batch_results['surrogate_classifications'])
+        for i in range(len(batch_results['surrogate_classifications'])):
+            attack_metrics['surrogate_classifications'][i] += batch_results['surrogate_classifications'][i] * actual_batch_size
+        attack_metrics['l2_distance'] += batch_results['l2_distance'] * actual_batch_size
+        attack_metrics['perceptual_distance'] += batch_results['perceptual_distance'] * actual_batch_size
+        attack_metrics['mse_distance_mean'] += batch_results['mse_distance_mean'] * actual_batch_size
+        attack_metrics['mse_distance_std'] += batch_results['mse_distance_std'] * actual_batch_size
+        attack_metrics['mae_distance_mean'] += batch_results['mae_distance_mean'] * actual_batch_size
+        attack_metrics['mae_distance_std'] += batch_results['mae_distance_std'] * actual_batch_size
+        attack_metrics['num_samples'] += actual_batch_size
+        
+        # Store all distances for ASR calculation
+        mse_distances = torch.mean(torch.pow(batch_results['predicted_keys'] - batch_results['true_keys'], 2), dim=1).cpu().numpy()
+        mae_distances = torch.mean(torch.abs(batch_results['predicted_keys'] - batch_results['true_keys']), dim=1).cpu().numpy()
+        attack_metrics['all_mse_distances'].extend(mse_distances)
+        attack_metrics['all_mae_distances'].extend(mae_distances)
+    
+    # Normalize metrics
+    attack_metrics['initial_match_rate'] /= attack_metrics['num_samples']
+    attack_metrics['final_match_rate'] /= attack_metrics['num_samples']
+    attack_metrics['surrogate_classifications'] = [s / attack_metrics['num_samples'] for s in attack_metrics['surrogate_classifications']]
+    attack_metrics['l2_distance'] /= attack_metrics['num_samples']
+    attack_metrics['perceptual_distance'] /= attack_metrics['num_samples']
+    attack_metrics['mse_distance_mean'] /= attack_metrics['num_samples']
+    attack_metrics['mse_distance_std'] /= attack_metrics['num_samples']
+    attack_metrics['mae_distance_mean'] /= attack_metrics['num_samples']
+    attack_metrics['mae_distance_std'] /= attack_metrics['num_samples']
+    
+    # Calculate ASR@95%TPR
+    if watermarked_mse_distances is not None and watermarked_mae_distances is not None:
+        asr_mse, _ = calculate_asr_at_tpr(watermarked_mse_distances, attack_metrics['all_mse_distances'])
+        asr_mae, _ = calculate_asr_at_tpr(watermarked_mae_distances, attack_metrics['all_mae_distances'])
+        attack_metrics['asr_95tpr_mse'] = asr_mse
+        attack_metrics['asr_95tpr_mae'] = asr_mae
+    else:
+        attack_metrics['asr_95tpr_mse'] = 0.0
+        attack_metrics['asr_95tpr_mae'] = 0.0
+    
+    return attack_metrics
 
 
 def main():
@@ -892,14 +1067,13 @@ def main():
         
         if rank == 0:
             logging.info("\n===== ATTACK SUMMARY =====")
-            logging.info("Alpha | Success Rate | MSE Distance | MAE Distance")
-            logging.info("----- | ------------ | ------------ | ------------")
+            logging.info("Alpha | Case | Match Rate | ASR@95%TPR (MSE) | ASR@95%TPR (MAE) | L2 Dist | LPIPS Dist")
+            logging.info("----- | ---- | ---------- | ---------------- | ---------------- | ------- | ----------")
             
             # Print a summary of results for each alpha value
-            for alpha, metrics in all_attack_metrics.items():
-                logging.info(f"{alpha:.4f} | {metrics['final_match_rate']:.2f}% | "
-                            f"{metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f} | "
-                            f"{metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f}")
+            for alpha, case_metrics in all_attack_metrics.items():
+                for case_name, metrics in case_metrics.items():
+                    logging.info(f"{alpha:.4f} | {case_name} | {metrics['final_match_rate']:.2f}% | {metrics['asr_95tpr_mse']:.2f}% | {metrics['asr_95tpr_mae']:.2f}% | {metrics['l2_distance']:.4f} | {metrics['perceptual_distance']:.4f}")
             
             logging.info(f"Attack completed. Results saved to {config.output_dir}")
         

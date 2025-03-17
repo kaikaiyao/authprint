@@ -75,20 +75,21 @@ spec:
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
                       scripts/attack.py \
-                      --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth" \
-                      --num_samples 1000 \
-                      --pgd_alpha 0.0001 0.001 0.01 0.1 1.0 \
+                      --checkpoint_path "/nfs-user-029/w_based/key_length_32/checkpoint_iter200000.pth" \
+                      --num_samples 100 \
+                      --pgd_alpha 0.001 \
                       --pgd_steps 200 \
                       --pgd_epsilon 1.0 \
                       --num_surrogate_models 10 \
                       --surrogate_num_samples 20000 \
                       --key_length 32 \
                       --key_mapper_seed 2025 \
-                      --use_image_pixels \
-                      --image_pixel_count 8192 \
-                      --image_pixel_set_seed 42 \
                       --output_dir "attack_results"
               
+              # --use_image_pixels 
+              # --image_pixel_count 8192 
+              # --image_pixel_set_seed 42
+
               exit_status=$?
               echo "Attack finished with exit status $exit_status"
               

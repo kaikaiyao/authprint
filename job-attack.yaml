@@ -76,12 +76,12 @@ spec:
                       --master_port=12345 \
                       scripts/attack.py \
                       --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth" \
-                      --num_samples 100 \
+                      --num_samples 50 \
                       --pgd_alpha 0.001 \
                       --pgd_steps 500 \
                       --pgd_epsilon 1.0 \
-                      --num_surrogate_models 5 \
-                      --surrogate_num_samples 1000 \
+                      --num_surrogate_models 1 \
+                      --surrogate_num_samples 10000 \
                       --key_length 32 \
                       --key_mapper_seed 2025 \
                       --output_dir "attack_results" \

@@ -686,13 +686,22 @@ def run_attack(config, local_rank, rank, world_size, device):
         logging.info(f"Will test {len(alpha_values)} alpha values: {alpha_values}")
     
     # First collect watermarked image distances for threshold calculation
+    # Use fixed 1000 samples regardless of config.attack.num_samples
     watermarked_mse_distances = []
     watermarked_mae_distances = []
     
+    # Fixed number of samples for threshold computation
+    num_threshold_samples = 1000
+    batch_size = config.attack.batch_size
+    num_batches = (num_threshold_samples + batch_size - 1) // batch_size
+    
+    if rank == 0:
+        logging.info(f"Computing threshold using {num_threshold_samples} watermarked samples...")
+    
     # Generate watermarked images and collect distances
-    num_batches = (config.attack.num_samples + config.attack.batch_size - 1) // config.attack.batch_size
+    samples_processed = 0
     for batch_idx in range(num_batches):
-        actual_batch_size = min(config.attack.batch_size, config.attack.num_samples - batch_idx * config.attack.batch_size)
+        actual_batch_size = min(batch_size, num_threshold_samples - samples_processed)
         if actual_batch_size <= 0:
             break
             
@@ -727,10 +736,14 @@ def run_attack(config, local_rank, rank, world_size, device):
             
             watermarked_mse_distances.extend(mse_dist)
             watermarked_mae_distances.extend(mae_dist)
+            samples_processed += actual_batch_size
     
     # Convert to numpy arrays
     watermarked_mse_distances = np.array(watermarked_mse_distances)
     watermarked_mae_distances = np.array(watermarked_mae_distances)
+    
+    if rank == 0:
+        logging.info(f"Computed threshold using {len(watermarked_mse_distances)} watermarked samples")
     
     # Step 2: Perform PGD attack for each alpha value and each case
     for alpha in alpha_values:

@@ -80,7 +80,7 @@ class EvaluateConfig:
     evaluate_quantization: bool = True
     evaluate_downsample: bool = True
     downsample_size: int = 128
-    evaluate_jpeg: bool = True
+    evaluate_jpeg: bool = False
     jpeg_quality: int = 55
 
 

@@ -79,7 +79,7 @@ spec:
                       --selected_indices "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31" \
                       --use_combined_surrogate_input \
                       --num_samples 50 \
-                      --pgd_alpha 0.00010.001 0.01 \
+                      --pgd_alpha 0.0001 0.001 0.01 \
                       --pgd_steps 500 \
                       --pgd_epsilon 2.0 \
                       --num_surrogate_models 10 \

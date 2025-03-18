@@ -73,6 +73,8 @@ def parse_args():
                         help="Number of dimensions to select from the w vector (default: 32)")
     parser.add_argument("--use_image_pixels", action="store_true", default=False,
                         help="Use image pixels for watermarking instead of latent vectors")
+    parser.add_argument("--use_combined_surrogate_input", action="store_true", default=False,
+                        help="In w-latent mode, use both images and w_partial as input to surrogate decoders")
     parser.add_argument("--image_pixel_set_seed", type=int, default=42,
                         help="Random seed for selecting pixel indices from the generated image")
     parser.add_argument("--image_pixel_count", type=int, default=8192,
@@ -112,9 +114,12 @@ def parse_args():
 class SurrogateDecoder(nn.Module):
     """
     Simplified surrogate decoder for binary classification between original and watermarked images.
+    Can optionally take combined input (image + w_partial) in w-latent mode.
     """
-    def __init__(self, image_size=256, channels=3):
+    def __init__(self, image_size=256, channels=3, w_partial_length=None):
         super(SurrogateDecoder, self).__init__()
+        self.w_partial_length = w_partial_length
+        
         self.features = nn.Sequential(
             # Initial layer: 256 -> 128
             nn.Conv2d(channels, 64, kernel_size=4, stride=2, padding=1),
@@ -149,18 +154,45 @@ class SurrogateDecoder(nn.Module):
         # Calculate the size of the flattened output
         self.feature_size = 512 * (image_size // 64) * (image_size // 64)
         
+        # Additional network for w_partial if used
+        if w_partial_length is not None:
+            self.w_partial_net = nn.Sequential(
+                nn.Linear(w_partial_length, 256),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Dropout(0.5),
+                nn.Linear(256, 256),
+                nn.LeakyReLU(0.2, inplace=True)
+            )
+            # Adjust classifier input size for combined features
+            classifier_input_size = self.feature_size + 256
+        else:
+            self.w_partial_net = None
+            classifier_input_size = self.feature_size
+        
         # Classification head
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(self.feature_size, 256),
+            nn.Linear(classifier_input_size, 256),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Dropout(0.5),
             nn.Linear(256, 1)  # Binary classification - 0: original, 1: watermarked
         )
     
-    def forward(self, x):
-        """Forward pass for surrogate decoder."""
+    def forward(self, x, w_partial=None):
+        """Forward pass for surrogate decoder.
+        
+        Args:
+            x (torch.Tensor): Input images
+            w_partial (torch.Tensor, optional): Partial latent vectors when using combined input
+        """
         features = self.features(x)
+        features = features.view(features.size(0), -1)
+        
+        if self.w_partial_net is not None and w_partial is not None:
+            # Process w_partial and concatenate with image features
+            w_features = self.w_partial_net(w_partial)
+            features = torch.cat([features, w_features], dim=1)
+        
         return self.classifier(features)
 
 
@@ -276,12 +308,22 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
     if rank == 0:
         logging.info(f"Training {config.attack.num_surrogate_models} surrogate decoders...")
     
+    # Determine if we're using combined input (only in w-latent mode)
+    use_combined_input = (not config.model.use_image_pixels) and config.attack.use_combined_surrogate_input
+    if use_combined_input and rank == 0:
+        logging.info("Using combined input (images + w_partial) for surrogate decoders")
+    
     for model_idx in range(config.attack.num_surrogate_models):
         if rank == 0:
             logging.info(f"Training surrogate decoder {model_idx+1}/{config.attack.num_surrogate_models}")
         
-        # Initialize surrogate decoder
-        surrogate_decoder = SurrogateDecoder(image_size=config.model.img_size).to(device)
+        # Initialize surrogate decoder with w_partial_length if using combined input
+        w_partial_length = len(config.model.selected_indices) if use_combined_input else None
+        surrogate_decoder = SurrogateDecoder(
+            image_size=config.model.img_size,
+            channels=3,
+            w_partial_length=w_partial_length
+        ).to(device)
         
         # Use DDP if distributed training
         if world_size > 1:
@@ -299,18 +341,33 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             # Sample random latents
             z = torch.randn(batch_size, gan_model.z_dim, device=device)
             
-            # Get original images
+            # Get original images and w vectors
             with torch.no_grad():
                 w_orig = gan_model.mapping(z, None)
                 x_orig = gan_model.synthesis(w_orig, noise_mode="const")
                 
-                # Get watermarked images
+                # Get watermarked images and w vectors
                 if hasattr(watermarked_model, 'module'):
                     w_water = watermarked_model.module.mapping(z, None)
                     x_water = watermarked_model.module.synthesis(w_water, noise_mode="const")
                 else:
                     w_water = watermarked_model.mapping(z, None)
                     x_water = watermarked_model.synthesis(w_water, noise_mode="const")
+            
+            # Extract w_partial if using combined input
+            w_partial_orig = None
+            w_partial_water = None
+            if use_combined_input:
+                if w_orig.ndim == 3:
+                    w_orig_single = w_orig[:, 0, :]
+                    w_water_single = w_water[:, 0, :]
+                else:
+                    w_orig_single = w_orig
+                    w_water_single = w_water
+                
+                # Get w_partial using selected indices
+                w_partial_orig = w_orig_single[:, config.model.selected_indices]
+                w_partial_water = w_water_single[:, config.model.selected_indices]
             
             # Prepare labels: 0 for original, 1 for watermarked
             orig_labels = torch.zeros(batch_size, 1, device=device)
@@ -320,7 +377,11 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             x_combined = torch.cat([x_orig, x_water], dim=0)
             labels_combined = torch.cat([orig_labels, water_labels], dim=0)
             
-            return x_combined, labels_combined
+            if use_combined_input:
+                w_partial_combined = torch.cat([w_partial_orig, w_partial_water], dim=0)
+                return x_combined, w_partial_combined, labels_combined
+            else:
+                return x_combined, None, labels_combined
         
         # Train the surrogate decoder
         surrogate_decoder.train()
@@ -333,13 +394,13 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             iterator = tqdm(range(num_batches), desc=f"Epoch {epoch+1}/{config.attack.surrogate_epochs}") if rank == 0 else range(num_batches)
             for _ in iterator:
                 # Generate a batch
-                x, labels = generate_batch()
+                x, w_partial, labels = generate_batch()
                 
                 # Zero the gradients
                 optimizer.zero_grad()
                 
                 # Forward pass
-                outputs = surrogate_decoder(x)
+                outputs = surrogate_decoder(x, w_partial)
                 
                 # Calculate loss
                 loss = criterion(outputs, labels)
@@ -384,7 +445,8 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             surrogate_path = os.path.join(surrogate_dir, f"surrogate_decoder_{model_idx}.pth")
             torch.save({
                 'model_state_dict': state_dict,
-                'accuracy': accuracy
+                'accuracy': accuracy,
+                'use_combined_input': use_combined_input
             }, surrogate_path)
             logging.info(f"Saved surrogate decoder {model_idx+1} to {surrogate_path}")
     
@@ -411,8 +473,14 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     Returns:
         dict: Attack results including statistics and attacked images
     """
-    # Create a copy of the images for attack (detach to avoid gradient tracking from generation)
+    # Determine if we're using combined input for surrogates
+    use_combined_input = (not config.model.use_image_pixels) and config.attack.use_combined_surrogate_input
+    
+    # Create copies for attack (detach to avoid gradient tracking from generation)
     attacked_images = images.clone().detach().requires_grad_(True)
+    attacked_w_partials = None
+    if use_combined_input and w_partials is not None:
+        attacked_w_partials = w_partials.clone().detach().requires_grad_(True)
     
     # Get true keys from key mapper
     if config.model.use_image_pixels:
@@ -430,26 +498,39 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     img_min = images.min()
     img_max = images.max()
     
+    # If using w_partial, compute its stats too
+    if attacked_w_partials is not None:
+        w_min = w_partials.min()
+        w_max = w_partials.max()
+    
     # Get predicted keys from real decoder before attack (for comparison)
     with torch.no_grad():
         initial_pred = real_decoder(images)
         initial_bin_pred = (torch.sigmoid(initial_pred) > 0.5).float()
         initial_match = (initial_bin_pred == true_keys).all(dim=1).float().mean().item() * 100.0
     
-    # Setup optimizer (single step is handled manually in PGD)
+    # Setup optimizers (single step is handled manually in PGD)
     # We'll use the Adam optimizer for better convergence in PGD
-    optimizer = optim.Adam([attacked_images], lr=alpha)  # Use the specific alpha value
+    optimizers = []
+    optimizers.append(optim.Adam([attacked_images], lr=alpha))
+    if attacked_w_partials is not None:
+        optimizers.append(optim.Adam([attacked_w_partials], lr=alpha * 0.1))  # Lower learning rate for w_partial
     
     # PGD attack loop
     for step in range(config.attack.pgd_steps):
-        optimizer.zero_grad()
+        # Zero all gradients
+        for optimizer in optimizers:
+            optimizer.zero_grad()
         
         # Calculate average loss from all surrogate decoders
         surrogate_loss = 0
         for surrogate in surrogate_decoders:
             # We want to maximize the "watermarked" classification (labeled 1) for original images (labeled 0)
             # This means minimizing the loss between "outputs" and "target"
-            outputs = surrogate(attacked_images)
+            if use_combined_input and attacked_w_partials is not None:
+                outputs = surrogate(attacked_images, attacked_w_partials)
+            else:
+                outputs = surrogate(attacked_images)
             
             # Target is 1 (watermarked) for all images
             target = torch.ones(batch_size, 1, device=device)
@@ -462,15 +543,23 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         
         # Compute gradients
         surrogate_loss.backward()
-
-        # Update the attacked images
-        optimizer.step()
+        
+        # Update the attacked images and w_partials
+        for optimizer in optimizers:
+            optimizer.step()
         
         # Project back to epsilon ball (L-infinity norm constraint)
         with torch.no_grad():
-            delta = attacked_images - images
-            delta = torch.clamp(delta, -config.attack.pgd_epsilon, config.attack.pgd_epsilon)
-            attacked_images.data = torch.clamp(images + delta, img_min, img_max)
+            # Project images
+            delta_img = attacked_images - images
+            delta_img = torch.clamp(delta_img, -config.attack.pgd_epsilon, config.attack.pgd_epsilon)
+            attacked_images.data = torch.clamp(images + delta_img, img_min, img_max)
+            
+            # Project w_partials if using combined input
+            if attacked_w_partials is not None:
+                delta_w = attacked_w_partials - w_partials
+                delta_w = torch.clamp(delta_w, -config.attack.pgd_epsilon * 0.1, config.attack.pgd_epsilon * 0.1)  # Smaller epsilon for w_partial
+                attacked_w_partials.data = torch.clamp(w_partials + delta_w, w_min, w_max)
     
     # Evaluate attack success on real decoder
     with torch.no_grad():
@@ -493,7 +582,10 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         # Binary classification by surrogate decoders
         surrogate_classifications = []
         for surrogate in surrogate_decoders:
-            output = surrogate(attacked_images)
+            if use_combined_input and attacked_w_partials is not None:
+                output = surrogate(attacked_images, attacked_w_partials)
+            else:
+                output = surrogate(attacked_images)
             # Calculate percentage of images classified as watermarked (class 1)
             pred = (torch.sigmoid(output) > 0.5).float().mean().item() * 100.0
             surrogate_classifications.append(pred)
@@ -501,18 +593,25 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         # Calculate L2 distance between original and attacked images
         l2_distance = torch.norm(images - attacked_images, p=2, dim=(1, 2, 3)).mean().item()
         
+        # Calculate L2 distance for w_partial if used
+        if attacked_w_partials is not None:
+            w_l2_distance = torch.norm(w_partials - attacked_w_partials, p=2, dim=1).mean().item()
+        else:
+            w_l2_distance = 0.0
+        
         # Calculate LPIPS perceptual distance
         lpips_loss_fn = lpips.LPIPS(net='alex').to(device)
         perceptual_dist = lpips_loss_fn(images, attacked_images).mean().item()
     
     # Return results
-    return {
+    results = {
         'attacked_images': attacked_images.detach(),
         'original_images': images.detach(),
         'initial_match_rate': initial_match,
         'final_match_rate': final_match,
         'surrogate_classifications': surrogate_classifications,
         'l2_distance': l2_distance,
+        'w_l2_distance': w_l2_distance,
         'perceptual_distance': perceptual_dist,
         'key_match_rate': (final_bin_pred == true_keys).float().mean(dim=0).cpu().numpy(),  # Per-bit accuracy
         'true_keys': true_keys.cpu().numpy(),
@@ -523,6 +622,13 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         'mae_distance_mean': mae_distance_mean,
         'mae_distance_std': mae_distance_std
     }
+    
+    # Add attacked w_partials if used
+    if attacked_w_partials is not None:
+        results['attacked_w_partials'] = attacked_w_partials.detach()
+        results['original_w_partials'] = w_partials.detach()
+    
+    return results
 
 
 def calculate_asr_at_tpr(watermarked_distances, attack_distances, target_tpr=0.95):

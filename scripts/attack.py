@@ -624,7 +624,7 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     
     w_partial_optimizer = None
     if attacked_w_partials is not None:
-        w_lr = alpha * 0.1  # Lower learning rate for w_partial
+        w_lr = alpha # * 0.1  # Lower learning rate for w_partial
         w_partial_optimizer = optim.Adam([attacked_w_partials], lr=w_lr)
         optimizers.append(w_partial_optimizer)
         logging.info(f"  - Using separate optimizer for w_partial with learning rate: {w_lr}")
@@ -709,7 +709,7 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
             # Project w_partials if using combined input
             if attacked_w_partials is not None:
                 delta_w = attacked_w_partials - w_partials
-                w_epsilon = config.attack.pgd_epsilon * 0.1  # Smaller epsilon for w_partial
+                w_epsilon = config.attack.pgd_epsilon # * 0.1  # Smaller epsilon for w_partial
                 delta_w = torch.clamp(delta_w, -w_epsilon, w_epsilon)
                 attacked_w_partials.data = torch.clamp(w_partials + delta_w, w_min, w_max)
     

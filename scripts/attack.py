@@ -354,6 +354,9 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             w_partial_length=w_partial_length
         ).to(device)
         
+        if rank == 0 and use_combined_input:
+            logging.info(f"Surrogate model architecture: Image feature size = {surrogate_decoder.feature_size}, w_partial size = {w_partial_length}")
+        
         # Use DDP if distributed training
         if world_size > 1:
             surrogate_decoder = DDP(surrogate_decoder, device_ids=[local_rank])
@@ -412,12 +415,24 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             else:
                 return x_combined, None, labels_combined
         
+        # Training metrics
+        training_metrics = {
+            'avg_losses': [],
+            'accuracies': [],
+            'w_partial_grad_norms': [] if use_combined_input else None,
+            'image_grad_norms': []
+        }
+        
         # Train the surrogate decoder
         surrogate_decoder.train()
         for epoch in range(config.attack.surrogate_epochs):
             total_loss = 0.0
             correct = 0
             total = 0
+            
+            # Track average gradient norms for debugging
+            epoch_w_partial_grad_norms = [] if use_combined_input else None
+            epoch_image_grad_norms = []
             
             # Only use tqdm on rank 0
             iterator = tqdm(range(num_batches), desc=f"Epoch {epoch+1}/{config.attack.surrogate_epochs}") if rank == 0 else range(num_batches)
@@ -437,6 +452,26 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
                 # Backward pass
                 loss.backward()
                 
+                # Collect gradient statistics if on rank 0
+                if rank == 0:
+                    # Get model (handle DDP)
+                    model = surrogate_decoder.module if hasattr(surrogate_decoder, 'module') else surrogate_decoder
+                    
+                    # Track image feature gradients
+                    image_grad_norm = 0.0
+                    for name, param in model.features.named_parameters():
+                        if param.grad is not None:
+                            image_grad_norm += param.grad.norm().item()
+                    epoch_image_grad_norms.append(image_grad_norm)
+                    
+                    # Track w_partial gradients if used
+                    if use_combined_input and model.w_partial_net is not None:
+                        w_partial_grad_norm = 0.0
+                        for name, param in model.w_partial_net.named_parameters():
+                            if param.grad is not None:
+                                w_partial_grad_norm += param.grad.norm().item()
+                        epoch_w_partial_grad_norms.append(w_partial_grad_norm)
+                
                 # Update weights
                 optimizer.step()
                 
@@ -450,10 +485,27 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             avg_loss = total_loss / num_batches
             accuracy = 100.0 * correct / total
             
-            # Log metrics - only on rank 0
-            if rank == 0:
+            # Store metrics
+            training_metrics['avg_losses'].append(avg_loss)
+            training_metrics['accuracies'].append(accuracy)
+            
+            if rank == 0 and use_combined_input:
+                avg_w_partial_grad_norm = sum(epoch_w_partial_grad_norms) / len(epoch_w_partial_grad_norms) if epoch_w_partial_grad_norms else 0
+                training_metrics['w_partial_grad_norms'].append(avg_w_partial_grad_norm)
+                
+                avg_image_grad_norm = sum(epoch_image_grad_norms) / len(epoch_image_grad_norms)
+                training_metrics['image_grad_norms'].append(avg_image_grad_norm)
+                
+                # Log detailed metrics for combined input training
                 logging.info(f"Surrogate {model_idx+1} - Epoch {epoch+1}/{config.attack.surrogate_epochs}, "
-                             f"Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
+                            f"Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%, "
+                            f"Avg. Image Grad Norm: {avg_image_grad_norm:.4f}, "
+                            f"Avg. W-Partial Grad Norm: {avg_w_partial_grad_norm:.4f}")
+            else:
+                # Log basic metrics for non-combined input or non-rank 0
+                if rank == 0:
+                    logging.info(f"Surrogate {model_idx+1} - Epoch {epoch+1}/{config.attack.surrogate_epochs}, "
+                                f"Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
         
         # Set to evaluation mode
         surrogate_decoder.eval()
@@ -475,9 +527,28 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
             torch.save({
                 'model_state_dict': state_dict,
                 'accuracy': accuracy,
-                'use_combined_input': use_combined_input
+                'use_combined_input': use_combined_input,
+                'training_metrics': training_metrics
             }, surrogate_path)
             logging.info(f"Saved surrogate decoder {model_idx+1} to {surrogate_path}")
+            
+            # Output more detailed confirmation about architecture if using combined input
+            if use_combined_input:
+                if hasattr(surrogate_decoder, 'module'):
+                    model = surrogate_decoder.module
+                else:
+                    model = surrogate_decoder
+                    
+                logging.info(f"COMBINED INPUT VERIFICATION - Surrogate {model_idx+1}:")
+                logging.info(f"  - w_partial_net defined: {model.w_partial_net is not None}")
+                logging.info(f"  - w_partial input dimension: {w_partial_length}")
+                logging.info(f"  - Final classifier input dimension: {model.classifier[1].in_features}")
+                logging.info(f"  - Feature size from image: {model.feature_size}")
+                if model.w_partial_net is not None:
+                    logging.info(f"  - w_partial network output size: {model.w_partial_net[-2].out_features}")
+                    expected_combined_size = model.feature_size + model.w_partial_net[-2].out_features
+                    logging.info(f"  - Expected combined feature size: {expected_combined_size}")
+                    logging.info(f"  - Combined input correctly configured: {model.classifier[1].in_features == expected_combined_size}")
     
     return surrogate_decoders
 
@@ -511,6 +582,13 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     if use_combined_input and w_partials is not None:
         attacked_w_partials = w_partials.clone().detach().requires_grad_(True)
     
+    # Log initial state
+    logging.info(f"PGD attack with alpha={alpha}: Starting attack")
+    logging.info(f"  - Using combined input (images + w_partial): {use_combined_input}")
+    if use_combined_input:
+        logging.info(f"  - w_partial shape: {w_partials.shape}")
+        logging.info(f"  - Image shape: {images.shape}")
+    
     # Get true keys from key mapper
     if config.model.use_image_pixels:
         # Extract pixel values from images for key generation
@@ -541,18 +619,38 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
     # Setup optimizers (single step is handled manually in PGD)
     # We'll use the Adam optimizer for better convergence in PGD
     optimizers = []
-    optimizers.append(optim.Adam([attacked_images], lr=alpha))
+    image_optimizer = optim.Adam([attacked_images], lr=alpha)
+    optimizers.append(image_optimizer)
+    
+    w_partial_optimizer = None
     if attacked_w_partials is not None:
-        optimizers.append(optim.Adam([attacked_w_partials], lr=alpha * 0.1))  # Lower learning rate for w_partial
+        w_lr = alpha * 0.1  # Lower learning rate for w_partial
+        w_partial_optimizer = optim.Adam([attacked_w_partials], lr=w_lr)
+        optimizers.append(w_partial_optimizer)
+        logging.info(f"  - Using separate optimizer for w_partial with learning rate: {w_lr}")
+    
+    # Initialize attack statistics
+    attack_stats = {
+        'loss_history': [],
+        'image_grad_norms': [],
+        'w_partial_grad_norms': [] if attacked_w_partials is not None else None,
+        'surrogate_outputs': []
+    }
+    
+    # Log attack details
+    attack_steps = config.attack.pgd_steps
+    log_interval = min(attack_steps // 10, 10)  # Log at most 10 times during attack
+    log_interval = max(log_interval, 1)  # Ensure we log at least once per step
     
     # PGD attack loop
-    for step in range(config.attack.pgd_steps):
+    for step in range(attack_steps):
         # Zero all gradients
         for optimizer in optimizers:
             optimizer.zero_grad()
         
         # Calculate average loss from all surrogate decoders
         surrogate_loss = 0
+        surrogate_outputs = []
         for surrogate in surrogate_decoders:
             # We want to maximize the "watermarked" classification (labeled 1) for original images (labeled 0)
             # This means minimizing the loss between "outputs" and "target"
@@ -566,12 +664,36 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
             
             # Calculate BCE loss
             surrogate_loss += F.binary_cross_entropy_with_logits(outputs, target, reduction='mean')
+            
+            # Store outputs for logging
+            surrogate_outputs.append(torch.sigmoid(outputs).mean().item())
         
         # Average the loss across all surrogate decoders
         surrogate_loss /= len(surrogate_decoders)
+        attack_stats['loss_history'].append(surrogate_loss.item())
+        attack_stats['surrogate_outputs'].append(surrogate_outputs)
         
         # Compute gradients
         surrogate_loss.backward()
+        
+        # Track gradient information for logging
+        image_grad_norm = attacked_images.grad.norm().item()
+        attack_stats['image_grad_norms'].append(image_grad_norm)
+        
+        if attacked_w_partials is not None:
+            w_partial_grad_norm = attacked_w_partials.grad.norm().item() if attacked_w_partials.grad is not None else 0.0
+            attack_stats['w_partial_grad_norms'].append(w_partial_grad_norm)
+        
+        # Log attack progress
+        if step % log_interval == 0 or step == attack_steps - 1:
+            log_msg = f"  - Step {step+1}/{attack_steps}, Loss: {surrogate_loss.item():.4f}, Image Grad Norm: {image_grad_norm:.4f}"
+            if attacked_w_partials is not None:
+                log_msg += f", W-Partial Grad Norm: {w_partial_grad_norm:.4f}"
+            logging.info(log_msg)
+            
+            # Log surrogate outputs (probabilities)
+            surrogate_probs = [f"{prob:.4f}" for prob in surrogate_outputs]
+            logging.info(f"    Surrogate probabilities: {', '.join(surrogate_probs)}")
         
         # Update the attacked images and w_partials
         for optimizer in optimizers:
@@ -587,7 +709,8 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
             # Project w_partials if using combined input
             if attacked_w_partials is not None:
                 delta_w = attacked_w_partials - w_partials
-                delta_w = torch.clamp(delta_w, -config.attack.pgd_epsilon * 0.1, config.attack.pgd_epsilon * 0.1)  # Smaller epsilon for w_partial
+                w_epsilon = config.attack.pgd_epsilon * 0.1  # Smaller epsilon for w_partial
+                delta_w = torch.clamp(delta_w, -w_epsilon, w_epsilon)
                 attacked_w_partials.data = torch.clamp(w_partials + delta_w, w_min, w_max)
     
     # Evaluate attack success on real decoder
@@ -625,12 +748,44 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         # Calculate L2 distance for w_partial if used
         if attacked_w_partials is not None:
             w_l2_distance = torch.norm(w_partials - attacked_w_partials, p=2, dim=1).mean().item()
+            logging.info(f"  - Final w_partial L2 distance: {w_l2_distance:.4f}")
         else:
             w_l2_distance = 0.0
         
         # Calculate LPIPS perceptual distance
         lpips_loss_fn = lpips.LPIPS(net='alex').to(device)
         perceptual_dist = lpips_loss_fn(images, attacked_images).mean().item()
+    
+    # Log final attack results
+    logging.info(f"PGD attack completed with alpha={alpha}:")
+    logging.info(f"  - Initial match rate: {initial_match:.2f}%")
+    logging.info(f"  - Final match rate: {final_match:.2f}%")
+    logging.info(f"  - MSE distance: {mse_distance_mean:.4f}±{mse_distance_std:.4f}")
+    logging.info(f"  - MAE distance: {mae_distance_mean:.4f}±{mae_distance_std:.4f}")
+    logging.info(f"  - Image L2 distance: {l2_distance:.4f}")
+    logging.info(f"  - Perceptual distance: {perceptual_dist:.4f}")
+    
+    if use_combined_input:
+        # Additional statistics for combined input verification
+        logging.info("COMBINED INPUT ATTACK VERIFICATION:")
+        
+        # Average gradient statistics
+        avg_image_grad = sum(attack_stats['image_grad_norms']) / len(attack_stats['image_grad_norms'])
+        logging.info(f"  - Average image gradient norm: {avg_image_grad:.4f}")
+        
+        if attack_stats['w_partial_grad_norms']:
+            avg_w_grad = sum(attack_stats['w_partial_grad_norms']) / len(attack_stats['w_partial_grad_norms'])
+            logging.info(f"  - Average w_partial gradient norm: {avg_w_grad:.4f}")
+            
+            # Verify if w_partial gradients are non-zero
+            nonzero_w_grads = sum(1 for g in attack_stats['w_partial_grad_norms'] if g > 1e-6)
+            w_grad_percentage = (nonzero_w_grads / len(attack_stats['w_partial_grad_norms'])) * 100
+            logging.info(f"  - Percentage of steps with non-zero w_partial gradients: {w_grad_percentage:.2f}%")
+        
+        # Histogram of w_partial changes
+        if attacked_w_partials is not None:
+            w_diff = (attacked_w_partials - w_partials).abs()
+            logging.info(f"  - W-partial changes - Min: {w_diff.min().item():.6f}, Max: {w_diff.max().item():.6f}, Mean: {w_diff.mean().item():.6f}")
     
     # Return results
     results = {
@@ -649,7 +804,8 @@ def pgd_attack(images, w_partials, surrogate_decoders, real_decoder, key_mapper,
         'mse_distance_mean': mse_distance_mean,
         'mse_distance_std': mse_distance_std,
         'mae_distance_mean': mae_distance_mean,
-        'mae_distance_std': mae_distance_std
+        'mae_distance_std': mae_distance_std,
+        'attack_stats': attack_stats
     }
     
     # Add attacked w_partials if used
@@ -1078,7 +1234,7 @@ def attack_case(
         source_model: Model to generate images from
         watermarked_model: Watermarked model for comparison
         decoder: Decoder model
-        key_mapper: Key mapper model
+        key_mapper: The key mapper model
         surrogate_decoders: List of surrogate decoders
         config: Configuration object
         device: Device to run on
@@ -1258,6 +1414,7 @@ def main():
     finally:
         # Clean up distributed environment
         cleanup_distributed()
+
 
 
 if __name__ == "__main__":

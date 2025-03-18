@@ -75,7 +75,7 @@ spec:
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
                       scripts/attack.py \
-                      --checkpoint_path "/nfs-user-029/pixel_based/num_pixel_128/key_length_32/checkpoint_iter260000.pth" \
+                      --checkpoint_path "/nfs-user-029/pixel_based/num_pixel_32/key_length_32/checkpoint_iter100000.pth" \
                       --num_samples 100 \
                       --pgd_alpha 0.001 \
                       --pgd_steps 200 \
@@ -85,7 +85,7 @@ spec:
                       --key_length 32 \
                       --key_mapper_seed 2025 \
                       --use_image_pixels \
-                      --image_pixel_count 128 \
+                      --image_pixel_count 32 \
                       --image_pixel_set_seed 42
               
               # --use_image_pixels 

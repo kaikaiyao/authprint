@@ -282,6 +282,26 @@ def extract_image_partial(images, pixel_indices):
     return image_partial
 
 
+def parse_selected_indices(indices):
+    """
+    Parse selected indices from string or list format into a list of integers.
+    
+    Args:
+        indices: String of comma-separated indices or list of indices
+        
+    Returns:
+        list: List of integer indices
+    """
+    if isinstance(indices, str):
+        # Parse comma-separated string
+        return [int(idx.strip()) for idx in indices.split(',')]
+    elif isinstance(indices, (list, np.ndarray)):
+        # Convert existing list/array to integers
+        return [int(idx) for idx in indices]
+    else:
+        raise ValueError(f"Invalid indices format: {type(indices)}. Expected string or list.")
+
+
 def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, rank, world_size, device):
     """
     Train surrogate decoder models for attack.
@@ -313,12 +333,21 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
     if use_combined_input and rank == 0:
         logging.info("Using combined input (images + w_partial) for surrogate decoders")
     
+    # Parse selected indices if using combined input
+    selected_indices = None
+    if use_combined_input:
+        if config.model.selected_indices is None:
+            raise ValueError("selected_indices must be provided when using combined surrogate input")
+        selected_indices = parse_selected_indices(config.model.selected_indices)
+        if rank == 0:
+            logging.info(f"Using {len(selected_indices)} selected indices for w_partial")
+    
     for model_idx in range(config.attack.num_surrogate_models):
         if rank == 0:
             logging.info(f"Training surrogate decoder {model_idx+1}/{config.attack.num_surrogate_models}")
         
         # Initialize surrogate decoder with w_partial_length if using combined input
-        w_partial_length = len(config.model.selected_indices) if use_combined_input else None
+        w_partial_length = len(selected_indices) if use_combined_input else None
         surrogate_decoder = SurrogateDecoder(
             image_size=config.model.img_size,
             channels=3,
@@ -365,9 +394,9 @@ def train_surrogate_decoders(gan_model, watermarked_model, config, local_rank, r
                     w_orig_single = w_orig
                     w_water_single = w_water
                 
-                # Get w_partial using selected indices
-                w_partial_orig = w_orig_single[:, config.model.selected_indices]
-                w_partial_water = w_water_single[:, config.model.selected_indices]
+                # Get w_partial using selected indices (already converted to integers)
+                w_partial_orig = w_orig_single[:, selected_indices]
+                w_partial_water = w_water_single[:, selected_indices]
             
             # Prepare labels: 0 for original, 1 for watermarked
             orig_labels = torch.zeros(batch_size, 1, device=device)

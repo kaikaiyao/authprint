@@ -102,6 +102,7 @@ class AttackConfig:
     surrogate_epochs: int = 1
     surrogate_num_samples: int = 10000
     num_surrogate_models: int = 5
+    use_combined_surrogate_input: bool = False  # Whether to use both images and w_partial as input to surrogate decoders
     
     # Attack evaluation
     log_interval: int = 10

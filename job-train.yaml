@@ -82,7 +82,7 @@ spec:
                       --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
                       --use_image_pixels \
-                      --image_pixel_count 128 \
+                      --image_pixel_count 32 \
                       --image_pixel_set_seed 42
               
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"

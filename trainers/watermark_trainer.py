@@ -139,8 +139,14 @@ class WatermarkTrainer:
         
         # Wrap with DDP if in distributed training
         if self.world_size > 1:
-            self.watermarked_model = DDP(self.watermarked_model, device_ids=[self.local_rank], 
-                                        find_unused_parameters=self.freeze_watermarked_model)
+            # Only wrap with DDP if the model has parameters that require gradients
+            if not self.freeze_watermarked_model:
+                self.watermarked_model = DDP(self.watermarked_model, device_ids=[self.local_rank])
+                if self.rank == 0:
+                    logging.info("Wrapped watermarked model with DDP")
+            else:
+                if self.rank == 0:
+                    logging.info("Skipping DDP for frozen watermarked model")
         
         # Initialize decoder model
         self.decoder = Decoder(
@@ -151,6 +157,8 @@ class WatermarkTrainer:
         
         if self.world_size > 1:
             self.decoder = DDP(self.decoder, device_ids=[self.local_rank])
+            if self.rank == 0:
+                logging.info("Wrapped decoder with DDP")
         
         # Initialize key mapper based on the approach
         if self.use_image_pixels:
@@ -285,12 +293,14 @@ class WatermarkTrainer:
         z = torch.randn(self.config.training.batch_size, latent_dim, device=self.device)
         
         # Generate watermarked image
-        if hasattr(self.watermarked_model, 'module'):
-            w = self.watermarked_model.module.mapping(z, None)
-            x_water = self.watermarked_model.module.synthesis(w, noise_mode="const")
-        else:
-            w = self.watermarked_model.mapping(z, None)
-            x_water = self.watermarked_model.synthesis(w, noise_mode="const")
+        # Use torch.no_grad for the watermarked model when it's frozen
+        with torch.no_grad() if self.freeze_watermarked_model else torch.enable_grad():
+            if hasattr(self.watermarked_model, 'module'):
+                w = self.watermarked_model.module.mapping(z, None)
+                x_water = self.watermarked_model.module.synthesis(w, noise_mode="const")
+            else:
+                w = self.watermarked_model.mapping(z, None)
+                x_water = self.watermarked_model.synthesis(w, noise_mode="const")
 
         # Compute the original image using the frozen pretrained model for LPIPS loss
         with torch.no_grad():
@@ -384,17 +394,31 @@ class WatermarkTrainer:
         
         # Re-freeze watermarked model if needed (in case checkpoint was from normal training)
         if self.freeze_watermarked_model:
-            if hasattr(self.watermarked_model, 'module'):
-                for param in self.watermarked_model.module.parameters():
-                    param.requires_grad = False
-                self.watermarked_model.module.eval()
-            else:
-                for param in self.watermarked_model.parameters():
-                    param.requires_grad = False
-                self.watermarked_model.eval()
+            # First, make sure we're not dealing with a DDP model
+            watermarked_model = self.watermarked_model
+            if hasattr(watermarked_model, 'module'):
+                # If the model is a DDP model, we need to unwrap it first
+                if self.rank == 0:
+                    logging.info("Unwrapping DDP from watermarked model before freezing")
+                self.watermarked_model = watermarked_model.module
+                # Set to device explicitly after unwrapping
+                self.watermarked_model.to(self.device)
+            
+            # Now freeze the model
+            for param in self.watermarked_model.parameters():
+                param.requires_grad = False
+            self.watermarked_model.eval()
                 
             if self.rank == 0:
                 logging.info("Re-applied freezing to watermarked model after loading checkpoint")
+                
+            # Recreate optimizer to ensure it only includes decoder parameters
+            self.optimizer = optim.Adam(
+                self.decoder.parameters(),
+                lr=self.config.training.lr
+            )
+            if self.rank == 0:
+                logging.info("Optimizer recreated with decoder parameters only")
         
         if self.rank == 0:
             logging.info(f"Successfully loaded checkpoint from iteration {checkpoint['iteration']}")
@@ -411,6 +435,24 @@ class WatermarkTrainer:
                 self.validate_indices()
             
             start_time = time.time()
+            
+            # Ensure watermarked model is in the correct mode
+            if self.freeze_watermarked_model:
+                # Ensure the model is in eval mode when frozen
+                if hasattr(self.watermarked_model, 'module'):
+                    self.watermarked_model.module.eval()
+                else:
+                    self.watermarked_model.eval()
+                if self.rank == 0:
+                    logging.info("Confirmed watermarked model is in eval mode")
+            else:
+                # Ensure the model is in training mode when not frozen
+                if hasattr(self.watermarked_model, 'module'):
+                    self.watermarked_model.module.train()
+                else:
+                    self.watermarked_model.train()
+                if self.rank == 0:
+                    logging.info("Confirmed watermarked model is in train mode")
             
             # Main training loop - start from self.start_iteration for resuming
             for iteration in range(self.start_iteration, self.config.training.total_iterations + 1):

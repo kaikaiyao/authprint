@@ -64,6 +64,11 @@ class WatermarkTrainer:
         self.global_step = 0
         self.start_iteration = 1  # Track starting iteration for resuming
         
+        # Flag to control watermarked model freezing
+        self.freeze_watermarked_model = getattr(self.config.training, 'freeze_watermarked_model', False)
+        if self.freeze_watermarked_model and self.rank == 0:
+            logging.info("Watermarked model parameters will be frozen during training")
+        
         # Handle selected indices based on the approach
         self.use_image_pixels = self.config.model.use_image_pixels
         
@@ -117,11 +122,25 @@ class WatermarkTrainer:
         # Clone the pretrained model to obtain a trainable watermarked model
         self.watermarked_model = clone_model(self.gan_model)
         self.watermarked_model.to(self.device)
-        self.watermarked_model.train()
+        
+        # Set watermarked model to train or eval mode based on freeze setting
+        if self.freeze_watermarked_model:
+            # Set to eval mode and freeze parameters
+            self.watermarked_model.eval()
+            for param in self.watermarked_model.parameters():
+                param.requires_grad = False
+            if self.rank == 0:
+                logging.info("Watermarked model parameters frozen")
+        else:
+            # Normal training mode
+            self.watermarked_model.train()
+            if self.rank == 0:
+                logging.info("Watermarked model will be trained")
         
         # Wrap with DDP if in distributed training
         if self.world_size > 1:
-            self.watermarked_model = DDP(self.watermarked_model, device_ids=[self.local_rank])
+            self.watermarked_model = DDP(self.watermarked_model, device_ids=[self.local_rank], 
+                                        find_unused_parameters=self.freeze_watermarked_model)
         
         # Initialize decoder model
         self.decoder = Decoder(
@@ -150,11 +169,23 @@ class WatermarkTrainer:
         # Set up LPIPS loss function
         self.lpips_loss_fn = lpips.LPIPS(net='alex').to(self.device)
         
-        # Initialize optimizer
-        self.optimizer = optim.Adam(
-            list(self.watermarked_model.parameters()) + list(self.decoder.parameters()),
-            lr=self.config.training.lr
-        )
+        # Initialize optimizer based on freezing setting
+        if self.freeze_watermarked_model:
+            # Only optimize decoder parameters
+            self.optimizer = optim.Adam(
+                self.decoder.parameters(),
+                lr=self.config.training.lr
+            )
+            if self.rank == 0:
+                logging.info("Optimizer initialized with decoder parameters only")
+        else:
+            # Optimize both watermarked model and decoder parameters (original behavior)
+            self.optimizer = optim.Adam(
+                list(self.watermarked_model.parameters()) + list(self.decoder.parameters()),
+                lr=self.config.training.lr
+            )
+            if self.rank == 0:
+                logging.info("Optimizer initialized with both watermarked model and decoder parameters")
     
     def _generate_pixel_indices(self) -> None:
         """
@@ -351,6 +382,20 @@ class WatermarkTrainer:
         self.global_step = checkpoint['global_step']
         self.start_iteration = checkpoint['iteration'] + 1  # Start from next iteration
         
+        # Re-freeze watermarked model if needed (in case checkpoint was from normal training)
+        if self.freeze_watermarked_model:
+            if hasattr(self.watermarked_model, 'module'):
+                for param in self.watermarked_model.module.parameters():
+                    param.requires_grad = False
+                self.watermarked_model.module.eval()
+            else:
+                for param in self.watermarked_model.parameters():
+                    param.requires_grad = False
+                self.watermarked_model.eval()
+                
+            if self.rank == 0:
+                logging.info("Re-applied freezing to watermarked model after loading checkpoint")
+        
         if self.rank == 0:
             logging.info(f"Successfully loaded checkpoint from iteration {checkpoint['iteration']}")
             logging.info(f"Resuming training from iteration {self.start_iteration}")
@@ -376,9 +421,10 @@ class WatermarkTrainer:
                 # Log progress
                 if self.global_step % self.config.training.log_interval == 0 and self.rank == 0:
                     approach = "image-based" if self.use_image_pixels else "latent-based"
+                    frozen_str = " (frozen watermarked model)" if self.freeze_watermarked_model else ""
                     elapsed = time.time() - start_time
                     logging.info(
-                        f"Iteration [{iteration}/{self.config.training.total_iterations}] ({approach}) "
+                        f"Iteration [{iteration}/{self.config.training.total_iterations}] ({approach}){frozen_str} "
                         f"Key Loss: {metrics['key_loss']:.4f}, LPIPS Loss: {metrics['lpips_loss']:.4f}, "
                         f"Total Loss: {metrics['total_loss']:.4f}, Match Rate: {metrics['match_rate']:.2f}%, "
                         f"MSE Dist: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}, "

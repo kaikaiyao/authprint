@@ -38,6 +38,7 @@ class TrainingConfig:
     lambda_lpips: float = 1.0
     log_interval: int = 1
     checkpoint_interval: int = 10000
+    freeze_watermarked_model: bool = False
 
 
 @dataclass

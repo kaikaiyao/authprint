@@ -45,6 +45,8 @@ def parse_args():
                         help="Number of pixels to select from the image (default: 8192)")
     parser.add_argument("--key_mapper_seed", type=int, default=2025, 
                         help="Specific random seed for KeyMapper initialization for reproducibility")
+    parser.add_argument("--freeze_watermarked_model", action="store_true", default=False,
+                        help="Freeze the watermarked model parameters, only train the decoder")
     
     # Training configuration
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")

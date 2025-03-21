@@ -81,10 +81,10 @@ spec:
                       --num_vis_samples 16 \
                       --batch_size 128 \
                       --key_length 256 \
-                      --key_mapper_seed 9999 \
+                      --key_mapper_seed 2025 \
                       --use_image_pixels \
                       --image_pixel_count 4 \
-                      --image_pixel_set_seed 42
+                      --image_pixel_set_seed 9999
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

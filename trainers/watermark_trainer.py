@@ -321,6 +321,16 @@ class WatermarkTrainer:
                 w_single = w
             features = w_single[:, self.latent_indices]
         
+        # Get raw activations and binary keys for logging during the first iteration
+        if self.global_step == 0 and self.rank == 0:
+            with torch.no_grad():
+                raw_activations, binary_keys = self.key_mapper.get_raw_and_binary(features[:3])  # First 3 samples
+                logging.info("Example outputs during first training iteration:")
+                for i in range(min(3, len(raw_activations))):
+                    logging.info(f"  Training sample {i+1}:")
+                    logging.info(f"    Raw activations: {raw_activations[i].tolist()}")
+                    logging.info(f"    Binary key:     {binary_keys[i].tolist()}")
+        
         # Generate true key using the key mapper
         true_key = self.key_mapper(features)  # shape: (batch_size, key_length) with binary values
 
@@ -456,6 +466,10 @@ class WatermarkTrainer:
                 if self.rank == 0:
                     logging.info("Confirmed watermarked model is in train mode")
             
+            # Print example KeyMapper outputs at the beginning of training (only on rank 0)
+            if self.start_iteration == 1 and self.rank == 0:
+                self._log_key_mapper_examples()
+            
             # Main training loop - start from self.start_iteration for resuming
             for iteration in range(self.start_iteration, self.config.training.total_iterations + 1):
                 # Run training iteration
@@ -507,3 +521,53 @@ class WatermarkTrainer:
         except Exception as e:
             logging.error(f"Error in training: {str(e)}", exc_info=True)
             raise 
+            
+    def _log_key_mapper_examples(self) -> None:
+        """
+        Generate and log examples of KeyMapper output for debugging.
+        Prints both raw activation values and binary keys for 10 random inputs.
+        """
+        logging.info("Generating KeyMapper example outputs...")
+        
+        # Get latent dimension from the model
+        latent_dim = self.gan_model.z_dim
+        
+        # Generate 10 random latent vectors
+        num_examples = 10
+        torch.manual_seed(42)  # For reproducible examples
+        z_examples = torch.randn(num_examples, latent_dim, device=self.device)
+        
+        # Process through the model to get features
+        with torch.no_grad():
+            if self.use_image_pixels:
+                # Generate images first
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z_examples, None)
+                    x_water = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z_examples, None)
+                    x_water = self.watermarked_model.synthesis(w, noise_mode="const")
+                
+                # Extract pixel values
+                features = self.extract_image_partial(x_water)
+            else:
+                # Extract latent features
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z_examples, None)
+                else:
+                    w = self.watermarked_model.mapping(z_examples, None)
+                
+                if w.ndim == 3:
+                    w_single = w[:, 0, :]
+                else:
+                    w_single = w
+                features = w_single[:, self.latent_indices]
+        
+        # Use the new helper method to get both raw activations and binary keys
+        activations, binary_keys = self.key_mapper.get_raw_and_binary(features)
+        
+        # Log examples
+        for i in range(num_examples):
+            logging.info(f"Example {i+1}:")
+            logging.info(f"  Raw activations: {activations[i].tolist()}")
+            logging.info(f"  Binary key:     {binary_keys[i].tolist()}") 

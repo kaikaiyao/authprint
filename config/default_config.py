@@ -18,6 +18,8 @@ class ModelConfig:
     key_length: int = 4
     selected_indices: Optional[Union[List[int], str]] = None
     key_mapper_seed: Optional[int] = None  # Specific seed for KeyMapper initialization
+    key_mapper_use_sine: bool = False  # Whether to use sine-based mapping in KeyMapper (more sensitive to input changes)
+    key_mapper_sensitivity: float = 20.0  # Sensitivity parameter for sine-based mapping
     
     # Latent-based watermarking configuration
     w_partial_set_seed: int = 42  # Seed for selecting random latent indices

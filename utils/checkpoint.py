@@ -66,6 +66,48 @@ def save_checkpoint(
     logging.info(f"Saved checkpoint at iteration {iteration} to {ckpt_path}")
 
 
+def check_key_mapper_attributes(checkpoint_path: str, device: torch.device = torch.device('cpu')):
+    """
+    Check if a checkpoint contains a KeyMapper with the sine-based mapping attributes.
+    
+    Args:
+        checkpoint_path (str): Path to the checkpoint file.
+        device (torch.device): Device to load the checkpoint on.
+        
+    Returns:
+        dict: A dictionary with 'has_use_sine' and 'has_sensitivity' keys.
+    """
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        result = {
+            'has_use_sine': False,
+            'has_sensitivity': False
+        }
+        
+        # Check if key_mapper_state exists in checkpoint
+        if 'key_mapper_state' in checkpoint:
+            key_mapper_state = checkpoint['key_mapper_state']
+            
+            # Check for _metadata first
+            if '_metadata' in key_mapper_state:
+                metadata = key_mapper_state['_metadata']
+                if 'use_sine' in metadata:
+                    result['has_use_sine'] = True
+                if 'sensitivity' in metadata:
+                    result['has_sensitivity'] = True
+            
+            # If not found in metadata, check for buffers directly
+            if 'use_sine' in key_mapper_state:
+                result['has_use_sine'] = True
+            if 'sensitivity' in key_mapper_state:
+                result['has_sensitivity'] = True
+        
+        return result
+    except Exception as e:
+        logging.warning(f"Error checking KeyMapper attributes in checkpoint: {str(e)}")
+        return {'has_use_sine': False, 'has_sensitivity': False}
+
+
 def load_checkpoint(
     checkpoint_path: str,
     watermarked_model: Union[nn.Module, DDP],
@@ -97,9 +139,30 @@ def load_checkpoint(
     w_model.load_state_dict(checkpoint['watermarked_model_state'])
     dec.load_state_dict(checkpoint['decoder_state'])
     
-    # Load key_mapper state if provided and exists in checkpoint
+    # Check for key_mapper compatibility if provided
     if key_mapper is not None and 'key_mapper_state' in checkpoint:
-        key_mapper.load_state_dict(checkpoint['key_mapper_state'])
+        try:
+            # First, check if it has the new attributes
+            key_mapper_attrs = check_key_mapper_attributes(checkpoint_path, device)
+            
+            # If loading an old checkpoint into a new KeyMapper, ensure backward compatibility
+            if not key_mapper_attrs['has_use_sine'] and hasattr(key_mapper, 'use_sine'):
+                # Old checkpoint, new KeyMapper model
+                logging.info("Loading checkpoint from a model without sine-based mapping capability")
+                
+                # If current KeyMapper is configured to use sine, warn about incompatibility
+                if key_mapper.use_sine:
+                    logging.warning("Current KeyMapper is configured to use sine-based mapping, "
+                                   "but loading a checkpoint trained without it. "
+                                   "Setting use_sine=False for compatibility.")
+                    key_mapper.use_sine = False
+            
+            # Load state dict - this will ignore missing keys in the checkpoint
+            key_mapper.load_state_dict(checkpoint['key_mapper_state'], strict=False)
+            
+        except Exception as e:
+            logging.warning(f"Error loading KeyMapper state: {str(e)}. "
+                           "Continuing with possibly incomplete state.")
     
     if optimizer is not None and 'optimizer_state' in checkpoint:
         optimizer.load_state_dict(checkpoint['optimizer_state'])

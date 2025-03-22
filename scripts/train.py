@@ -45,6 +45,10 @@ def parse_args():
                         help="Number of pixels to select from the image (default: 8192)")
     parser.add_argument("--key_mapper_seed", type=int, default=2025, 
                         help="Specific random seed for KeyMapper initialization for reproducibility")
+    parser.add_argument("--key_mapper_use_sine", action="store_true", default=False,
+                        help="Use sine-based mapping in the KeyMapper (more sensitive to input changes)")
+    parser.add_argument("--key_mapper_sensitivity", type=float, default=20.0,
+                        help="Sensitivity parameter for sine-based mapping (higher values: more sensitive to changes)")
     parser.add_argument("--freeze_watermarked_model", action="store_true", default=False,
                         help="Freeze the watermarked model parameters, only train the decoder")
     

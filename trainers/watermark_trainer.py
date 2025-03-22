@@ -171,7 +171,9 @@ class WatermarkTrainer:
         self.key_mapper = KeyMapper(
             input_dim=input_dim,
             output_dim=self.config.model.key_length,
-            seed=self.config.model.key_mapper_seed
+            seed=self.config.model.key_mapper_seed,
+            use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
+            sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
         ).to(self.device)
         
         # Set up LPIPS loss function

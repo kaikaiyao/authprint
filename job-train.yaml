@@ -81,7 +81,7 @@ spec:
                       --key_length 256 \
                       --key_mapper_seed 2025 \
                       --key_mapper_use_sine \
-                      --key_mapper_sensitivity 1.0 \
+                      --key_mapper_sensitivity 0.1 \
                       --lambda_lpips 1.0 \
                       --w_partial_length 8 \
                       --w_partial_set_seed 42 \

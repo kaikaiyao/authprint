@@ -87,7 +87,7 @@ spec:
                       --image_pixel_set_seed 42
               
               exit_status=$?
-              echo "Training finished with exit status $exit_status"
+              echo "Evaluation finished with exit status $exit_status"
               
               sleep infinity
           resources:

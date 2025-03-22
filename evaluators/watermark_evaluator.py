@@ -367,36 +367,24 @@ class WatermarkEvaluator:
                 # Compute key from watermarked image
                 pred_key_water_logits = self.decoder(x_water)
                 pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
-                pred_key_water = (pred_key_water_probs > 0.5).float()
                 
                 # Compute key from original image
                 pred_key_orig_logits = self.decoder(x_orig)
                 pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
-                pred_key_orig = (pred_key_orig_probs > 0.5).float()
                 
-                # Calculate distance metrics for watermarked images
+                # Calculate MSE distance metrics for watermarked images
                 watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
-                watermarked_mae_distance = torch.mean(torch.abs(pred_key_water_probs - true_key), dim=1)
                 
-                # Calculate distance metrics for original images
+                # Calculate MSE distance metrics for original images
                 original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
-                original_mae_distance = torch.mean(torch.abs(pred_key_orig_probs - true_key), dim=1)
-                
-                # Calculate match rates (all bits must match)
-                water_matches = (pred_key_water == true_key).all(dim=1).sum().item()
-                orig_matches = (pred_key_orig == true_key).all(dim=1).sum().item()
                 
                 # Calculate LPIPS loss between original and watermarked images
                 lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze().cpu().numpy()
                 
-                # Return all metrics data
+                # Return metrics data
                 return {
                     'watermarked_mse_distances': watermarked_mse_distance.cpu().numpy(),
                     'original_mse_distances': original_mse_distance.cpu().numpy(),
-                    'watermarked_mae_distances': watermarked_mae_distance.cpu().numpy(),
-                    'original_mae_distances': original_mae_distance.cpu().numpy(),
-                    'watermarked_matches': water_matches,
-                    'original_matches': orig_matches,
                     'batch_size': z.size(0),
                     'lpips_losses': lpips_losses,
                     'x_orig': x_orig,
@@ -411,10 +399,6 @@ class WatermarkEvaluator:
                 return {
                     'watermarked_mse_distances': np.ones(batch_size) * 0.5,
                     'original_mse_distances': np.ones(batch_size) * 0.5,
-                    'watermarked_mae_distances': np.ones(batch_size) * 0.5,
-                    'original_mae_distances': np.ones(batch_size) * 0.5,
-                    'watermarked_matches': 0,
-                    'original_matches': 0,
                     'batch_size': batch_size,
                     'lpips_losses': np.ones(batch_size) * 0.5,
                     'x_orig': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size)),
@@ -528,14 +512,9 @@ class WatermarkEvaluator:
             # Compute key from negative sample image
             pred_key_neg_logits = self.decoder(x_neg)
             pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
-            pred_key_neg = (pred_key_neg_probs > 0.5).float()
             
-            # Calculate distance metrics
+            # Calculate MSE distance metrics
             neg_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
-            neg_mae_distance = torch.mean(torch.abs(pred_key_neg_probs - true_key), dim=1)
-            
-            # Calculate match rate
-            neg_matches = (pred_key_neg == true_key).all(dim=1).sum().item()
             
             # Use dummy values for watermarked measurements to maintain API compatibility
             batch_size = z.size(0)
@@ -548,10 +527,6 @@ class WatermarkEvaluator:
             return {
                 'watermarked_mse_distances': dummy_distances,  # Dummy value
                 'original_mse_distances': neg_mse_distance.cpu().numpy(),  # Actual negative sample distances
-                'watermarked_mae_distances': dummy_distances,  # Dummy value
-                'original_mae_distances': neg_mae_distance.cpu().numpy(),  # Actual negative sample distances
-                'watermarked_matches': 0,  # Dummy value
-                'original_matches': neg_matches,  # Actual negative sample matches
                 'batch_size': batch_size,
                 'lpips_losses': np.zeros(batch_size),  # Zero LPIPS since we're not comparing
                 'x_orig': x_neg,  # Store the negative sample image as the "original"
@@ -566,10 +541,6 @@ class WatermarkEvaluator:
             return {
                 'watermarked_mse_distances': np.ones(batch_size) * 0.5,
                 'original_mse_distances': np.ones(batch_size) * 0.5,
-                'watermarked_mae_distances': np.ones(batch_size) * 0.5,
-                'original_mae_distances': np.ones(batch_size) * 0.5,
-                'watermarked_matches': 0,
-                'original_matches': 0,
                 'batch_size': batch_size,
                 'lpips_losses': np.zeros(batch_size),
                 'x_orig': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size)),
@@ -592,70 +563,201 @@ class WatermarkEvaluator:
         # First, evaluate original and watermarked models
         results['original'] = self.evaluate_model_batch(None, None)
         
+        # Calculate the threshold at 95% TPR using watermarked samples
+        threshold = self.calculate_threshold_at_tpr(
+            results['original']['all_watermarked_mse_distances'], 
+            target_tpr=0.95
+        )
+        
+        if self.rank == 0:
+            logging.info(f"Calculated threshold at 95% TPR: {threshold:.6f}")
+            
+        # Save threshold for use in all evaluations
+        results['original']['threshold_95tpr'] = threshold
+        
+        # Calculate FPR for original model (negative samples)
+        original_fpr = self.calculate_fpr_at_threshold(
+            results['original']['all_original_mse_distances'], 
+            threshold
+        )
+        results['original']['original_fpr_at_95tpr'] = original_fpr
+        
         # Evaluate negative samples if needed
         if hasattr(self.config.evaluate, 'evaluate_neg_samples') and self.config.evaluate.evaluate_neg_samples:
             # Evaluate pretrained models
             if hasattr(self.config.evaluate, 'evaluate_pretrained') and self.config.evaluate.evaluate_pretrained:
                 for model_name in self.pretrained_models:
                     results[f'pretrained_{model_name}'] = self.evaluate_model_batch(model_name, None)
+                    # Calculate FPR at the same threshold
+                    fpr = self.calculate_fpr_at_threshold(
+                        results[f'pretrained_{model_name}']['all_original_mse_distances'], 
+                        threshold
+                    )
+                    results[f'pretrained_{model_name}']['original_fpr_at_95tpr'] = fpr
             
             # Evaluate transformations
             if hasattr(self.config.evaluate, 'evaluate_transforms') and self.config.evaluate.evaluate_transforms:
                 # Evaluate truncation
                 if hasattr(self.config.evaluate, 'evaluate_truncation') and self.config.evaluate.evaluate_truncation:
                     results['truncation_original'] = self.evaluate_model_batch(None, 'truncation_original')
+                    fpr = self.calculate_fpr_at_threshold(
+                        results['truncation_original']['all_original_mse_distances'], 
+                        threshold
+                    )
+                    results['truncation_original']['original_fpr_at_95tpr'] = fpr
+                    
                     if hasattr(self.config.evaluate, 'evaluate_truncation_watermarked') and self.config.evaluate.evaluate_truncation_watermarked:
                         results['truncation_watermarked'] = self.evaluate_model_batch(None, 'truncation_watermarked')
+                        fpr = self.calculate_fpr_at_threshold(
+                            results['truncation_watermarked']['all_original_mse_distances'], 
+                            threshold
+                        )
+                        results['truncation_watermarked']['original_fpr_at_95tpr'] = fpr
                 
                 # Evaluate quantization (int8)
                 if hasattr(self.config.evaluate, 'evaluate_quantization') and self.config.evaluate.evaluate_quantization:
                     results['quantization_original'] = self.evaluate_model_batch(None, 'quantization_original')
+                    fpr = self.calculate_fpr_at_threshold(
+                        results['quantization_original']['all_original_mse_distances'], 
+                        threshold
+                    )
+                    results['quantization_original']['original_fpr_at_95tpr'] = fpr
+                    
                     if hasattr(self.config.evaluate, 'evaluate_quantization_watermarked') and self.config.evaluate.evaluate_quantization_watermarked:
                         results['quantization_watermarked'] = self.evaluate_model_batch(None, 'quantization_watermarked')
+                        fpr = self.calculate_fpr_at_threshold(
+                            results['quantization_watermarked']['all_original_mse_distances'], 
+                            threshold
+                        )
+                        results['quantization_watermarked']['original_fpr_at_95tpr'] = fpr
                 
                 # Evaluate quantization (int4)
                 if hasattr(self.config.evaluate, 'evaluate_quantization_int4') and self.config.evaluate.evaluate_quantization_int4:
                     results['quantization_int4_original'] = self.evaluate_model_batch(None, 'quantization_int4_original')
+                    fpr = self.calculate_fpr_at_threshold(
+                        results['quantization_int4_original']['all_original_mse_distances'], 
+                        threshold
+                    )
+                    results['quantization_int4_original']['original_fpr_at_95tpr'] = fpr
+                    
                     if hasattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked') and self.config.evaluate.evaluate_quantization_int4_watermarked:
                         results['quantization_int4_watermarked'] = self.evaluate_model_batch(None, 'quantization_int4_watermarked')
+                        fpr = self.calculate_fpr_at_threshold(
+                            results['quantization_int4_watermarked']['all_original_mse_distances'], 
+                            threshold
+                        )
+                        results['quantization_int4_watermarked']['original_fpr_at_95tpr'] = fpr
                         
                 # Evaluate quantization (int2)
                 if hasattr(self.config.evaluate, 'evaluate_quantization_int2') and self.config.evaluate.evaluate_quantization_int2:
                     results['quantization_int2_original'] = self.evaluate_model_batch(None, 'quantization_int2_original')
+                    fpr = self.calculate_fpr_at_threshold(
+                        results['quantization_int2_original']['all_original_mse_distances'], 
+                        threshold
+                    )
+                    results['quantization_int2_original']['original_fpr_at_95tpr'] = fpr
+                    
                     if hasattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked') and self.config.evaluate.evaluate_quantization_int2_watermarked:
                         results['quantization_int2_watermarked'] = self.evaluate_model_batch(None, 'quantization_int2_watermarked')
+                        fpr = self.calculate_fpr_at_threshold(
+                            results['quantization_int2_watermarked']['all_original_mse_distances'], 
+                            threshold
+                        )
+                        results['quantization_int2_watermarked']['original_fpr_at_95tpr'] = fpr
                 
                 # Evaluate downsample/upsample
                 if hasattr(self.config.evaluate, 'evaluate_downsample') and self.config.evaluate.evaluate_downsample:
                     results['downsample_original'] = self.evaluate_model_batch(None, 'downsample_original')
+                    fpr = self.calculate_fpr_at_threshold(
+                        results['downsample_original']['all_original_mse_distances'], 
+                        threshold
+                    )
+                    results['downsample_original']['original_fpr_at_95tpr'] = fpr
+                    
                     if hasattr(self.config.evaluate, 'evaluate_downsample_watermarked') and self.config.evaluate.evaluate_downsample_watermarked:
                         results['downsample_watermarked'] = self.evaluate_model_batch(None, 'downsample_watermarked')
+                        fpr = self.calculate_fpr_at_threshold(
+                            results['downsample_watermarked']['all_original_mse_distances'], 
+                            threshold
+                        )
+                        results['downsample_watermarked']['original_fpr_at_95tpr'] = fpr
                 
                 # Evaluate JPEG compression
                 if hasattr(self.config.evaluate, 'evaluate_jpeg') and self.config.evaluate.evaluate_jpeg:
                     results['jpeg_original'] = self.evaluate_model_batch(None, 'jpeg_original')
+                    fpr = self.calculate_fpr_at_threshold(
+                        results['jpeg_original']['all_original_mse_distances'], 
+                        threshold
+                    )
+                    results['jpeg_original']['original_fpr_at_95tpr'] = fpr
+                    
                     if hasattr(self.config.evaluate, 'evaluate_jpeg_watermarked') and self.config.evaluate.evaluate_jpeg_watermarked:
                         results['jpeg_watermarked'] = self.evaluate_model_batch(None, 'jpeg_watermarked')
+                        fpr = self.calculate_fpr_at_threshold(
+                            results['jpeg_watermarked']['all_original_mse_distances'], 
+                            threshold
+                        )
+                        results['jpeg_watermarked']['original_fpr_at_95tpr'] = fpr
         
         # Generate combined metrics summary
         if self.rank == 0:
             logging.info("=== Evaluation Summary ===")
+            logging.info(f"Threshold at 95% TPR: {threshold:.6f}")
             
+            # Create a table format for results
+            header = ["Model/Transform", "FPR at 95% TPR", "ROC-AUC (MSE)", "LPIPS Avg", "LPIPS Std"]
+            table_data = []
+            
+            # Add original model results (first row)
+            table_data.append([
+                "Watermarked (Positive)", 
+                f"95.00%", 
+                f"{results['original']['roc_auc_score_mse']:.4f}",
+                f"{results['original']['watermarked_lpips_loss_avg']:.4f}",
+                f"{results['original']['watermarked_lpips_loss_std']:.4f}"
+            ])
+            
+            # Add original model non-watermarked results (second row)
+            table_data.append([
+                "Original (Negative)", 
+                f"{results['original']['original_fpr_at_95tpr']:.2f}%",
+                "-",
+                "-",
+                "-"
+            ])
+            
+            # Add other negative samples
             for result_name, metrics in results.items():
-                logging.info(f"\n--- Results for {result_name} ---")
-                
                 if result_name == 'original':
-                    # For original evaluation, show both watermarked and original match rates plus comparison metrics
-                    logging.info(f"Watermarked match rate: {metrics['watermarked_match_rate']:.2f}%")
-                    logging.info(f"Original match rate: {metrics['original_match_rate']:.2f}%")
-                    logging.info(f"LPIPS loss avg: {metrics['watermarked_lpips_loss_avg']:.6f}, std: {metrics['watermarked_lpips_loss_std']:.6f}")
-                    logging.info(f"ROC-AUC score (MSE): {metrics['roc_auc_score_mse']:.6f}")
-                    logging.info(f"ROC-AUC score (MAE): {metrics['roc_auc_score_mae']:.6f}")
-                else:
-                    # For negative sample groups, just show their match rate
-                    logging.info(f"Negative samples match rate: {metrics['original_match_rate']:.2f}%")
+                    continue  # Already added above
                 
-                # Save individual metric files
+                table_data.append([
+                    result_name,
+                    f"{metrics['original_fpr_at_95tpr']:.2f}%",
+                    "-",
+                    "-",
+                    "-"
+                ])
+            
+            # Print table
+            logging.info("Results Table:")
+            col_widths = [max(len(row[i]) for row in [header] + table_data) for i in range(len(header))]
+            
+            # Print header
+            header_str = " | ".join(f"{h:{w}s}" for h, w in zip(header, col_widths))
+            logging.info(f"| {header_str} |")
+            
+            # Print separator
+            sep = " | ".join("-" * w for w in col_widths)
+            logging.info(f"| {sep} |")
+            
+            # Print data rows
+            for row in table_data:
+                row_str = " | ".join(f"{cell:{w}s}" for cell, w in zip(row, col_widths))
+                logging.info(f"| {row_str} |")
+            
+            # Save all metrics to files
+            for result_name, metrics in results.items():
                 output_dir = os.path.join(self.config.output_dir, result_name)
                 os.makedirs(output_dir, exist_ok=True)
                 save_metrics_text(metrics, output_dir)
@@ -673,8 +775,8 @@ class WatermarkEvaluator:
                         y_data,
                         metrics['all_watermarked_mse_distances'],
                         metrics['all_original_mse_distances'],
-                        metrics['all_watermarked_mae_distances'],
-                        metrics['all_original_mae_distances'],
+                        None,  # No MAE for watermarked
+                        None,  # No MAE for original
                         output_dir
                     )
         
@@ -706,12 +808,8 @@ class WatermarkEvaluator:
             # Initialize metrics collection
             all_watermarked_mse_distances = []
             all_original_mse_distances = []
-            all_watermarked_mae_distances = []
-            all_original_mae_distances = []
             
             num_batches = (self.config.evaluate.num_samples + self.config.evaluate.batch_size - 1) // self.config.evaluate.batch_size
-            watermarked_correct = 0
-            original_correct = 0
             total_samples = 0
             all_lpips_losses = []
             
@@ -730,13 +828,9 @@ class WatermarkEvaluator:
                     # Process batch
                     batch_results = self.process_batch(z, model_name, transformation)
                     
-                    # Accumulate metrics
+                    # Accumulate metrics (only MSE, no MAE)
                     all_watermarked_mse_distances.extend(batch_results['watermarked_mse_distances'])
                     all_original_mse_distances.extend(batch_results['original_mse_distances'])
-                    all_watermarked_mae_distances.extend(batch_results['watermarked_mae_distances'])
-                    all_original_mae_distances.extend(batch_results['original_mae_distances'])
-                    watermarked_correct += batch_results['watermarked_matches']
-                    original_correct += batch_results['original_matches']
                     total_samples += batch_results['batch_size']
                     all_lpips_losses.extend(batch_results['lpips_losses'])
                     
@@ -753,7 +847,7 @@ class WatermarkEvaluator:
                 # Return empty metrics
                 return self._create_empty_metrics()
             
-            # Calculate ROC data
+            # Calculate ROC data (only for MSE, no MAE)
             try:
                 # Prepare data for ROC curve calculation
                 y_true = np.concatenate([
@@ -767,40 +861,24 @@ class WatermarkEvaluator:
                     -np.array(all_original_mse_distances)
                 ])
                 
-                y_score_mae = np.concatenate([
-                    -np.array(all_watermarked_mae_distances), 
-                    -np.array(all_original_mae_distances)
-                ])
-                
-                # Calculate ROC-AUC
+                # Calculate ROC-AUC for MSE
                 roc_auc_mse = skmetrics.roc_auc_score(y_true, y_score_mse)
-                roc_auc_mae = skmetrics.roc_auc_score(y_true, y_score_mae)
-                roc_auc_score = roc_auc_mse  # Use MSE as primary metric
+                roc_auc_score = roc_auc_mse  # Use MSE as the only metric
             except Exception as e:
                 if self.rank == 0:
                     logging.error(f"Error calculating ROC metrics for {name_str}: {str(e)}")
                 # Use fallback values
                 roc_auc_mse = 0.5
-                roc_auc_mae = 0.5
                 roc_auc_score = 0.5
                 y_true = np.array([1, 0])
                 y_score_mse = np.array([-0.4, -0.6])
-                y_score_mae = np.array([-0.4, -0.6])
             
-            # Calculate metrics (without using calculate_metrics function to avoid duplication)
-            watermarked_match_rate = (watermarked_correct / total_samples) * 100
-            original_match_rate = (original_correct / total_samples) * 100
-            
-            # Calculate distance statistics
+            # Calculate MSE distance statistics
             watermarked_mse_distance_avg = np.mean(all_watermarked_mse_distances)
             watermarked_mse_distance_std = np.std(all_watermarked_mse_distances)
-            watermarked_mae_distance_avg = np.mean(all_watermarked_mae_distances)
-            watermarked_mae_distance_std = np.std(all_watermarked_mae_distances)
             
             original_mse_distance_avg = np.mean(all_original_mse_distances)
             original_mse_distance_std = np.std(all_original_mse_distances)
-            original_mae_distance_avg = np.mean(all_original_mae_distances)
-            original_mae_distance_std = np.std(all_original_mae_distances)
             
             # Calculate LPIPS statistics
             lpips_loss_avg = np.mean(all_lpips_losses)
@@ -808,29 +886,20 @@ class WatermarkEvaluator:
             
             # Create metrics dictionary
             metrics = {
-                'watermarked_match_rate': watermarked_match_rate,
-                'original_match_rate': original_match_rate,
                 'watermarked_lpips_loss_avg': lpips_loss_avg,
                 'watermarked_lpips_loss_std': lpips_loss_std,
                 'watermarked_mse_distance_avg': watermarked_mse_distance_avg,
                 'watermarked_mse_distance_std': watermarked_mse_distance_std,
-                'watermarked_mae_distance_avg': watermarked_mae_distance_avg,
-                'watermarked_mae_distance_std': watermarked_mae_distance_std,
                 'original_mse_distance_avg': original_mse_distance_avg,
                 'original_mse_distance_std': original_mse_distance_std,
-                'original_mae_distance_avg': original_mae_distance_avg,
-                'original_mae_distance_std': original_mae_distance_std,
                 'roc_auc_score_mse': roc_auc_mse,
-                'roc_auc_score_mae': roc_auc_mae,
                 'roc_auc_score': roc_auc_score,
                 'num_samples_processed': total_samples,
                 # Store raw data for plotting
                 'all_watermarked_mse_distances': all_watermarked_mse_distances,
                 'all_original_mse_distances': all_original_mse_distances,
-                'all_watermarked_mae_distances': all_watermarked_mae_distances,
-                'all_original_mae_distances': all_original_mae_distances,
                 # Store ROC data
-                'roc_data': (y_true, y_score_mse, y_score_mae)
+                'roc_data': (y_true, y_score_mse)
             }
             
             return metrics
@@ -846,30 +915,20 @@ class WatermarkEvaluator:
         # Create minimal fallback ROC data
         y_true = np.array([1, 0])
         y_score_mse = np.array([-0.4, -0.6])
-        y_score_mae = np.array([-0.4, -0.6])
         
         return {
-            'watermarked_match_rate': 0.0,
-            'original_match_rate': 0.0,
             'watermarked_mse_distance_avg': 0.5,
             'watermarked_mse_distance_std': 0.0,
             'original_mse_distance_avg': 0.5,
             'original_mse_distance_std': 0.0,
-            'watermarked_mae_distance_avg': 0.5,
-            'watermarked_mae_distance_std': 0.0,
-            'original_mae_distance_avg': 0.5,
-            'original_mae_distance_std': 0.0,
             'roc_auc_score_mse': 0.5,
-            'roc_auc_score_mae': 0.5,
             'roc_auc_score': 0.5,
             'watermarked_lpips_loss_avg': 0.5,
             'watermarked_lpips_loss_std': 0.0,
             'all_watermarked_mse_distances': [0.5],
             'all_original_mse_distances': [0.5],
-            'all_watermarked_mae_distances': [0.5],
-            'all_original_mae_distances': [0.5],
             'num_samples_processed': 1,
-            'roc_data': (y_true, y_score_mse, y_score_mae)
+            'roc_data': (y_true, y_score_mse)
         }
     
     def _create_fallback_roc_data(self, metrics):
@@ -886,17 +945,12 @@ class WatermarkEvaluator:
                 -np.array(metrics['all_original_mse_distances'])
             ])
             
-            y_score_mae = np.concatenate([
-                -np.array(metrics['all_watermarked_mae_distances']), 
-                -np.array(metrics['all_original_mae_distances'])
-            ])
-            
-            return (y_true, y_score_mse, y_score_mae)
+            return (y_true, y_score_mse)
         except (KeyError, ValueError) as e:
             if self.rank == 0:
                 logging.warning(f"Error creating ROC data: {str(e)}. Using fallback data.")
             # Return fallback data
-            return (np.array([1, 0]), np.array([-0.4, -0.6]), np.array([-0.4, -0.6]))
+            return (np.array([1, 0]), np.array([-0.4, -0.6]))
     
     def visualize_samples(self):
         """
@@ -1040,12 +1094,9 @@ class WatermarkEvaluator:
             pred_keys_orig_probs_vis = torch.sigmoid(pred_keys_orig_logits_vis)
             pred_keys_orig_vis = pred_keys_orig_probs_vis > 0.5
             
-            # Calculate distance metrics for each sample
+            # Calculate MSE distance metrics for each sample
             watermarked_mse_distances_vis = torch.mean(torch.pow(pred_keys_water_probs_vis - true_keys_vis, 2), dim=1)
-            watermarked_mae_distances_vis = torch.mean(torch.abs(pred_keys_water_probs_vis - true_keys_vis), dim=1)
-            
             original_mse_distances_vis = torch.mean(torch.pow(pred_keys_orig_probs_vis - true_keys_vis, 2), dim=1)
-            original_mae_distances_vis = torch.mean(torch.abs(pred_keys_orig_probs_vis - true_keys_vis), dim=1)
             
             # Save key comparison to log
             for i in range(self.config.evaluate.num_vis_samples):
@@ -1057,8 +1108,48 @@ class WatermarkEvaluator:
                 logging.info(f"  Original match: {(pred_keys_orig_vis[i] == true_keys_vis[i]).all().item()}")
                 logging.info(f"  Watermarked MSE distance: {watermarked_mse_distances_vis[i].item():.6f}")
                 logging.info(f"  Original MSE distance: {original_mse_distances_vis[i].item():.6f}")
-                logging.info(f"  Watermarked MAE distance: {watermarked_mae_distances_vis[i].item():.6f}")
-                logging.info(f"  Original MAE distance: {original_mae_distances_vis[i].item():.6f}")
+    
+    def calculate_threshold_at_tpr(self, watermarked_distances, target_tpr=0.95):
+        """
+        Calculate the threshold where target_tpr (e.g. 95%) of watermarked images have MSE distances below it.
+        
+        Args:
+            watermarked_distances (np.ndarray): Array of MSE distances for watermarked images
+            target_tpr (float): Target true positive rate (default: 0.95)
+            
+        Returns:
+            float: Threshold value
+        """
+        # Sort distances in ascending order
+        sorted_distances = np.sort(watermarked_distances)
+        
+        # Find the index corresponding to the target TPR
+        idx = int(np.ceil(len(sorted_distances) * target_tpr)) - 1
+        
+        # Ensure index is valid
+        idx = max(0, min(idx, len(sorted_distances) - 1))
+        
+        # Return the threshold
+        return sorted_distances[idx]
+    
+    def calculate_fpr_at_threshold(self, negative_distances, threshold):
+        """
+        Calculate the false positive rate (FPR) for negative samples at the given threshold.
+        
+        Args:
+            negative_distances (np.ndarray): Array of MSE distances for negative images
+            threshold (float): Threshold value
+            
+        Returns:
+            float: False positive rate (percentage of negative samples below threshold)
+        """
+        # Count how many negative samples are below the threshold
+        below_threshold = np.sum(negative_distances <= threshold)
+        
+        # Calculate FPR
+        fpr = (below_threshold / len(negative_distances)) * 100
+        
+        return fpr
     
     def evaluate(self, evaluation_mode='both'):
         """

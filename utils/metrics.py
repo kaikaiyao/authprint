@@ -5,6 +5,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn import metrics as skmetrics
+import logging
+import seaborn as sns
 
 
 def calculate_metrics(
@@ -103,81 +105,90 @@ def calculate_metrics(
     return metrics, (y_true, y_score_mse, y_score_mae)
 
 
-def save_metrics_plots(
-    metrics, 
-    y_data,
-    all_watermarked_mse_distances,
-    all_original_mse_distances,
-    all_watermarked_mae_distances,
-    all_original_mae_distances,
-    output_dir
-):
-    """
-    Save metrics plots.
-    
-    Args:
-        metrics (dict): Dictionary of metrics
-        y_data (tuple): y_true, y_score_mse, y_score_mae for ROC curves
-        all_watermarked_mse_distances (list): MSE distances for watermarked images
-        all_original_mse_distances (list): MSE distances for original images
-        all_watermarked_mae_distances (list): MAE distances for watermarked images
-        all_original_mae_distances (list): MAE distances for original images
-        output_dir (str): Output directory
-    """
-    # Create plots directory
-    plots_dir = os.path.join(output_dir, "plots")
-    os.makedirs(plots_dir, exist_ok=True)
-    
-    # Unpack y_data
-    y_true, y_score_mse, y_score_mae = y_data
-    
-    # Plot ROC curves
-    plt.figure(figsize=(10, 8))
-    
-    # ROC curve for MSE distance
-    fpr_mse, tpr_mse, _ = skmetrics.roc_curve(y_true, y_score_mse)
-    plt.plot(fpr_mse, tpr_mse, label=f'MSE Distance (AUC = {metrics["roc_auc_score_mse"]:.4f})')
-    
-    # ROC curve for MAE distance
-    fpr_mae, tpr_mae, _ = skmetrics.roc_curve(y_true, y_score_mae)
-    plt.plot(fpr_mae, tpr_mae, label=f'MAE Distance (AUC = {metrics["roc_auc_score_mae"]:.4f})')
-    
-    # Plot diagonal line
-    plt.plot([0, 1], [0, 1], 'k--')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('ROC Curve for Watermark Detection')
-    plt.legend(loc='lower right')
-    plt.grid(True)
-    plt.savefig(os.path.join(plots_dir, 'roc_curve.png'), dpi=300)
-    plt.close()
-    
-    # Plot histograms of distances
-    plt.figure(figsize=(12, 10))
-    
-    # MSE distance histogram
-    plt.subplot(2, 1, 1)
-    plt.hist(all_watermarked_mse_distances, bins=50, alpha=0.5, label='Watermarked')
-    plt.hist(all_original_mse_distances, bins=50, alpha=0.5, label='Original')
-    plt.xlabel('MSE Distance')
-    plt.ylabel('Count')
-    plt.title('Histogram of MSE Distances')
-    plt.legend()
-    plt.grid(True)
-    
-    # MAE distance histogram
-    plt.subplot(2, 1, 2)
-    plt.hist(all_watermarked_mae_distances, bins=50, alpha=0.5, label='Watermarked')
-    plt.hist(all_original_mae_distances, bins=50, alpha=0.5, label='Original')
-    plt.xlabel('MAE Distance')
-    plt.ylabel('Count')
-    plt.title('Histogram of MAE Distances')
-    plt.legend()
-    plt.grid(True)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(plots_dir, 'distance_histograms.png'), dpi=300)
-    plt.close()
+def save_metrics_plots(metrics, y_data, watermarked_mse_distances, original_mse_distances, 
+                   watermarked_mae_distances=None, original_mae_distances=None, output_dir=None):
+    """Save metrics plots to output directory."""
+    # Create output directory if it doesn't exist
+    if output_dir is None:
+        output_dir = 'evaluation_results'
+    os.makedirs(output_dir, exist_ok=True)
+
+    try:
+        from sklearn.metrics import roc_curve, auc
+        
+        plt.style.use('seaborn-v0_8-darkgrid')
+
+        # Unpack y_data
+        if len(y_data) == 3:
+            y_true, y_score_mse, y_score_mae = y_data
+        else:
+            y_true, y_score_mse = y_data
+            y_score_mae = None
+        
+        # Create ROC curve figure
+        plt.figure(figsize=(10, 8))
+        
+        # Calculate ROC curve for MSE
+        fpr_mse, tpr_mse, _ = roc_curve(y_true, y_score_mse)
+        roc_auc_mse = auc(fpr_mse, tpr_mse)
+        
+        # Plot MSE ROC curve
+        plt.plot(fpr_mse, tpr_mse, color='blue', lw=2, 
+                label=f'MSE (AUC = {roc_auc_mse:.4f})')
+        
+        # Calculate and plot MAE ROC curve if available
+        if y_score_mae is not None and watermarked_mae_distances is not None and original_mae_distances is not None:
+            fpr_mae, tpr_mae, _ = roc_curve(y_true, y_score_mae)
+            roc_auc_mae = auc(fpr_mae, tpr_mae)
+            plt.plot(fpr_mae, tpr_mae, color='green', lw=2, 
+                    label=f'MAE (AUC = {roc_auc_mae:.4f})')
+        
+        # Plot random classifier
+        plt.plot([0, 1], [0, 1], color='red', lw=1, linestyle='--',
+                label='Random Classifier')
+        
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver Operating Characteristic (ROC) Curve')
+        plt.legend(loc="lower right")
+        plt.grid(True)
+        plt.savefig(os.path.join(output_dir, 'roc_curve.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Create distance distribution plot
+        plt.figure(figsize=(12, 10))
+        
+        # MSE distance distribution
+        plt.subplot(2, 1, 1)
+        sns.histplot(watermarked_mse_distances, bins=50, alpha=0.5, color='blue', label='Watermarked')
+        sns.histplot(original_mse_distances, bins=50, alpha=0.5, color='red', label='Original')
+        plt.title('MSE Distance Distribution')
+        plt.xlabel('MSE Distance')
+        plt.ylabel('Frequency')
+        plt.legend()
+        plt.grid(True)
+        
+        # MAE distance distribution if available
+        if watermarked_mae_distances is not None and original_mae_distances is not None:
+            plt.subplot(2, 1, 2)
+            sns.histplot(watermarked_mae_distances, bins=50, alpha=0.5, color='blue', label='Watermarked')
+            sns.histplot(original_mae_distances, bins=50, alpha=0.5, color='red', label='Original')
+            plt.title('MAE Distance Distribution')
+            plt.xlabel('MAE Distance')
+            plt.ylabel('Frequency')
+            plt.legend()
+            plt.grid(True)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'distance_distribution.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+    except ImportError:
+        logging.warning("matplotlib and/or seaborn not available. Skipping plot generation.")
+    except Exception as e:
+        logging.warning(f"Error generating plots: {str(e)}")
 
 
 def save_metrics_text(metrics, output_dir):

@@ -77,11 +77,15 @@ class EvaluateConfig:
     # Image transformation options
     evaluate_transforms: bool = True
     evaluate_truncation: bool = True
+    evaluate_truncation_watermarked: bool = True
     truncation_psi: float = 2.0
     evaluate_quantization: bool = True
+    evaluate_quantization_watermarked: bool = True
     evaluate_downsample: bool = True
+    evaluate_downsample_watermarked: bool = True
     downsample_size: int = 128
     evaluate_jpeg: bool = False
+    evaluate_jpeg_watermarked: bool = False
     jpeg_quality: int = 55
 
 

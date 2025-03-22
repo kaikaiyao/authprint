@@ -1,0 +1,191 @@
+2025-03-22 14:26:57,733 - INFO - Logging initialized (rank 0). Log file: evaluation_results/train_rank0.log
+2025-03-22 14:26:57,734 - INFO - Configuration:
+Config(output_dir='evaluation_results', checkpoint_path='/nfs-user-029/pixel_based/num_pixel_32/key_length_128/checkpoint_iter160000.pth', model=ModelConfig(stylegan2_url='https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl', stylegan2_local_path='ffhq70k-paper256-ada.pkl', img_size=256, key_length=128, selected_indices=None, key_mapper_seed=2025, w_partial_set_seed=42, w_partial_length=32, use_image_pixels=True, image_pixel_set_seed=42, image_pixel_count=32), training=TrainingConfig(batch_size=16, total_iterations=100000, lr=0.0001, lambda_lpips=1.0, log_interval=1, checkpoint_interval=10000, freeze_watermarked_model=False), decoder=DecoderConfig(image_size=256, channels=3, output_dim=4), distributed=DistributedConfig(backend='nccl', init_method='env://'), evaluate=EvaluateConfig(batch_size=128, num_samples=1000, num_vis_samples=16, evaluation_mode='both', visualization_seed=42, verbose_visualization=False, evaluate_neg_samples=True, evaluate_pretrained=True, evaluate_ffhq1k=True, evaluate_ffhq30k=True, evaluate_ffhq70k_bcr=True, evaluate_ffhq70k_noaug=True, evaluate_transforms=True, evaluate_truncation=True, evaluate_truncation_watermarked=True, truncation_psi=2.0, evaluate_quantization=True, evaluate_quantization_watermarked=True, evaluate_quantization_int4=True, evaluate_quantization_int4_watermarked=True, evaluate_quantization_int2=True, evaluate_quantization_int2_watermarked=True, evaluate_downsample=True, evaluate_downsample_watermarked=True, downsample_size=128, evaluate_jpeg=False, evaluate_jpeg_watermarked=False, jpeg_quality=55), attack=AttackConfig(batch_size=16, num_samples=100, pgd_alpha=0.01, pgd_steps=100, pgd_epsilon=1.0, surrogate_lr=0.0001, surrogate_batch_size=32, surrogate_epochs=1, surrogate_num_samples=10000, num_surrogate_models=5, use_combined_surrogate_input=False, log_interval=10, visualization_samples=5), seed=None)
+2025-03-22 14:26:57,734 - INFO - Evaluation Options:
+2025-03-22 14:26:57,734 - INFO -   Evaluate negative samples: True
+2025-03-22 14:26:57,734 - INFO -   Evaluate pretrained models: True
+2025-03-22 14:26:57,734 - INFO -     - FFHQ1K: True
+2025-03-22 14:26:57,734 - INFO -     - FFHQ30K: True
+2025-03-22 14:26:57,734 - INFO -     - FFHQ70K-BCR: True
+2025-03-22 14:26:57,734 - INFO -     - FFHQ70K-NOAUG: True
+2025-03-22 14:26:57,734 - INFO -   Evaluate transforms: True
+2025-03-22 14:26:57,734 - INFO -     - Truncation (psi=2.0): True
+2025-03-22 14:26:57,735 - INFO -       - Original model: True
+2025-03-22 14:26:57,735 - INFO -       - Watermarked model: True
+2025-03-22 14:26:57,735 - INFO -     - Int8 Quantization: True
+2025-03-22 14:26:57,735 - INFO -       - Original model: True
+2025-03-22 14:26:57,735 - INFO -       - Watermarked model: True
+2025-03-22 14:26:57,735 - INFO -     - Int4 Quantization: True
+2025-03-22 14:26:57,735 - INFO -       - Original model: True
+2025-03-22 14:26:57,735 - INFO -       - Watermarked model: True
+2025-03-22 14:26:57,735 - INFO -     - Int2 Quantization: True
+2025-03-22 14:26:57,735 - INFO -       - Original model: True
+2025-03-22 14:26:57,735 - INFO -       - Watermarked model: True
+2025-03-22 14:26:57,735 - INFO -     - Downsample (size=128): True
+2025-03-22 14:26:57,735 - INFO -       - Original model: True
+2025-03-22 14:26:57,735 - INFO -       - Watermarked model: True
+2025-03-22 14:26:57,735 - INFO -     - JPEG (quality=55): False
+2025-03-22 14:26:57,735 - INFO - Distributed setup: local_rank=0, rank=0, world_size=1, device=cuda:0
+2025-03-22 14:26:57,735 - INFO - Using image-based approach with 32 pixels and seed 42
+2025-03-22 14:26:57,736 - INFO - Loading StyleGAN2 model...
+2025-03-22 14:26:59,929 - INFO - Initializing key mapper with seed 2025
+2025-03-22 14:26:59,935 - INFO - Generated 32 pixel indices with seed 42
+2025-03-22 14:26:59,935 - INFO - Loading checkpoint from /nfs-user-029/pixel_based/num_pixel_32/key_length_128/checkpoint_iter160000.pth...
+2025-03-22 14:27:00,792 - INFO - Loaded checkpoint from /nfs-user-029/pixel_based/num_pixel_32/key_length_128/checkpoint_iter160000.pth (iteration 160000)
+2025-03-22 14:27:09,236 - INFO - Setting up int8 quantized model...
+2025-03-22 14:27:09,363 - INFO - Setting up int8 quantized watermarked model...
+2025-03-22 14:27:09,413 - INFO - Setting up int4 quantized model...
+2025-03-22 14:27:09,460 - INFO - Setting up int4 quantized watermarked model...
+2025-03-22 14:27:09,515 - INFO - Setting up int2 quantized model...
+2025-03-22 14:27:09,568 - INFO - Setting up int2 quantized watermarked model...
+2025-03-22 14:27:09,622 - INFO - Loading pretrained model: ffhq1k
+2025-03-22 14:27:09,622 - INFO - Downloading StyleGAN2 model to ffhq1k-paper256-ada.pkl...
+2025-03-22 14:27:10,828 - INFO - Download complete.
+2025-03-22 14:27:11,859 - INFO - Successfully loaded pretrained model: ffhq1k
+2025-03-22 14:27:11,859 - INFO - Loading pretrained model: ffhq30k
+2025-03-22 14:27:11,859 - INFO - Downloading StyleGAN2 model to ffhq30k-paper256-ada.pkl...
+2025-03-22 14:27:13,163 - INFO - Download complete.
+2025-03-22 14:27:13,417 - INFO - Successfully loaded pretrained model: ffhq30k
+2025-03-22 14:27:13,417 - INFO - Loading pretrained model: ffhq70k-bcr
+2025-03-22 14:27:13,417 - INFO - Downloading StyleGAN2 model to ffhq70k-paper256-ada-bcr.pkl...
+2025-03-22 14:27:14,789 - INFO - Download complete.
+2025-03-22 14:27:15,017 - INFO - Successfully loaded pretrained model: ffhq70k-bcr
+2025-03-22 14:27:15,017 - INFO - Loading pretrained model: ffhq70k-noaug
+2025-03-22 14:27:15,018 - INFO - Downloading StyleGAN2 model to ffhq70k-paper256-noaug.pkl...
+2025-03-22 14:27:16,423 - INFO - Download complete.
+2025-03-22 14:27:16,673 - INFO - Successfully loaded pretrained model: ffhq70k-noaug
+2025-03-22 14:27:16,673 - INFO - Loaded 4 pretrained models: ['ffhq1k', 'ffhq30k', 'ffhq70k-bcr', 'ffhq70k-noaug']
+2025-03-22 14:27:16,673 - INFO - Setting up quantized model...
+2025-03-22 14:27:16,726 - INFO - Setting up quantized watermarked model...
+2025-03-22 14:27:16,777 - INFO - Running batch evaluation with 1000 samples...
+2025-03-22 14:27:16,777 - INFO - Evaluating watermarked vs. original models...
+2025-03-22 14:28:14,566 - INFO - Calculated threshold at 95% TPR: 0.015616
+2025-03-22 14:28:14,567 - INFO - Evaluating pretrained model 'ffhq1k'...
+2025-03-22 14:28:15,816 - INFO - Evaluating pretrained model 'ffhq30k'...
+2025-03-22 14:28:17,064 - INFO - Evaluating pretrained model 'ffhq70k-bcr'...
+2025-03-22 14:28:18,314 - INFO - Evaluating pretrained model 'ffhq70k-noaug'...
+2025-03-22 14:28:19,563 - INFO - Evaluating truncation_original transformation...
+2025-03-22 14:28:20,819 - INFO - Evaluating truncation_watermarked transformation...
+2025-03-22 14:28:22,071 - INFO - Evaluating quantization_original transformation...
+2025-03-22 14:28:23,320 - INFO - Evaluating quantization_watermarked transformation...
+2025-03-22 14:28:24,571 - INFO - Evaluating quantization_int4_original transformation...
+2025-03-22 14:28:25,819 - INFO - Evaluating quantization_int4_watermarked transformation...
+2025-03-22 14:28:27,068 - INFO - Evaluating quantization_int2_original transformation...
+2025-03-22 14:28:28,315 - INFO - Evaluating quantization_int2_watermarked transformation...
+2025-03-22 14:28:29,564 - INFO - Evaluating downsample_original transformation...
+2025-03-22 14:28:30,820 - INFO - Evaluating downsample_watermarked transformation...
+2025-03-22 14:28:32,077 - INFO - === Evaluation Summary ===
+2025-03-22 14:28:32,077 - INFO - Threshold at 95% TPR: 0.015616
+2025-03-22 14:28:32,077 - INFO - Results Table:
+2025-03-22 14:28:32,077 - INFO - | Model/Transform               | FPR at 95% TPR | ROC-AUC (MSE) | LPIPS Avg | LPIPS Std |
+2025-03-22 14:28:32,077 - INFO - | ----------------------------- | -------------- | ------------- | --------- | --------- |
+2025-03-22 14:28:32,078 - INFO - | Watermarked (Positive)        | 95.00%         | 1.0000        | 0.0139    | 0.0039    |
+2025-03-22 14:28:32,078 - INFO - | Original (Negative)           | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | pretrained_ffhq1k             | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | pretrained_ffhq30k            | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | pretrained_ffhq70k-bcr        | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | pretrained_ffhq70k-noaug      | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | truncation_original           | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | truncation_watermarked        | 81.10%         | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | quantization_original         | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | quantization_watermarked      | 94.40%         | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | quantization_int4_original    | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | quantization_int4_watermarked | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | quantization_int2_original    | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | quantization_int2_watermarked | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | downsample_original           | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:32,078 - INFO - | downsample_watermarked        | 0.00%          | -             | -         | -         |
+2025-03-22 14:28:33,425 - INFO - Running visual evaluation with 16 samples...
+2025-03-22 14:28:33,426 - INFO - Using fixed visualization seed 42 for all samples
+2025-03-22 14:28:33,426 - INFO - Visualizing watermarked vs. original models...
+2025-03-22 14:30:27,326 - INFO - Visualization summary for watermarked (16 samples):
+2025-03-22 14:30:27,326 - INFO -   Key match rate - Watermarked: 6/16 (37.50%)
+2025-03-22 14:30:27,327 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:30:27,327 - INFO -   Average MSE - Watermarked: 0.007247
+2025-03-22 14:30:27,327 - INFO -   Average MSE - Original: 0.179655
+2025-03-22 14:30:27,327 - INFO - Visualizing pretrained model 'ffhq1k'...
+2025-03-22 14:32:07,259 - INFO - Visualization summary for pretrained_ffhq1k (16 samples):
+2025-03-22 14:32:07,259 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:32:07,259 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:32:07,259 - INFO -   Average MSE - Watermarked: 0.372409
+2025-03-22 14:32:07,259 - INFO -   Average MSE - Original: 0.250605
+2025-03-22 14:32:07,259 - INFO - Visualizing pretrained model 'ffhq30k'...
+2025-03-22 14:33:57,031 - INFO - Visualization summary for pretrained_ffhq30k (16 samples):
+2025-03-22 14:33:57,031 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:33:57,031 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:33:57,031 - INFO -   Average MSE - Watermarked: 0.380737
+2025-03-22 14:33:57,031 - INFO -   Average MSE - Original: 0.249071
+2025-03-22 14:33:57,031 - INFO - Visualizing pretrained model 'ffhq70k-bcr'...
+2025-03-22 14:35:53,473 - INFO - Visualization summary for pretrained_ffhq70k-bcr (16 samples):
+2025-03-22 14:35:53,473 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:35:53,473 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:35:53,473 - INFO -   Average MSE - Watermarked: 0.377687
+2025-03-22 14:35:53,474 - INFO -   Average MSE - Original: 0.226517
+2025-03-22 14:35:53,474 - INFO - Visualizing pretrained model 'ffhq70k-noaug'...
+2025-03-22 14:37:40,651 - INFO - Visualization summary for pretrained_ffhq70k-noaug (16 samples):
+2025-03-22 14:37:40,651 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:37:40,651 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:37:40,651 - INFO -   Average MSE - Watermarked: 0.364337
+2025-03-22 14:37:40,652 - INFO -   Average MSE - Original: 0.240904
+2025-03-22 14:37:40,652 - INFO - Visualizing truncation_original transformation...
+2025-03-22 14:39:31,636 - INFO - Visualization summary for truncation_original (16 samples):
+2025-03-22 14:39:31,636 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:39:31,636 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:39:31,636 - INFO -   Average MSE - Watermarked: 0.394449
+2025-03-22 14:39:31,636 - INFO -   Average MSE - Original: 0.173479
+2025-03-22 14:39:31,637 - INFO - Visualizing truncation_watermarked transformation...
+2025-03-22 14:41:08,867 - INFO - Visualization summary for truncation_watermarked (16 samples):
+2025-03-22 14:41:08,867 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:41:08,867 - INFO -   Key match rate - Original: 4/16 (25.00%)
+2025-03-22 14:41:08,867 - INFO -   Average MSE - Watermarked: 0.411584
+2025-03-22 14:41:08,868 - INFO -   Average MSE - Original: 0.008170
+2025-03-22 14:41:08,868 - INFO - Visualizing quantization_original transformation...
+2025-03-22 14:42:59,292 - INFO - Visualization summary for quantization_original (16 samples):
+2025-03-22 14:42:59,293 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:42:59,293 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:42:59,293 - INFO -   Average MSE - Watermarked: 0.382490
+2025-03-22 14:42:59,293 - INFO -   Average MSE - Original: 0.155681
+2025-03-22 14:42:59,293 - INFO - Visualizing quantization_watermarked transformation...
+2025-03-22 14:44:36,003 - INFO - Visualization summary for quantization_watermarked (16 samples):
+2025-03-22 14:44:36,003 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:44:36,003 - INFO -   Key match rate - Original: 5/16 (31.25%)
+2025-03-22 14:44:36,003 - INFO -   Average MSE - Watermarked: 0.379011
+2025-03-22 14:44:36,003 - INFO -   Average MSE - Original: 0.007332
+2025-03-22 14:44:36,004 - INFO - Visualizing quantization_int4_original transformation...
+2025-03-22 14:46:29,801 - INFO - Visualization summary for quantization_int4_original (16 samples):
+2025-03-22 14:46:29,801 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:46:29,801 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:46:29,801 - INFO -   Average MSE - Watermarked: 0.469237
+2025-03-22 14:46:29,801 - INFO -   Average MSE - Original: 0.189789
+2025-03-22 14:46:29,801 - INFO - Visualizing quantization_int4_watermarked transformation...
+2025-03-22 14:48:22,815 - INFO - Visualization summary for quantization_int4_watermarked (16 samples):
+2025-03-22 14:48:22,816 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:48:22,816 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:48:22,816 - INFO -   Average MSE - Watermarked: 0.486540
+2025-03-22 14:48:22,816 - INFO -   Average MSE - Original: 0.172609
+2025-03-22 14:48:22,816 - INFO - Visualizing quantization_int2_original transformation...
+2025-03-22 14:49:50,117 - INFO - Visualization summary for quantization_int2_original (16 samples):
+2025-03-22 14:49:50,118 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:49:50,118 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:49:50,118 - INFO -   Average MSE - Watermarked: 0.547785
+2025-03-22 14:49:50,118 - INFO -   Average MSE - Original: 0.109375
+2025-03-22 14:49:50,118 - INFO - Visualizing quantization_int2_watermarked transformation...
+2025-03-22 14:50:56,784 - INFO - Visualization summary for quantization_int2_watermarked (16 samples):
+2025-03-22 14:50:56,785 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:50:56,785 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:50:56,785 - INFO -   Average MSE - Watermarked: 0.422277
+2025-03-22 14:50:56,785 - INFO -   Average MSE - Original: 0.320312
+2025-03-22 14:50:56,785 - INFO - Visualizing downsample_original transformation...
+2025-03-22 14:52:33,711 - INFO - Visualization summary for downsample_original (16 samples):
+2025-03-22 14:52:33,712 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:52:33,712 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:52:33,712 - INFO -   Average MSE - Watermarked: 0.377543
+2025-03-22 14:52:33,712 - INFO -   Average MSE - Original: 0.222311
+2025-03-22 14:52:33,712 - INFO - Visualizing downsample_watermarked transformation...
+2025-03-22 14:54:19,831 - INFO - Visualization summary for downsample_watermarked (16 samples):
+2025-03-22 14:54:19,831 - INFO -   Key match rate - Watermarked: 0/16 (0.00%)
+2025-03-22 14:54:19,831 - INFO -   Key match rate - Original: 0/16 (0.00%)
+2025-03-22 14:54:19,832 - INFO -   Average MSE - Watermarked: 0.377712
+2025-03-22 14:54:19,832 - INFO -   Average MSE - Original: 0.220575
+2025-03-22 14:54:19,832 - INFO - Evaluation completed. Results saved to evaluation_results
+2025-03-22 14:54:19,832 - INFO - Destroyed distributed process group

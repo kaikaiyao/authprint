@@ -76,14 +76,30 @@ class EvaluateConfig:
     
     # Image transformation options
     evaluate_transforms: bool = True
+    
+    # Truncation options
     evaluate_truncation: bool = True
     evaluate_truncation_watermarked: bool = True
     truncation_psi: float = 2.0
+    
+    # Int8 quantization options (original)
     evaluate_quantization: bool = True
     evaluate_quantization_watermarked: bool = True
+    
+    # Int4 quantization options
+    evaluate_quantization_int4: bool = True
+    evaluate_quantization_int4_watermarked: bool = True
+    
+    # Int2 quantization options
+    evaluate_quantization_int2: bool = True
+    evaluate_quantization_int2_watermarked: bool = True
+    
+    # Downsampling options
     evaluate_downsample: bool = True
     evaluate_downsample_watermarked: bool = True
     downsample_size: int = 128
+    
+    # JPEG compression options
     evaluate_jpeg: bool = False
     evaluate_jpeg_watermarked: bool = False
     jpeg_quality: int = 55

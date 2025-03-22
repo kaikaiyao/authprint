@@ -247,6 +247,66 @@ class WatermarkEvaluator:
         
         # Initialize LPIPS loss with the same network as in training
         self.lpips_loss_fn = lpips.LPIPS(net='alex').to(self.device)
+        
+        # Setup quantized models
+        self.quantized_models = {}
+        self.quantized_watermarked_models = {}
+        
+        # Setup int8 quantized versions if needed
+        if getattr(self.config.evaluate, 'evaluate_quantization', False):
+            # Setup int8 quantized version of the original model
+            if self.rank == 0:
+                logging.info("Setting up int8 quantized model...")
+            self.quantized_models['int8'] = quantize_model_weights(self.gan_model, 'int8')
+            self.quantized_models['int8'].eval()
+            
+            # Setup int8 quantized version of the watermarked model
+            if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', False):
+                if self.rank == 0:
+                    logging.info("Setting up int8 quantized watermarked model...")
+                self.quantized_watermarked_models['int8'] = quantize_model_weights(self.watermarked_model, 'int8')
+                self.quantized_watermarked_models['int8'].eval()
+                
+        # Setup int4 quantized versions if needed
+        if getattr(self.config.evaluate, 'evaluate_quantization_int4', False):
+            # Setup int4 quantized version of the original model
+            if self.rank == 0:
+                logging.info("Setting up int4 quantized model...")
+            self.quantized_models['int4'] = quantize_model_weights(self.gan_model, 'int4')
+            self.quantized_models['int4'].eval()
+            
+            # Setup int4 quantized version of the watermarked model
+            if getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', False):
+                if self.rank == 0:
+                    logging.info("Setting up int4 quantized watermarked model...")
+                self.quantized_watermarked_models['int4'] = quantize_model_weights(self.watermarked_model, 'int4')
+                self.quantized_watermarked_models['int4'].eval()
+                
+        # Setup int2 quantized versions if needed
+        if getattr(self.config.evaluate, 'evaluate_quantization_int2', False):
+            # Setup int2 quantized version of the original model
+            if self.rank == 0:
+                logging.info("Setting up int2 quantized model...")
+            self.quantized_models['int2'] = quantize_model_weights(self.gan_model, 'int2')
+            self.quantized_models['int2'].eval()
+            
+            # Setup int2 quantized version of the watermarked model
+            if getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', False):
+                if self.rank == 0:
+                    logging.info("Setting up int2 quantized watermarked model...")
+                self.quantized_watermarked_models['int2'] = quantize_model_weights(self.watermarked_model, 'int2')
+                self.quantized_watermarked_models['int2'].eval()
+        
+        # For backward compatibility
+        if 'int8' in self.quantized_models:
+            self.quantized_model = self.quantized_models['int8']
+        else:
+            self.quantized_model = None
+            
+        if 'int8' in self.quantized_watermarked_models:
+            self.quantized_watermarked_model = self.quantized_watermarked_models['int8'] 
+        else:
+            self.quantized_watermarked_model = None
     
     def process_batch(self, z, model_name=None, transformation=None):
         """
@@ -391,12 +451,9 @@ class WatermarkEvaluator:
                 
             else:  # transformation is not None
                 # Determine which base model to use based on the transformation
-                if transformation.endswith('_watermarked'):
-                    base_model = self.watermarked_model
-                    transformation_base = transformation.replace('_watermarked', '')
-                else:
-                    base_model = self.gan_model
-                    transformation_base = transformation.replace('_original', '')
+                is_watermarked = '_watermarked' in transformation
+                base_model = self.watermarked_model if is_watermarked else self.gan_model
+                transformation_base = transformation.replace('_watermarked', '').replace('_original', '')
                 
                 # Handle transformations
                 if transformation_base == 'truncation':
@@ -404,26 +461,34 @@ class WatermarkEvaluator:
                     truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
                     x_neg, w_neg = apply_truncation(base_model, z, truncation_psi, return_w=True)
                     
-                elif transformation_base == 'quantization':
-                    # For quantization, use the appropriate quantized model
-                    if transformation.endswith('_watermarked'):
-                        if self.quantized_watermarked_model is None:
-                            if self.rank == 0:
-                                logging.warning("Quantized watermarked model not initialized. Using watermarked model instead.")
-                            w_neg = base_model.mapping(z, None)
-                            x_neg = base_model.synthesis(w_neg, noise_mode="const")
+                elif transformation_base in ['quantization', 'quantization_int4', 'quantization_int2']:
+                    # Extract the bit precision from the transformation name
+                    if transformation_base == 'quantization':
+                        precision = 'int8'
+                    elif transformation_base == 'quantization_int4':
+                        precision = 'int4'
+                    else:  # quantization_int2
+                        precision = 'int2'
+                        
+                    # Use the appropriate quantized model
+                    if is_watermarked:
+                        if precision in self.quantized_watermarked_models:
+                            quantized_model = self.quantized_watermarked_models[precision]
                         else:
-                            w_neg = self.quantized_watermarked_model.mapping(z, None)
-                            x_neg = self.quantized_watermarked_model.synthesis(w_neg, noise_mode="const")
+                            if self.rank == 0:
+                                logging.warning(f"Quantized watermarked model with precision {precision} not initialized. Using watermarked model instead.")
+                            quantized_model = base_model
                     else:
-                        if self.quantized_model is None:
-                            if self.rank == 0:
-                                logging.warning("Quantized model not initialized. Using original model instead.")
-                            w_neg = base_model.mapping(z, None)
-                            x_neg = base_model.synthesis(w_neg, noise_mode="const")
+                        if precision in self.quantized_models:
+                            quantized_model = self.quantized_models[precision]
                         else:
-                            w_neg = self.quantized_model.mapping(z, None)
-                            x_neg = self.quantized_model.synthesis(w_neg, noise_mode="const")
+                            if self.rank == 0:
+                                logging.warning(f"Quantized model with precision {precision} not initialized. Using original model instead.")
+                            quantized_model = base_model
+                            
+                    # Generate images with the quantized model
+                    w_neg = quantized_model.mapping(z, None)
+                    x_neg = quantized_model.synthesis(w_neg, noise_mode="const")
                         
                 else:
                     # First generate image with base model
@@ -542,11 +607,23 @@ class WatermarkEvaluator:
                     if hasattr(self.config.evaluate, 'evaluate_truncation_watermarked') and self.config.evaluate.evaluate_truncation_watermarked:
                         results['truncation_watermarked'] = self.evaluate_model_batch(None, 'truncation_watermarked')
                 
-                # Evaluate quantization
+                # Evaluate quantization (int8)
                 if hasattr(self.config.evaluate, 'evaluate_quantization') and self.config.evaluate.evaluate_quantization:
                     results['quantization_original'] = self.evaluate_model_batch(None, 'quantization_original')
                     if hasattr(self.config.evaluate, 'evaluate_quantization_watermarked') and self.config.evaluate.evaluate_quantization_watermarked:
                         results['quantization_watermarked'] = self.evaluate_model_batch(None, 'quantization_watermarked')
+                
+                # Evaluate quantization (int4)
+                if hasattr(self.config.evaluate, 'evaluate_quantization_int4') and self.config.evaluate.evaluate_quantization_int4:
+                    results['quantization_int4_original'] = self.evaluate_model_batch(None, 'quantization_int4_original')
+                    if hasattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked') and self.config.evaluate.evaluate_quantization_int4_watermarked:
+                        results['quantization_int4_watermarked'] = self.evaluate_model_batch(None, 'quantization_int4_watermarked')
+                        
+                # Evaluate quantization (int2)
+                if hasattr(self.config.evaluate, 'evaluate_quantization_int2') and self.config.evaluate.evaluate_quantization_int2:
+                    results['quantization_int2_original'] = self.evaluate_model_batch(None, 'quantization_int2_original')
+                    if hasattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked') and self.config.evaluate.evaluate_quantization_int2_watermarked:
+                        results['quantization_int2_watermarked'] = self.evaluate_model_batch(None, 'quantization_int2_watermarked')
                 
                 # Evaluate downsample/upsample
                 if hasattr(self.config.evaluate, 'evaluate_downsample') and self.config.evaluate.evaluate_downsample:
@@ -849,11 +926,23 @@ class WatermarkEvaluator:
                     if hasattr(self.config.evaluate, 'evaluate_truncation_watermarked') and self.config.evaluate.evaluate_truncation_watermarked:
                         self.visualize_model_samples(None, 'truncation_watermarked', "truncation_watermarked")
                 
-                # Visualize quantization
+                # Visualize quantization (int8)
                 if hasattr(self.config.evaluate, 'evaluate_quantization') and self.config.evaluate.evaluate_quantization:
                     self.visualize_model_samples(None, 'quantization_original', "quantization_original")
                     if hasattr(self.config.evaluate, 'evaluate_quantization_watermarked') and self.config.evaluate.evaluate_quantization_watermarked:
                         self.visualize_model_samples(None, 'quantization_watermarked', "quantization_watermarked")
+                
+                # Visualize quantization (int4)
+                if hasattr(self.config.evaluate, 'evaluate_quantization_int4') and self.config.evaluate.evaluate_quantization_int4:
+                    self.visualize_model_samples(None, 'quantization_int4_original', "quantization_int4_original")
+                    if hasattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked') and self.config.evaluate.evaluate_quantization_int4_watermarked:
+                        self.visualize_model_samples(None, 'quantization_int4_watermarked', "quantization_int4_watermarked")
+                        
+                # Visualize quantization (int2)
+                if hasattr(self.config.evaluate, 'evaluate_quantization_int2') and self.config.evaluate.evaluate_quantization_int2:
+                    self.visualize_model_samples(None, 'quantization_int2_original', "quantization_int2_original")
+                    if hasattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked') and self.config.evaluate.evaluate_quantization_int2_watermarked:
+                        self.visualize_model_samples(None, 'quantization_int2_watermarked', "quantization_int2_watermarked")
                 
                 # Visualize downsample/upsample
                 if hasattr(self.config.evaluate, 'evaluate_downsample') and self.config.evaluate.evaluate_downsample:

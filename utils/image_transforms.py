@@ -48,7 +48,7 @@ def quantize_model_weights(model, precision='int8'):
     
     Args:
         model: The model to quantize
-        precision: Quantization precision ('int8')
+        precision: Quantization precision ('int8', 'int4', or 'int2')
     
     Returns:
         Quantized model copy
@@ -56,7 +56,7 @@ def quantize_model_weights(model, precision='int8'):
     try:
         quantized_model = copy.deepcopy(model)
         
-        def quantize_tensor(tensor):
+        def quantize_tensor(tensor, bit_precision):
             # Handle empty or NaN tensors
             if tensor.numel() == 0 or torch.isnan(tensor).any():
                 return tensor.clone()
@@ -65,11 +65,23 @@ def quantize_model_weights(model, precision='int8'):
             max_abs_val = torch.max(torch.abs(tensor))
             if max_abs_val == 0:
                 return tensor.clone()
+            
+            # Set quantization parameters based on precision
+            if bit_precision == 'int8':
+                max_val = 127
+            elif bit_precision == 'int4':
+                max_val = 7  # 2^3 - 1
+            elif bit_precision == 'int2':
+                max_val = 1  # 2^1 - 1
+            else:
+                # Default to int8
+                max_val = 127
                 
-            # Scale to int8 range
-            scale = 127.0 / max_abs_val
+            # Scale to appropriate range
+            scale = float(max_val) / max_abs_val
             quantized = torch.round(tensor * scale)
-            quantized = torch.clamp(quantized, -127, 127)
+            quantized = torch.clamp(quantized, -max_val, max_val)
+            
             # Scale back to original range
             dequantized = quantized / scale
             return dequantized
@@ -77,11 +89,11 @@ def quantize_model_weights(model, precision='int8'):
         # Quantize all parameters
         with torch.no_grad():
             for param in quantized_model.parameters():
-                param.copy_(quantize_tensor(param))
+                param.copy_(quantize_tensor(param, precision))
         
         return quantized_model
     except Exception as e:
-        logging.error(f"Error quantizing model weights: {str(e)}")
+        logging.error(f"Error quantizing model weights with precision {precision}: {str(e)}")
         # Return original model as fallback
         return model
 

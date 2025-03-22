@@ -79,22 +79,42 @@ def parse_args():
     # Image transformation options - enabled by default
     parser.add_argument("--evaluate_transforms", action="store_true", default=True,
                         help="Whether to evaluate on transformed images")
+    
+    # Truncation options
     parser.add_argument("--evaluate_truncation", action="store_true", default=True,
                         help="Evaluate on truncated images (original model)")
     parser.add_argument("--evaluate_truncation_watermarked", action="store_true", default=True,
                         help="Evaluate on truncated images (watermarked model)")
     parser.add_argument("--truncation_psi", type=float, default=2.0,
                         help="Truncation psi parameter")
+    
+    # Int8 quantization options
     parser.add_argument("--evaluate_quantization", action="store_true", default=True,
-                        help="Evaluate on images from quantized model (original model)")
+                        help="Evaluate on images from int8 quantized model (original model)")
     parser.add_argument("--evaluate_quantization_watermarked", action="store_true", default=True,
-                        help="Evaluate on images from quantized model (watermarked model)")
+                        help="Evaluate on images from int8 quantized model (watermarked model)")
+    
+    # Int4 quantization options
+    parser.add_argument("--evaluate_quantization_int4", action="store_true", default=True,
+                        help="Evaluate on images from int4 quantized model (original model)")
+    parser.add_argument("--evaluate_quantization_int4_watermarked", action="store_true", default=True,
+                        help="Evaluate on images from int4 quantized model (watermarked model)")
+    
+    # Int2 quantization options
+    parser.add_argument("--evaluate_quantization_int2", action="store_true", default=True,
+                        help="Evaluate on images from int2 quantized model (original model)")
+    parser.add_argument("--evaluate_quantization_int2_watermarked", action="store_true", default=True,
+                        help="Evaluate on images from int2 quantized model (watermarked model)")
+    
+    # Downsampling options
     parser.add_argument("--evaluate_downsample", action="store_true", default=True,
                         help="Evaluate on downsampled and upsampled images (original model)")
     parser.add_argument("--evaluate_downsample_watermarked", action="store_true", default=True,
                         help="Evaluate on downsampled and upsampled images (watermarked model)")
     parser.add_argument("--downsample_size", type=int, default=128,
                         help="Size to downsample to before upsampling back")
+    
+    # JPEG compression options
     parser.add_argument("--evaluate_jpeg", action="store_true", default=False,
                         help="Evaluate on JPEG compressed images (original model)")
     parser.add_argument("--evaluate_jpeg_watermarked", action="store_true", default=False,
@@ -153,10 +173,20 @@ def main():
                     logging.info(f"      - Original model: {config.evaluate.evaluate_truncation}")
                     logging.info(f"      - Watermarked model: {config.evaluate.evaluate_truncation_watermarked}")
                 
-                logging.info(f"    - Quantization: {config.evaluate.evaluate_quantization}")
+                logging.info(f"    - Int8 Quantization: {config.evaluate.evaluate_quantization}")
                 if config.evaluate.evaluate_quantization:
                     logging.info(f"      - Original model: {config.evaluate.evaluate_quantization}")
                     logging.info(f"      - Watermarked model: {config.evaluate.evaluate_quantization_watermarked}")
+                
+                logging.info(f"    - Int4 Quantization: {config.evaluate.evaluate_quantization_int4}")
+                if config.evaluate.evaluate_quantization_int4:
+                    logging.info(f"      - Original model: {config.evaluate.evaluate_quantization_int4}")
+                    logging.info(f"      - Watermarked model: {config.evaluate.evaluate_quantization_int4_watermarked}")
+                
+                logging.info(f"    - Int2 Quantization: {config.evaluate.evaluate_quantization_int2}")
+                if config.evaluate.evaluate_quantization_int2:
+                    logging.info(f"      - Original model: {config.evaluate.evaluate_quantization_int2}")
+                    logging.info(f"      - Watermarked model: {config.evaluate.evaluate_quantization_int2_watermarked}")
                 
                 logging.info(f"    - Downsample (size={config.evaluate.downsample_size}): {config.evaluate.evaluate_downsample}")
                 if config.evaluate.evaluate_downsample:

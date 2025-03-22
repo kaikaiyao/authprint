@@ -64,6 +64,10 @@ class EvaluateConfig:
     num_vis_samples: int = 10
     evaluation_mode: str = 'both'
     
+    # Visualization options
+    visualization_seed: int = 42  # Random seed for consistent visualization samples
+    verbose_visualization: bool = False  # Whether to log detailed per-sample information
+    
     # Negative sample evaluation options
     evaluate_neg_samples: bool = True
     
@@ -191,7 +195,7 @@ class Config:
                 'evaluate_ffhq1k', 'evaluate_ffhq30k', 'evaluate_ffhq70k_bcr', 'evaluate_ffhq70k_noaug',
                 'evaluate_transforms', 'evaluate_truncation', 'truncation_psi',
                 'evaluate_quantization', 'evaluate_downsample', 'downsample_size',
-                'evaluate_jpeg', 'jpeg_quality'
+                'evaluate_jpeg', 'jpeg_quality', 'visualization_seed', 'verbose_visualization'
             ]
             
             for option in evaluate_options:

@@ -314,7 +314,7 @@ class WatermarkEvaluator:
         
         Args:
             z (torch.Tensor): Batch of latent vectors.
-            model_name (str, optional): Name of the pretrained model to use. If None, uses the watermarked model.
+            model_name (str, optional): Name of the pretrained model to use.
             transformation (str, optional): Name of the transformation to apply to the original model/images.
         
         Returns:
@@ -962,55 +962,65 @@ class WatermarkEvaluator:
             
         logging.info(f"Running visual evaluation with {self.config.evaluate.num_vis_samples} samples...")
         
+        # Set fixed seed for visualization to ensure consistent samples across all models/transformations
+        vis_seed = getattr(self.config.evaluate, 'visualization_seed', 42)
+        torch.manual_seed(vis_seed)
+        
+        # Generate latent vectors ONCE and reuse them for all visualizations
+        z_vis = torch.randn(self.config.evaluate.num_vis_samples, self.latent_dim, device=self.device)
+        
+        if self.rank == 0:
+            logging.info(f"Using fixed visualization seed {vis_seed} for all samples")
+        
         # First visualize original vs. watermarked
-        self.visualize_model_samples(None, None, "watermarked")
+        self.visualize_model_samples(None, None, "watermarked", z_vis)
         
         # Visualize negative samples if needed
         if hasattr(self.config.evaluate, 'evaluate_neg_samples') and self.config.evaluate.evaluate_neg_samples:
             # Visualize pretrained models
             if hasattr(self.config.evaluate, 'evaluate_pretrained') and self.config.evaluate.evaluate_pretrained:
                 for model_name in self.pretrained_models:
-                    self.visualize_model_samples(model_name, None, f"pretrained_{model_name}")
+                    self.visualize_model_samples(model_name, None, f"pretrained_{model_name}", z_vis)
             
             # Visualize transformations
             if hasattr(self.config.evaluate, 'evaluate_transforms') and self.config.evaluate.evaluate_transforms:
                 # Visualize truncation
                 if hasattr(self.config.evaluate, 'evaluate_truncation') and self.config.evaluate.evaluate_truncation:
-                    self.visualize_model_samples(None, 'truncation_original', "truncation_original")
+                    self.visualize_model_samples(None, 'truncation_original', "truncation_original", z_vis)
                     if hasattr(self.config.evaluate, 'evaluate_truncation_watermarked') and self.config.evaluate.evaluate_truncation_watermarked:
-                        self.visualize_model_samples(None, 'truncation_watermarked', "truncation_watermarked")
+                        self.visualize_model_samples(None, 'truncation_watermarked', "truncation_watermarked", z_vis)
                 
                 # Visualize quantization (int8)
                 if hasattr(self.config.evaluate, 'evaluate_quantization') and self.config.evaluate.evaluate_quantization:
-                    self.visualize_model_samples(None, 'quantization_original', "quantization_original")
+                    self.visualize_model_samples(None, 'quantization_original', "quantization_original", z_vis)
                     if hasattr(self.config.evaluate, 'evaluate_quantization_watermarked') and self.config.evaluate.evaluate_quantization_watermarked:
-                        self.visualize_model_samples(None, 'quantization_watermarked', "quantization_watermarked")
+                        self.visualize_model_samples(None, 'quantization_watermarked', "quantization_watermarked", z_vis)
                 
                 # Visualize quantization (int4)
                 if hasattr(self.config.evaluate, 'evaluate_quantization_int4') and self.config.evaluate.evaluate_quantization_int4:
-                    self.visualize_model_samples(None, 'quantization_int4_original', "quantization_int4_original")
+                    self.visualize_model_samples(None, 'quantization_int4_original', "quantization_int4_original", z_vis)
                     if hasattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked') and self.config.evaluate.evaluate_quantization_int4_watermarked:
-                        self.visualize_model_samples(None, 'quantization_int4_watermarked', "quantization_int4_watermarked")
+                        self.visualize_model_samples(None, 'quantization_int4_watermarked', "quantization_int4_watermarked", z_vis)
                         
                 # Visualize quantization (int2)
                 if hasattr(self.config.evaluate, 'evaluate_quantization_int2') and self.config.evaluate.evaluate_quantization_int2:
-                    self.visualize_model_samples(None, 'quantization_int2_original', "quantization_int2_original")
+                    self.visualize_model_samples(None, 'quantization_int2_original', "quantization_int2_original", z_vis)
                     if hasattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked') and self.config.evaluate.evaluate_quantization_int2_watermarked:
-                        self.visualize_model_samples(None, 'quantization_int2_watermarked', "quantization_int2_watermarked")
+                        self.visualize_model_samples(None, 'quantization_int2_watermarked', "quantization_int2_watermarked", z_vis)
                 
                 # Visualize downsample/upsample
                 if hasattr(self.config.evaluate, 'evaluate_downsample') and self.config.evaluate.evaluate_downsample:
-                    self.visualize_model_samples(None, 'downsample_original', "downsample_original")
+                    self.visualize_model_samples(None, 'downsample_original', "downsample_original", z_vis)
                     if hasattr(self.config.evaluate, 'evaluate_downsample_watermarked') and self.config.evaluate.evaluate_downsample_watermarked:
-                        self.visualize_model_samples(None, 'downsample_watermarked', "downsample_watermarked")
+                        self.visualize_model_samples(None, 'downsample_watermarked', "downsample_watermarked", z_vis)
                 
                 # Visualize JPEG compression
                 if hasattr(self.config.evaluate, 'evaluate_jpeg') and self.config.evaluate.evaluate_jpeg:
-                    self.visualize_model_samples(None, 'jpeg_original', "jpeg_original")
+                    self.visualize_model_samples(None, 'jpeg_original', "jpeg_original", z_vis)
                     if hasattr(self.config.evaluate, 'evaluate_jpeg_watermarked') and self.config.evaluate.evaluate_jpeg_watermarked:
-                        self.visualize_model_samples(None, 'jpeg_watermarked', "jpeg_watermarked")
+                        self.visualize_model_samples(None, 'jpeg_watermarked', "jpeg_watermarked", z_vis)
     
-    def visualize_model_samples(self, model_name=None, transformation=None, output_subdir="watermarked"):
+    def visualize_model_samples(self, model_name=None, transformation=None, output_subdir="watermarked", z_vis=None):
         """
         Generate and visualize samples for a specific model or transformation.
         
@@ -1018,6 +1028,7 @@ class WatermarkEvaluator:
             model_name (str, optional): Name of the pretrained model to visualize.
             transformation (str, optional): Name of the transformation to apply.
             output_subdir (str): Subdirectory to save visualization results.
+            z_vis (torch.Tensor, optional): Fixed latent vectors to use. If None, will generate random ones.
         """
         # Create appropriate description for what's being visualized
         if model_name is None and transformation is None:
@@ -1030,8 +1041,10 @@ class WatermarkEvaluator:
         logging.info(f"Visualizing {name_str}...")
         
         with torch.no_grad():
-            # Sample latent vectors
-            z_vis = torch.randn(self.config.evaluate.num_vis_samples, self.latent_dim, device=self.device)
+            # Use provided latent vectors or generate new ones
+            if z_vis is None:
+                z_vis = torch.randn(self.config.evaluate.num_vis_samples, self.latent_dim, device=self.device)
+                logging.info("Using randomly generated latent vectors (not fixed across evaluations)")
             
             # Process batch for visualization
             batch_results = self.process_batch(z_vis, model_name, transformation)
@@ -1098,16 +1111,34 @@ class WatermarkEvaluator:
             watermarked_mse_distances_vis = torch.mean(torch.pow(pred_keys_water_probs_vis - true_keys_vis, 2), dim=1)
             original_mse_distances_vis = torch.mean(torch.pow(pred_keys_orig_probs_vis - true_keys_vis, 2), dim=1)
             
-            # Save key comparison to log
-            for i in range(self.config.evaluate.num_vis_samples):
-                logging.info(f"Sample {i} ({output_subdir}):")
-                logging.info(f"  True key: {true_keys_vis[i].cpu().numpy().astype(int)}")
-                logging.info(f"  Watermarked pred: {pred_keys_water_vis[i].cpu().numpy().astype(int)}")
-                logging.info(f"  Original pred: {pred_keys_orig_vis[i].cpu().numpy().astype(int)}")
-                logging.info(f"  Watermarked match: {(pred_keys_water_vis[i] == true_keys_vis[i]).all().item()}")
-                logging.info(f"  Original match: {(pred_keys_orig_vis[i] == true_keys_vis[i]).all().item()}")
-                logging.info(f"  Watermarked MSE distance: {watermarked_mse_distances_vis[i].item():.6f}")
-                logging.info(f"  Original MSE distance: {original_mse_distances_vis[i].item():.6f}")
+            # Check if verbose visualization logging is enabled
+            verbose_visualization = getattr(self.config.evaluate, 'verbose_visualization', False)
+            
+            if verbose_visualization:
+                # Detailed per-sample logging (original behavior)
+                for i in range(self.config.evaluate.num_vis_samples):
+                    logging.info(f"Sample {i} ({output_subdir}):")
+                    logging.info(f"  True key: {true_keys_vis[i].cpu().numpy().astype(int)}")
+                    logging.info(f"  Watermarked pred: {pred_keys_water_vis[i].cpu().numpy().astype(int)}")
+                    logging.info(f"  Original pred: {pred_keys_orig_vis[i].cpu().numpy().astype(int)}")
+                    logging.info(f"  Watermarked match: {(pred_keys_water_vis[i] == true_keys_vis[i]).all().item()}")
+                    logging.info(f"  Original match: {(pred_keys_orig_vis[i] == true_keys_vis[i]).all().item()}")
+                    logging.info(f"  Watermarked MSE distance: {watermarked_mse_distances_vis[i].item():.6f}")
+                    logging.info(f"  Original MSE distance: {original_mse_distances_vis[i].item():.6f}")
+            else:
+                # Summary statistics instead of per-sample details
+                watermarked_matches = sum((pred_keys_water_vis == true_keys_vis).all(dim=1).cpu().numpy())
+                original_matches = sum((pred_keys_orig_vis == true_keys_vis).all(dim=1).cpu().numpy())
+                
+                avg_watermarked_mse = watermarked_mse_distances_vis.mean().item()
+                avg_original_mse = original_mse_distances_vis.mean().item()
+                
+                # Log summary
+                logging.info(f"Visualization summary for {output_subdir} ({self.config.evaluate.num_vis_samples} samples):")
+                logging.info(f"  Key match rate - Watermarked: {watermarked_matches}/{self.config.evaluate.num_vis_samples} ({watermarked_matches/self.config.evaluate.num_vis_samples:.2%})")
+                logging.info(f"  Key match rate - Original: {original_matches}/{self.config.evaluate.num_vis_samples} ({original_matches/self.config.evaluate.num_vis_samples:.2%})")
+                logging.info(f"  Average MSE - Watermarked: {avg_watermarked_mse:.6f}")
+                logging.info(f"  Average MSE - Original: {avg_original_mse:.6f}")
     
     def calculate_threshold_at_tpr(self, watermarked_distances, target_tpr=0.95):
         """

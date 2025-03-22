@@ -60,6 +60,12 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, default="evaluation_results", 
                         help="Directory to save evaluation results")
     
+    # Visualization configuration
+    parser.add_argument("--visualization_seed", type=int, default=42,
+                        help="Random seed for generating visualization samples (ensures consistency across models)")
+    parser.add_argument("--verbose_visualization", action="store_true", default=False,
+                        help="Enable verbose logging for individual sample visualization details")
+    
     # Additional evaluation options for negative samples - enabled by default
     parser.add_argument("--evaluate_neg_samples", action="store_true", default=True,
                         help="Whether to evaluate on negative samples")

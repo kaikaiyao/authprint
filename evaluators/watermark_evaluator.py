@@ -96,12 +96,20 @@ class WatermarkEvaluator:
         
         # Setup the quantized model if we're evaluating quantization
         self.quantized_model = None
+        self.quantized_watermarked_model = None
         if getattr(self.config.evaluate, 'evaluate_quantization', False):
             # Setup quantized version of the original model
             if self.rank == 0:
                 logging.info("Setting up quantized model...")
             self.quantized_model = quantize_model_weights(self.gan_model)
             self.quantized_model.eval()
+            
+            # Setup quantized version of the watermarked model
+            if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', False):
+                if self.rank == 0:
+                    logging.info("Setting up quantized watermarked model...")
+                self.quantized_watermarked_model = quantize_model_weights(self.watermarked_model)
+                self.quantized_watermarked_model.eval()
     
     def _generate_pixel_indices(self) -> None:
         """
@@ -382,36 +390,51 @@ class WatermarkEvaluator:
                 x_neg = negative_model.synthesis(w_neg, noise_mode="const")
                 
             else:  # transformation is not None
-                # Use the original model with transformation
-                original_model = self.gan_model
+                # Determine which base model to use based on the transformation
+                if transformation.endswith('_watermarked'):
+                    base_model = self.watermarked_model
+                    transformation_base = transformation.replace('_watermarked', '')
+                else:
+                    base_model = self.gan_model
+                    transformation_base = transformation.replace('_original', '')
                 
                 # Handle transformations
-                if transformation == 'truncation':
+                if transformation_base == 'truncation':
                     # For truncation, apply truncation to the image generation
                     truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
-                    x_neg, w_neg = apply_truncation(original_model, z, truncation_psi, return_w=True)
+                    x_neg, w_neg = apply_truncation(base_model, z, truncation_psi, return_w=True)
                     
-                elif transformation == 'quantization':
-                    # For quantization, use the quantized model
-                    if self.quantized_model is None:
-                        if self.rank == 0:
-                            logging.warning("Quantized model not initialized. Using original model instead.")
-                        w_neg = original_model.mapping(z, None)
-                        x_neg = original_model.synthesis(w_neg, noise_mode="const")
+                elif transformation_base == 'quantization':
+                    # For quantization, use the appropriate quantized model
+                    if transformation.endswith('_watermarked'):
+                        if self.quantized_watermarked_model is None:
+                            if self.rank == 0:
+                                logging.warning("Quantized watermarked model not initialized. Using watermarked model instead.")
+                            w_neg = base_model.mapping(z, None)
+                            x_neg = base_model.synthesis(w_neg, noise_mode="const")
+                        else:
+                            w_neg = self.quantized_watermarked_model.mapping(z, None)
+                            x_neg = self.quantized_watermarked_model.synthesis(w_neg, noise_mode="const")
                     else:
-                        w_neg = self.quantized_model.mapping(z, None)
-                        x_neg = self.quantized_model.synthesis(w_neg, noise_mode="const")
+                        if self.quantized_model is None:
+                            if self.rank == 0:
+                                logging.warning("Quantized model not initialized. Using original model instead.")
+                            w_neg = base_model.mapping(z, None)
+                            x_neg = base_model.synthesis(w_neg, noise_mode="const")
+                        else:
+                            w_neg = self.quantized_model.mapping(z, None)
+                            x_neg = self.quantized_model.synthesis(w_neg, noise_mode="const")
                         
                 else:
-                    # First generate image with original model
-                    w_neg = original_model.mapping(z, None)
-                    x_neg = original_model.synthesis(w_neg, noise_mode="const")
+                    # First generate image with base model
+                    w_neg = base_model.mapping(z, None)
+                    x_neg = base_model.synthesis(w_neg, noise_mode="const")
                     
                     # Then apply post-processing transformations
-                    if transformation == 'downsample':
+                    if transformation_base == 'downsample':
                         downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
                         x_neg = downsample_and_upsample(x_neg, downsample_size)
-                    elif transformation == 'jpeg':
+                    elif transformation_base == 'jpeg':
                         jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 55)
                         x_neg = apply_jpeg_compression(x_neg, jpeg_quality)
             
@@ -515,19 +538,27 @@ class WatermarkEvaluator:
             if hasattr(self.config.evaluate, 'evaluate_transforms') and self.config.evaluate.evaluate_transforms:
                 # Evaluate truncation
                 if hasattr(self.config.evaluate, 'evaluate_truncation') and self.config.evaluate.evaluate_truncation:
-                    results['truncation'] = self.evaluate_model_batch(None, 'truncation')
+                    results['truncation_original'] = self.evaluate_model_batch(None, 'truncation_original')
+                    if hasattr(self.config.evaluate, 'evaluate_truncation_watermarked') and self.config.evaluate.evaluate_truncation_watermarked:
+                        results['truncation_watermarked'] = self.evaluate_model_batch(None, 'truncation_watermarked')
                 
                 # Evaluate quantization
                 if hasattr(self.config.evaluate, 'evaluate_quantization') and self.config.evaluate.evaluate_quantization:
-                    results['quantization'] = self.evaluate_model_batch(None, 'quantization')
+                    results['quantization_original'] = self.evaluate_model_batch(None, 'quantization_original')
+                    if hasattr(self.config.evaluate, 'evaluate_quantization_watermarked') and self.config.evaluate.evaluate_quantization_watermarked:
+                        results['quantization_watermarked'] = self.evaluate_model_batch(None, 'quantization_watermarked')
                 
                 # Evaluate downsample/upsample
                 if hasattr(self.config.evaluate, 'evaluate_downsample') and self.config.evaluate.evaluate_downsample:
-                    results['downsample'] = self.evaluate_model_batch(None, 'downsample')
+                    results['downsample_original'] = self.evaluate_model_batch(None, 'downsample_original')
+                    if hasattr(self.config.evaluate, 'evaluate_downsample_watermarked') and self.config.evaluate.evaluate_downsample_watermarked:
+                        results['downsample_watermarked'] = self.evaluate_model_batch(None, 'downsample_watermarked')
                 
                 # Evaluate JPEG compression
                 if hasattr(self.config.evaluate, 'evaluate_jpeg') and self.config.evaluate.evaluate_jpeg:
-                    results['jpeg'] = self.evaluate_model_batch(None, 'jpeg')
+                    results['jpeg_original'] = self.evaluate_model_batch(None, 'jpeg_original')
+                    if hasattr(self.config.evaluate, 'evaluate_jpeg_watermarked') and self.config.evaluate.evaluate_jpeg_watermarked:
+                        results['jpeg_watermarked'] = self.evaluate_model_batch(None, 'jpeg_watermarked')
         
         # Generate combined metrics summary
         if self.rank == 0:
@@ -814,19 +845,27 @@ class WatermarkEvaluator:
             if hasattr(self.config.evaluate, 'evaluate_transforms') and self.config.evaluate.evaluate_transforms:
                 # Visualize truncation
                 if hasattr(self.config.evaluate, 'evaluate_truncation') and self.config.evaluate.evaluate_truncation:
-                    self.visualize_model_samples(None, 'truncation', "truncation")
+                    self.visualize_model_samples(None, 'truncation_original', "truncation_original")
+                    if hasattr(self.config.evaluate, 'evaluate_truncation_watermarked') and self.config.evaluate.evaluate_truncation_watermarked:
+                        self.visualize_model_samples(None, 'truncation_watermarked', "truncation_watermarked")
                 
                 # Visualize quantization
                 if hasattr(self.config.evaluate, 'evaluate_quantization') and self.config.evaluate.evaluate_quantization:
-                    self.visualize_model_samples(None, 'quantization', "quantization")
+                    self.visualize_model_samples(None, 'quantization_original', "quantization_original")
+                    if hasattr(self.config.evaluate, 'evaluate_quantization_watermarked') and self.config.evaluate.evaluate_quantization_watermarked:
+                        self.visualize_model_samples(None, 'quantization_watermarked', "quantization_watermarked")
                 
                 # Visualize downsample/upsample
                 if hasattr(self.config.evaluate, 'evaluate_downsample') and self.config.evaluate.evaluate_downsample:
-                    self.visualize_model_samples(None, 'downsample', "downsample")
+                    self.visualize_model_samples(None, 'downsample_original', "downsample_original")
+                    if hasattr(self.config.evaluate, 'evaluate_downsample_watermarked') and self.config.evaluate.evaluate_downsample_watermarked:
+                        self.visualize_model_samples(None, 'downsample_watermarked', "downsample_watermarked")
                 
                 # Visualize JPEG compression
                 if hasattr(self.config.evaluate, 'evaluate_jpeg') and self.config.evaluate.evaluate_jpeg:
-                    self.visualize_model_samples(None, 'jpeg', "jpeg")
+                    self.visualize_model_samples(None, 'jpeg_original', "jpeg_original")
+                    if hasattr(self.config.evaluate, 'evaluate_jpeg_watermarked') and self.config.evaluate.evaluate_jpeg_watermarked:
+                        self.visualize_model_samples(None, 'jpeg_watermarked', "jpeg_watermarked")
     
     def visualize_model_samples(self, model_name=None, transformation=None, output_subdir="watermarked"):
         """

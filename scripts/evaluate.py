@@ -80,17 +80,25 @@ def parse_args():
     parser.add_argument("--evaluate_transforms", action="store_true", default=True,
                         help="Whether to evaluate on transformed images")
     parser.add_argument("--evaluate_truncation", action="store_true", default=True,
-                        help="Evaluate on truncated images")
+                        help="Evaluate on truncated images (original model)")
+    parser.add_argument("--evaluate_truncation_watermarked", action="store_true", default=True,
+                        help="Evaluate on truncated images (watermarked model)")
     parser.add_argument("--truncation_psi", type=float, default=2.0,
                         help="Truncation psi parameter")
     parser.add_argument("--evaluate_quantization", action="store_true", default=True,
-                        help="Evaluate on images from quantized model")
+                        help="Evaluate on images from quantized model (original model)")
+    parser.add_argument("--evaluate_quantization_watermarked", action="store_true", default=True,
+                        help="Evaluate on images from quantized model (watermarked model)")
     parser.add_argument("--evaluate_downsample", action="store_true", default=True,
-                        help="Evaluate on downsampled and upsampled images")
+                        help="Evaluate on downsampled and upsampled images (original model)")
+    parser.add_argument("--evaluate_downsample_watermarked", action="store_true", default=True,
+                        help="Evaluate on downsampled and upsampled images (watermarked model)")
     parser.add_argument("--downsample_size", type=int, default=128,
                         help="Size to downsample to before upsampling back")
     parser.add_argument("--evaluate_jpeg", action="store_true", default=False,
-                        help="Evaluate on JPEG compressed images")
+                        help="Evaluate on JPEG compressed images (original model)")
+    parser.add_argument("--evaluate_jpeg_watermarked", action="store_true", default=False,
+                        help="Evaluate on JPEG compressed images (watermarked model)")
     parser.add_argument("--jpeg_quality", type=int, default=55,
                         help="JPEG compression quality (0-100)")
     
@@ -141,9 +149,24 @@ def main():
             logging.info(f"  Evaluate transforms: {config.evaluate.evaluate_transforms}")
             if config.evaluate.evaluate_transforms:
                 logging.info(f"    - Truncation (psi={config.evaluate.truncation_psi}): {config.evaluate.evaluate_truncation}")
+                if config.evaluate.evaluate_truncation:
+                    logging.info(f"      - Original model: {config.evaluate.evaluate_truncation}")
+                    logging.info(f"      - Watermarked model: {config.evaluate.evaluate_truncation_watermarked}")
+                
                 logging.info(f"    - Quantization: {config.evaluate.evaluate_quantization}")
+                if config.evaluate.evaluate_quantization:
+                    logging.info(f"      - Original model: {config.evaluate.evaluate_quantization}")
+                    logging.info(f"      - Watermarked model: {config.evaluate.evaluate_quantization_watermarked}")
+                
                 logging.info(f"    - Downsample (size={config.evaluate.downsample_size}): {config.evaluate.evaluate_downsample}")
+                if config.evaluate.evaluate_downsample:
+                    logging.info(f"      - Original model: {config.evaluate.evaluate_downsample}")
+                    logging.info(f"      - Watermarked model: {config.evaluate.evaluate_downsample_watermarked}")
+                
                 logging.info(f"    - JPEG (quality={config.evaluate.jpeg_quality}): {config.evaluate.evaluate_jpeg}")
+                if config.evaluate.evaluate_jpeg:
+                    logging.info(f"      - Original model: {config.evaluate.evaluate_jpeg}")
+                    logging.info(f"      - Watermarked model: {config.evaluate.evaluate_jpeg_watermarked}")
                 
         logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
     

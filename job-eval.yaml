@@ -75,13 +75,15 @@ spec:
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
                       scripts/evaluate.py \
-                      --checkpoint_path "/nfs-user-029/w_based/w_partial_length_8/key_length_256/checkpoint_iter180000.pth" \
+                      --checkpoint_path "/nfs-user-029/w_based/w_partial_length_8/key_length_256/sin_0d1/checkpoint_iter170000.pth" \
                       --evaluation_mode "both" \
                       --num_samples 1000 \
                       --num_vis_samples 4 \
                       --batch_size 128 \
                       --key_length 256 \
                       --key_mapper_seed 2025 \
+                      --key_mapper_use_sine \
+                      --key_mapper_sensitivity 0.1 \
                       --w_partial_length 8 \
                       --w_partial_set_seed 42
               

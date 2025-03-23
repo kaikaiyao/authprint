@@ -98,8 +98,6 @@ spec:
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"
-              
-              sleep infinity
           resources:
             limits:
               nvidia.com/gpu: "1"

@@ -70,28 +70,32 @@ class KeyMapper(nn.Module):
         
     def get_raw_and_binary(self, latent_partial):
         """
-        Get both raw activation values and binary output.
+        Get the raw projection values, activation values, and binary output.
         Useful for debugging and visualization.
         
         Args:
             latent_partial (torch.Tensor): Input tensor of shape (B, input_dim).
             
         Returns:
-            tuple: (raw_activations, binary_outputs) both of shape (B, output_dim)
+            tuple: (pre_activation_projection, raw_activations, binary_outputs) all of shape (B, output_dim)
         """
         # Linear projection
         projection = torch.matmul(latent_partial, self.W)
         
         if self.use_sine:
             # Apply sine-based mapping: y = sign(sin(k*Wx))
-            sine_input = self.sensitivity * projection
-            activated = torch.sin(sine_input)
+            # Store pre-activation projection
+            pre_activation = self.sensitivity * projection  # This is k*Wx before sine
+            # Apply activation
+            activated = torch.sin(pre_activation)
         else:
             # Original implementation: y = sign(tanh(Wx + b))
-            projection = projection + self.b
-            activated = torch.tanh(projection)
+            # Store pre-activation projection (after adding bias)
+            pre_activation = projection + self.b  # This is Wx + b before tanh
+            # Apply activation
+            activated = torch.tanh(pre_activation)
             
         # Binary output
         target = (activated > 0).float()
         
-        return activated, target 
+        return pre_activation, activated, target 

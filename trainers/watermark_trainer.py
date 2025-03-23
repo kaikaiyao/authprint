@@ -324,12 +324,28 @@ class WatermarkTrainer:
         # Get raw activations and binary keys for logging during the first iteration
         if self.global_step == 0 and self.rank == 0:
             with torch.no_grad():
-                raw_activations, binary_keys = self.key_mapper.get_raw_and_binary(features[:3])  # First 3 samples
+                # Get first 3 samples
+                sample_features = features[:3]
+                
+                # Get projections, activations, and binary keys
+                projections, activations, binary_keys = self.key_mapper.get_raw_and_binary(sample_features)
+                
                 logging.info("Example outputs during first training iteration:")
-                for i in range(min(3, len(raw_activations))):
+                for i in range(min(3, len(activations))):
                     logging.info(f"  Training sample {i+1}:")
-                    logging.info(f"    Raw activations: {raw_activations[i].tolist()}")
-                    logging.info(f"    Binary key:     {binary_keys[i].tolist()}")
+                    
+                    # Only log a subset of feature values if there are many
+                    feature_str = str(sample_features[i].tolist())
+                    if len(feature_str) > 100:  # Truncate if too long
+                        # Show just the first few and last few elements
+                        feature_values = sample_features[i].tolist()
+                        feature_str = str(feature_values[:3]) + " ... " + str(feature_values[-3:])
+                        feature_str += f" (total length: {len(feature_values)})"
+                    
+                    logging.info(f"    Input features:  {feature_str}")
+                    logging.info(f"    Pre-activation:  {projections[i].tolist()}")
+                    logging.info(f"    Raw activations: {activations[i].tolist()}")
+                    logging.info(f"    Binary key:      {binary_keys[i].tolist()}")
         
         # Generate true key using the key mapper
         true_key = self.key_mapper(features)  # shape: (batch_size, key_length) with binary values
@@ -525,7 +541,8 @@ class WatermarkTrainer:
     def _log_key_mapper_examples(self) -> None:
         """
         Generate and log examples of KeyMapper output for debugging.
-        Prints both raw activation values and binary keys for 10 random inputs.
+        Prints input features, pre-activation projections, raw activation values, 
+        and binary keys for 10 random inputs.
         """
         logging.info("Generating KeyMapper example outputs...")
         
@@ -563,11 +580,22 @@ class WatermarkTrainer:
                     w_single = w
                 features = w_single[:, self.latent_indices]
         
-        # Use the new helper method to get both raw activations and binary keys
-        activations, binary_keys = self.key_mapper.get_raw_and_binary(features)
+        # Use the updated helper method to get projection, activations, and binary keys
+        projections, activations, binary_keys = self.key_mapper.get_raw_and_binary(features)
         
         # Log examples
         for i in range(num_examples):
             logging.info(f"Example {i+1}:")
+            
+            # Only log a subset of feature values if there are many
+            feature_str = str(features[i].tolist())
+            if len(feature_str) > 100:  # Truncate if too long
+                # Show just the first few and last few elements
+                feature_values = features[i].tolist()
+                feature_str = str(feature_values[:3]) + " ... " + str(feature_values[-3:])
+                feature_str += f" (total length: {len(feature_values)})"
+            
+            logging.info(f"  Input features:  {feature_str}")
+            logging.info(f"  Pre-activation:  {projections[i].tolist()}")
             logging.info(f"  Raw activations: {activations[i].tolist()}")
-            logging.info(f"  Binary key:     {binary_keys[i].tolist()}") 
+            logging.info(f"  Binary key:      {binary_keys[i].tolist()}") 

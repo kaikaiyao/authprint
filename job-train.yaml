@@ -79,10 +79,10 @@ spec:
                       --total_iterations 500000 \
                       --checkpoint_interval 10000 \
                       --key_length 64 \
-                      --key_mapper_seed 2033 \
+                      --key_mapper_seed 2034 \
                       --lambda_lpips 1.0 \
                       --w_partial_length 16 \
-                      --w_partial_set_seed 50 \
+                      --w_partial_set_seed 51 \
                       --freeze_watermarked_model
               
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"

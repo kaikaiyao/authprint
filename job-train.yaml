@@ -82,7 +82,7 @@ spec:
                       --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
                       --w_partial_length 256 \
-                      --w_partial_set_seed 42 \
+                      --w_partial_set_seed 2025 \
                       --freeze_watermarked_model
               
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"

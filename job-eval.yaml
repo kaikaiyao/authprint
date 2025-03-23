@@ -77,7 +77,7 @@ spec:
                       scripts/evaluate.py \
                       --checkpoint_path "/nfs-user-029/pixel_based/num_pixel_32/key_length_128/no_watermark/checkpoint_iter380000.pth" \
                       --evaluation_mode "both" \
-                      --num_samples 1280 \
+                      --num_samples 1000 \
                       --num_vis_samples 4 \
                       --batch_size 128 \
                       --key_length 128 \

@@ -13,7 +13,7 @@ import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from config.default_config import Config
-from models.decoder import Decoder
+from models.decoder import Decoder, FeatureDecoder
 from models.key_mapper import KeyMapper
 from models.model_utils import clone_model, load_stylegan2_model
 from utils.checkpoint import save_checkpoint, load_checkpoint
@@ -71,6 +71,17 @@ class WatermarkTrainer:
         
         # Handle selected indices based on the approach
         self.use_image_pixels = self.config.model.use_image_pixels
+        
+        # Flag for direct feature decoder mode
+        self.direct_feature_decoder = getattr(self.config.model, 'direct_feature_decoder', False)
+        if self.direct_feature_decoder:
+            # Ensure that direct_feature_decoder is only enabled under specific conditions
+            if not (self.freeze_watermarked_model and self.use_image_pixels):
+                self.direct_feature_decoder = False
+                if self.rank == 0:
+                    logging.warning("direct_feature_decoder can only be enabled when both freeze_watermarked_model=True and use_image_pixels=True. Disabling it.")
+            elif self.rank == 0:
+                logging.info("Using direct feature decoder mode: decoder will be trained on pixel features directly")
         
         if self.use_image_pixels:
             # For image-based approach, we'll generate pixel indices later
@@ -148,12 +159,33 @@ class WatermarkTrainer:
                 if self.rank == 0:
                     logging.info("Skipping DDP for frozen watermarked model")
         
-        # Initialize decoder model
-        self.decoder = Decoder(
-            image_size=self.config.model.img_size,
-            channels=3,
-            output_dim=self.config.model.key_length
-        ).to(self.device)
+        # Initialize pixel indices for image-based approach (needed for both decoder types)
+        if self.use_image_pixels:
+            self._generate_pixel_indices()
+        
+        # Initialize decoder model based on the mode
+        if self.direct_feature_decoder:
+            # Use FeatureDecoder that takes pixel features directly
+            input_dim = self.image_pixel_count  # Number of selected pixels
+            logging.info(f"Initializing enhanced FeatureDecoder with input_dim={input_dim}, output_dim={self.config.model.key_length}")
+            self.decoder = FeatureDecoder(
+                input_dim=input_dim,
+                output_dim=self.config.model.key_length,
+                hidden_dims=self.config.decoder.hidden_dims,
+                activation=self.config.decoder.activation,
+                dropout_rate=self.config.decoder.dropout_rate,
+                num_residual_blocks=self.config.decoder.num_residual_blocks,
+                use_spectral_norm=self.config.decoder.use_spectral_norm,
+                use_layer_norm=self.config.decoder.use_layer_norm,
+                use_attention=self.config.decoder.use_attention
+            ).to(self.device)
+        else:
+            # Use standard Decoder that takes images
+            self.decoder = Decoder(
+                image_size=self.config.model.img_size,
+                channels=3,
+                output_dim=self.config.model.key_length
+            ).to(self.device)
         
         if self.world_size > 1:
             self.decoder = DDP(self.decoder, device_ids=[self.local_rank])
@@ -162,8 +194,6 @@ class WatermarkTrainer:
         
         # Initialize key mapper based on the approach
         if self.use_image_pixels:
-            # Generate pixel indices if using image-based approach
-            self._generate_pixel_indices()
             input_dim = self.image_pixel_count  # Number of selected pixels
         else:
             input_dim = len(self.latent_indices)  # Number of selected latent dimensions
@@ -350,8 +380,13 @@ class WatermarkTrainer:
         # Generate true key using the key mapper
         true_key = self.key_mapper(features)  # shape: (batch_size, key_length) with binary values
 
-        # Predict key from watermarked image using the decoder (raw logits)
-        pred_key_logits = self.decoder(x_water)
+        # Predict key based on the decoder mode
+        if self.direct_feature_decoder:
+            # Use features directly as input to the decoder
+            pred_key_logits = self.decoder(features)
+        else:
+            # Use the full watermarked image as input
+            pred_key_logits = self.decoder(x_water)
         
         # Get predicted probabilities (before thresholding)
         pred_key_probs = torch.sigmoid(pred_key_logits)
@@ -375,9 +410,15 @@ class WatermarkTrainer:
 
         # Compute key loss (BCE with logits)
         key_loss = self.bce_loss_fn(pred_key_logits, true_key)
+        
         # Compute LPIPS loss between original and watermarked images
-        lpips_loss = self.lpips_loss_fn(x_orig, x_water).mean()
-        total_loss = key_loss + self.config.training.lambda_lpips * lpips_loss
+        # Skip LPIPS calculation in direct feature decoder mode as we're not trying to optimize the image
+        if self.direct_feature_decoder:
+            lpips_loss = torch.tensor(0.0, device=self.device)
+            total_loss = key_loss  # Only key loss matters in direct feature mode
+        else:
+            lpips_loss = self.lpips_loss_fn(x_orig, x_water).mean()
+            total_loss = key_loss + self.config.training.lambda_lpips * lpips_loss
 
         total_loss.backward()
         self.optimizer.step()
@@ -496,9 +537,10 @@ class WatermarkTrainer:
                 if self.global_step % self.config.training.log_interval == 0 and self.rank == 0:
                     approach = "image-based" if self.use_image_pixels else "latent-based"
                     frozen_str = " (frozen watermarked model)" if self.freeze_watermarked_model else ""
+                    direct_feature_str = " (direct feature decoder)" if self.direct_feature_decoder else ""
                     elapsed = time.time() - start_time
                     logging.info(
-                        f"Iteration [{iteration}/{self.config.training.total_iterations}] ({approach}){frozen_str} "
+                        f"Iteration [{iteration}/{self.config.training.total_iterations}] ({approach}){frozen_str}{direct_feature_str} "
                         f"Key Loss: {metrics['key_loss']:.4f}, LPIPS Loss: {metrics['lpips_loss']:.4f}, "
                         f"Total Loss: {metrics['total_loss']:.4f}, Match Rate: {metrics['match_rate']:.2f}%, "
                         f"MSE Dist: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}, "

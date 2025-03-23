@@ -84,7 +84,8 @@ spec:
                       --use_image_pixels \
                       --image_pixel_count 98304 \
                       --image_pixel_set_seed 2025 \
-                      --freeze_watermarked_model
+                      --freeze_watermarked_model \
+                      --direct_feature_decoder
               
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"
 

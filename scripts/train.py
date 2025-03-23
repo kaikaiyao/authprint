@@ -51,6 +51,25 @@ def parse_args():
                         help="Sensitivity parameter for sine-based mapping (higher values: more sensitive to changes)")
     parser.add_argument("--freeze_watermarked_model", action="store_true", default=False,
                         help="Freeze the watermarked model parameters, only train the decoder")
+    parser.add_argument("--direct_feature_decoder", action="store_true", default=False,
+                        help="When true and using image pixels with a frozen watermarked model, train decoder directly on pixel features instead of full images")
+    
+    # Enhanced FeatureDecoder configuration
+    parser.add_argument("--decoder_hidden_dims", type=str, default="1024,2048,1024,512,256",
+                        help="Comma-separated list of hidden layer dimensions for FeatureDecoder")
+    parser.add_argument("--decoder_activation", type=str, default="gelu",
+                        choices=["leaky_relu", "relu", "gelu", "swish", "mish"],
+                        help="Activation function for FeatureDecoder")
+    parser.add_argument("--decoder_dropout_rate", type=float, default=0.3,
+                        help="Dropout rate for FeatureDecoder")
+    parser.add_argument("--decoder_num_residual_blocks", type=int, default=3,
+                        help="Number of residual blocks in FeatureDecoder")
+    parser.add_argument("--decoder_no_spectral_norm", action="store_true", default=False,
+                        help="Disable spectral normalization in FeatureDecoder")
+    parser.add_argument("--decoder_no_layer_norm", action="store_true", default=False,
+                        help="Disable layer normalization in FeatureDecoder")
+    parser.add_argument("--decoder_no_attention", action="store_true", default=False,
+                        help="Disable self-attention mechanism in FeatureDecoder")
     
     # Training configuration
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")

@@ -29,6 +29,9 @@ class ModelConfig:
     use_image_pixels: bool = False  # Whether to use image pixels instead of latent vectors
     image_pixel_set_seed: int = 42  # Seed for selecting random pixels
     image_pixel_count: int = 8192  # Number of pixels to select from the image
+    
+    # Direct feature decoder mode
+    direct_feature_decoder: bool = False  # Whether to train decoder directly on features instead of images
 
 
 @dataclass
@@ -49,6 +52,15 @@ class DecoderConfig:
     image_size: int = 256
     channels: int = 3
     output_dim: int = 4
+    
+    # Enhanced FeatureDecoder parameters
+    hidden_dims: List[int] = field(default_factory=lambda: [1024, 2048, 1024, 512, 256])
+    activation: str = 'gelu'  # Options: 'leaky_relu', 'relu', 'gelu', 'swish', 'mish'
+    dropout_rate: float = 0.3
+    num_residual_blocks: int = 3
+    use_spectral_norm: bool = True
+    use_layer_norm: bool = True
+    use_attention: bool = True
 
 
 @dataclass
@@ -203,6 +215,31 @@ class Config:
             for option in evaluate_options:
                 if option in args_dict:
                     setattr(self.evaluate, option, args_dict[option])
+        
+        # Handle decoder special parameters
+        if 'decoder_hidden_dims' in args_dict and args_dict['decoder_hidden_dims'] is not None:
+            # Convert comma-separated string to list of ints
+            self.decoder.hidden_dims = [int(dim) for dim in args_dict['decoder_hidden_dims'].split(',')]
+        
+        if 'decoder_no_spectral_norm' in args_dict:
+            self.decoder.use_spectral_norm = not args_dict['decoder_no_spectral_norm']
+            
+        if 'decoder_no_layer_norm' in args_dict:
+            self.decoder.use_layer_norm = not args_dict['decoder_no_layer_norm']
+            
+        if 'decoder_no_attention' in args_dict:
+            self.decoder.use_attention = not args_dict['decoder_no_attention']
+        
+        # Update other decoder parameters
+        decoder_params = {
+            'activation': 'decoder_activation',
+            'dropout_rate': 'decoder_dropout_rate',
+            'num_residual_blocks': 'decoder_num_residual_blocks'
+        }
+        
+        for decoder_param, arg_name in decoder_params.items():
+            if arg_name in args_dict and args_dict[arg_name] is not None:
+                setattr(self.decoder, decoder_param, args_dict[arg_name])
         
         # These are shared across modes
         self._update_subconfig(self.decoder, args_dict)

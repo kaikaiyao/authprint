@@ -1259,38 +1259,78 @@ class WatermarkEvaluator:
         if evaluation_mode in ['batch', 'both']:
             metrics = self.evaluate_batch()
             
-            # Print metrics table if we have results
+            # Print metrics table if we have results and are on rank 0
             if metrics and self.rank == 0:
-                # Calculate threshold at 95% TPR using watermarked distances
-                watermarked_distances = np.concatenate([metrics['watermarked_mse_distances']])
-                threshold_95tpr = self.calculate_threshold_at_tpr(watermarked_distances, target_tpr=0.95)
+                # Validate required metrics are present
+                required_keys = ['watermarked_mse_distances', 'original_mse_distances', 'lpips_losses']
+                missing_keys = [key for key in required_keys if key not in metrics]
                 
-                # Print header
-                logging.info("\nEvaluation Results:")
-                logging.info("-" * 100)
-                logging.info(f"{'Model/Transform':<40}{'FPR@95%TPR':>15}{'Avg MSE':>15}{'ROC-AUC':>15}{'LPIPS':>15}")
-                logging.info("-" * 100)
+                if missing_keys:
+                    logging.error(f"Missing required metrics: {missing_keys}")
+                    logging.error("Metrics computation may have failed. Please check the evaluation logs.")
+                    return metrics
                 
-                # Print original model results
-                original_distances = np.concatenate([metrics['original_mse_distances']])
-                original_fpr = self.calculate_fpr_at_threshold(original_distances, threshold_95tpr)
-                original_avg_mse = np.mean(original_distances)
-                roc_auc = metrics.get('roc_auc', 0)
-                avg_lpips = np.mean(metrics['lpips_losses'])
-                
-                logging.info(f"{'Original Model':<40}{original_fpr:>15.2f}{original_avg_mse:>15.4f}{roc_auc:>15.4f}{avg_lpips:>15.4f}")
-                
-                # Print negative sample results if available
-                if 'negative_distances_all' in metrics:
-                    for sample_type, distances in metrics['negative_distances_all'].items():
-                        fpr = self.calculate_fpr_at_threshold(distances, threshold_95tpr)
-                        avg_mse = np.mean(distances)
-                        # For negative samples, we use '-' for LPIPS as it's not applicable
-                        logging.info(f"{sample_type:<40}{fpr:>15.2f}{avg_mse:>15.4f}{'-':>15}{'-':>15}")
-                
-                logging.info("-" * 100)
-                logging.info(f"Threshold at 95% TPR: {threshold_95tpr:.4f}")
-                logging.info("-" * 100)
+                try:
+                    # Calculate threshold at 95% TPR using watermarked distances
+                    watermarked_distances = metrics['watermarked_mse_distances']
+                    if not isinstance(watermarked_distances, np.ndarray):
+                        watermarked_distances = np.concatenate([watermarked_distances])
+                        
+                    threshold_95tpr = self.calculate_threshold_at_tpr(watermarked_distances, target_tpr=0.95)
+                    
+                    # Print header
+                    logging.info("\nEvaluation Results:")
+                    logging.info("-" * 100)
+                    logging.info(f"{'Model/Transform':<40}{'FPR@95%TPR':>15}{'Avg MSE':>15}{'ROC-AUC':>15}{'LPIPS':>15}")
+                    logging.info("-" * 100)
+                    
+                    # Print original model results
+                    original_distances = metrics['original_mse_distances']
+                    if not isinstance(original_distances, np.ndarray):
+                        original_distances = np.concatenate([original_distances])
+                        
+                    original_fpr = self.calculate_fpr_at_threshold(original_distances, threshold_95tpr)
+                    original_avg_mse = np.mean(original_distances)
+                    roc_auc = metrics.get('roc_auc', 0)
+                    
+                    lpips_losses = metrics['lpips_losses']
+                    if not isinstance(lpips_losses, np.ndarray):
+                        lpips_losses = np.concatenate([lpips_losses])
+                    avg_lpips = np.mean(lpips_losses)
+                    
+                    logging.info(f"{'Original Model':<40}{original_fpr:>15.2f}{original_avg_mse:>15.4f}{roc_auc:>15.4f}{avg_lpips:>15.4f}")
+                    
+                    # Print negative sample results if available
+                    if 'negative_distances_all' in metrics:
+                        logging.info("\nProcessing negative samples:")
+                        for sample_type, distances in metrics['negative_distances_all'].items():
+                            if not isinstance(distances, np.ndarray):
+                                distances = np.concatenate([distances])
+                            fpr = self.calculate_fpr_at_threshold(distances, threshold_95tpr)
+                            avg_mse = np.mean(distances)
+                            # Log detailed stats for verification
+                            below_threshold = np.sum(distances <= threshold_95tpr)
+                            total_samples = len(distances)
+                            if self.rank == 0 and self.enable_timing:
+                                logging.info(f"  {sample_type}:")
+                                logging.info(f"    Total samples: {total_samples}")
+                                logging.info(f"    Samples below threshold: {below_threshold}")
+                                logging.info(f"    Threshold: {threshold_95tpr:.4f}")
+                                logging.info(f"    Computed FPR: {fpr:.2f}%")
+                            # For negative samples, we use '-' for LPIPS as it's not applicable
+                            logging.info(f"{sample_type:<40}{fpr:>15.2f}{avg_mse:>15.4f}{'-':>15}{'-':>15}")
+                    else:
+                        logging.warning("No negative samples were evaluated. Check if negative sample evaluation is enabled.")
+                    
+                    logging.info("-" * 100)
+                    logging.info(f"Threshold at 95% TPR: {threshold_95tpr:.4f}")
+                    logging.info("-" * 100)
+                    
+                except Exception as e:
+                    logging.error(f"Error processing metrics: {str(e)}")
+                    logging.error("Raw metrics content:", metrics)
+                    logging.error(str(e), exc_info=True)
+                    return metrics
         
         # Visual evaluation after batch if enabled
         if evaluation_mode in ['visual', 'both'] and self.rank == 0:

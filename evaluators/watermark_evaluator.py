@@ -86,11 +86,13 @@ class WatermarkEvaluator:
             # Check if explicit indices are provided
             if hasattr(self.config.model, 'selected_indices') and self.config.model.selected_indices is not None:
                 if isinstance(self.config.model.selected_indices, str):
-                    self.latent_indices = [int(idx) for idx in self.config.model.selected_indices.split(',')]
+                    indices = [int(idx) for idx in self.config.model.selected_indices.split(',')]
                 else:
-                    self.latent_indices = self.config.model.selected_indices
+                    indices = self.config.model.selected_indices
+                # Convert to tensor immediately
+                self.latent_indices = torch.tensor(indices, dtype=torch.long, device=self.device)
                 if self.rank == 0:
-                    logging.info(f"Using manually specified latent indices: {self.latent_indices}")
+                    logging.info(f"Using manually specified latent indices: {indices}")
             else:
                 # We'll generate random indices later once we know the latent dimension
                 # For backward compatibility, default to 32 if w_partial_length not present
@@ -181,15 +183,17 @@ class WatermarkEvaluator:
             if self.rank == 0:
                 logging.warning(f"Requested {self.w_partial_length} indices exceeds latent dimension {latent_dim}. Using all dimensions.")
             self.w_partial_length = latent_dim
-            self.latent_indices = np.arange(latent_dim)
+            indices = np.arange(latent_dim)
         else:
-            self.latent_indices = np.random.choice(
+            indices = np.random.choice(
                 latent_dim, 
                 size=self.w_partial_length, 
                 replace=False
             )
+        # Convert to tensor
+        self.latent_indices = torch.tensor(indices, dtype=torch.long, device=self.device)
         if self.rank == 0:
-            logging.info(f"Generated {len(self.latent_indices)} latent indices with seed {self.w_partial_set_seed}")
+            logging.info(f"Generated {len(indices)} latent indices with seed {self.w_partial_set_seed}")
             
     def setup_models(self):
         """
@@ -418,8 +422,8 @@ class WatermarkEvaluator:
                     else:
                         latent_indices = self.latent_indices
                     
-                    features_water = w_water_single.index_select(1, latent_indices)
-                    features_orig = w_orig_single.index_select(1, latent_indices)
+                    features_water = w_water_single.index_select(1, self.latent_indices)
+                    features_orig = w_orig_single.index_select(1, self.latent_indices)
                 
                 if self.rank == 0 and self.enable_timing:
                     logging.info(f"Feature extraction completed in {time.time() - feat_start:.2f}s")
@@ -559,7 +563,7 @@ class WatermarkEvaluator:
                     w_neg_single = w_neg[:, 0, :]
                 else:
                     w_neg_single = w_neg
-                features_neg = w_neg_single.index_select(1, latent_indices)
+                features_neg = w_neg_single.index_select(1, self.latent_indices)
             
             if self.rank == 0 and self.enable_timing:
                 logging.info(f"Feature extraction completed in {time.time() - feat_start:.2f}s")

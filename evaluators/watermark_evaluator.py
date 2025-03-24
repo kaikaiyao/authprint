@@ -17,7 +17,7 @@ from models.key_mapper import KeyMapper
 from models.model_utils import clone_model, load_stylegan2_model
 from utils.checkpoint import load_checkpoint
 from utils.metrics import calculate_metrics, save_metrics_plots, save_metrics_text
-from utils.visualization import save_visualization
+from utils.visualization import save_visualization, save_comparison_visualization
 from utils.image_transforms import (
     apply_truncation, 
     quantize_model_weights, 
@@ -365,6 +365,21 @@ class WatermarkEvaluator:
                 w_orig = original_model.mapping(z, None)
                 x_orig = original_model.synthesis(w_orig, noise_mode="const")
                 
+                # Calculate difference images
+                diff_images = x_water - x_orig
+                
+                # Save comparison visualization if in visualization mode
+                if getattr(self.config.evaluate, 'save_comparisons', True):
+                    save_comparison_visualization(
+                        orig_images=x_orig,
+                        watermarked_images=x_water,
+                        diff_images=diff_images,
+                        output_dir=os.path.join(self.config.output_dir, "comparisons"),
+                        prefix=f"batch_{self.batch_counter}" if hasattr(self, 'batch_counter') else "batch"
+                    )
+                    if hasattr(self, 'batch_counter'):
+                        self.batch_counter += 1
+                
                 # Extract features based on the approach
                 if self.use_image_pixels:
                     # Extract pixel values from the watermarked image
@@ -424,7 +439,8 @@ class WatermarkEvaluator:
                     'x_orig': x_orig,
                     'x_water': x_water,
                     'features_water': features_water,
-                    'features_orig': features_orig
+                    'features_orig': features_orig,
+                    'diff_images': diff_images
                 }
             except Exception as e:
                 if self.rank == 0:
@@ -433,15 +449,17 @@ class WatermarkEvaluator:
                 # Return empty results with same shape as expected
                 batch_size = z.size(0)
                 empty_features = torch.zeros(batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices), device=self.device)
+                empty_image = torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size))
                 return {
                     'watermarked_mse_distances': np.ones(batch_size) * 0.5,
                     'original_mse_distances': np.ones(batch_size) * 0.5,
                     'batch_size': batch_size,
                     'lpips_losses': np.ones(batch_size) * 0.5,
-                    'x_orig': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size)),
-                    'x_water': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size)),
+                    'x_orig': empty_image,
+                    'x_water': empty_image,
                     'features_water': empty_features,
-                    'features_orig': empty_features
+                    'features_orig': empty_features,
+                    'diff_images': torch.zeros_like(empty_image)
                 }
     
     def _process_negative_sample_batch(self, z, model_name=None, transformation=None):

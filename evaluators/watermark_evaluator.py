@@ -1258,6 +1258,39 @@ class WatermarkEvaluator:
         # Batch evaluation first if enabled
         if evaluation_mode in ['batch', 'both']:
             metrics = self.evaluate_batch()
+            
+            # Print metrics table if we have results
+            if metrics and self.rank == 0:
+                # Calculate threshold at 95% TPR using watermarked distances
+                watermarked_distances = np.concatenate([metrics['watermarked_mse_distances']])
+                threshold_95tpr = self.calculate_threshold_at_tpr(watermarked_distances, target_tpr=0.95)
+                
+                # Print header
+                logging.info("\nEvaluation Results:")
+                logging.info("-" * 100)
+                logging.info(f"{'Model/Transform':<40}{'FPR@95%TPR':>15}{'Avg MSE':>15}{'ROC-AUC':>15}{'LPIPS':>15}")
+                logging.info("-" * 100)
+                
+                # Print original model results
+                original_distances = np.concatenate([metrics['original_mse_distances']])
+                original_fpr = self.calculate_fpr_at_threshold(original_distances, threshold_95tpr)
+                original_avg_mse = np.mean(original_distances)
+                roc_auc = metrics.get('roc_auc', 0)
+                avg_lpips = np.mean(metrics['lpips_losses'])
+                
+                logging.info(f"{'Original Model':<40}{original_fpr:>15.2f}{original_avg_mse:>15.4f}{roc_auc:>15.4f}{avg_lpips:>15.4f}")
+                
+                # Print negative sample results if available
+                if 'negative_distances_all' in metrics:
+                    for sample_type, distances in metrics['negative_distances_all'].items():
+                        fpr = self.calculate_fpr_at_threshold(distances, threshold_95tpr)
+                        avg_mse = np.mean(distances)
+                        # For negative samples, we use '-' for LPIPS as it's not applicable
+                        logging.info(f"{sample_type:<40}{fpr:>15.2f}{avg_mse:>15.4f}{'-':>15}{'-':>15}")
+                
+                logging.info("-" * 100)
+                logging.info(f"Threshold at 95% TPR: {threshold_95tpr:.4f}")
+                logging.info("-" * 100)
         
         # Visual evaluation after batch if enabled
         if evaluation_mode in ['visual', 'both'] and self.rank == 0:

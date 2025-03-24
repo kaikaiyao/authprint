@@ -78,6 +78,9 @@ class EvaluateConfig:
     num_vis_samples: int = 10
     evaluation_mode: str = 'batch'  # Changed from 'both' to 'batch' as default
     
+    # Process monitoring options
+    enable_timing_logs: bool = True  # Enable detailed timing logs for process monitoring
+    
     # Visualization options
     enable_visualization: bool = False  # Master switch for all visualizations
     save_comparisons: bool = False  # Whether to save comparison visualizations

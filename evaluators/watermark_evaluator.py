@@ -3,6 +3,7 @@ Evaluator for StyleGAN watermarking.
 """
 import logging
 import os
+import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
@@ -54,6 +55,14 @@ class WatermarkEvaluator:
         self.rank = rank
         self.world_size = world_size
         self.device = device
+        
+        # Enable timing logs
+        self.enable_timing = getattr(self.config.evaluate, 'enable_timing_logs', True)
+        if self.rank == 0 and self.enable_timing:
+            logging.info("Timing logs are enabled for detailed process monitoring")
+        
+        # Initialize timing dictionary for tracking durations
+        self.timing_stats = {}
         
         # Determine which approach to use
         self.use_image_pixels = self.config.model.use_image_pixels
@@ -350,53 +359,52 @@ class WatermarkEvaluator:
         Returns:
             dict: Dictionary containing evaluation results.
         """
+        start_time = time.time()
+        
+        if self.rank == 0 and self.enable_timing:
+            logging.info(f"Starting batch processing: model={model_name}, transform={transformation}")
+            
         with torch.no_grad():
             try:
                 # Determine if this is a comparison case (original evaluation) or a negative sample case
                 is_comparison_case = model_name is None and transformation is None
                 
+                if self.rank == 0 and self.enable_timing:
+                    gen_start = time.time()
+                    logging.info("Generating images and computing features...")
+                
                 # For negative cases, we only need to evaluate the specific model/transformation
                 if not is_comparison_case:
-                    return self._process_negative_sample_batch(z, model_name, transformation)
+                    result = self._process_negative_sample_batch(z, model_name, transformation)
+                    if self.rank == 0 and self.enable_timing:
+                        logging.info(f"Negative sample processing completed in {time.time() - gen_start:.2f}s")
+                    return result
                 
-                # This is the comparison case (original evaluation)
-                # Generate images and features in a single pass for efficiency
                 # Original Model
                 w_orig = self.gan_model.mapping(z, None)
                 x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
+                
+                if self.rank == 0 and self.enable_timing:
+                    logging.info(f"Original model generation completed in {time.time() - gen_start:.2f}s")
+                    water_start = time.time()
                 
                 # Watermarked Model
                 w_water = self.watermarked_model.mapping(z, None)
                 x_water = self.watermarked_model.synthesis(w_water, noise_mode="const")
                 
-                # Calculate difference images only if we need them for visualization
+                if self.rank == 0 and self.enable_timing:
+                    logging.info(f"Watermarked model generation completed in {time.time() - water_start:.2f}s")
+                    feat_start = time.time()
+                
+                # Calculate difference images only if needed
                 save_comparisons = getattr(self.config.evaluate, 'save_comparisons', False)
-                if save_comparisons:
-                    diff_images = x_water - x_orig
-                else:
-                    # Use None to save memory when visualizations aren't needed
-                    diff_images = None
+                diff_images = (x_water - x_orig) if save_comparisons else None
                 
-                # Save visualization if enabled (only infrequently to save time)
-                if save_comparisons and hasattr(self, 'batch_counter'):
-                    # Only save for a subset of batches to save time
-                    if self.batch_counter % 5 == 0:  # Save every 5th batch
-                        save_comparison_visualization(
-                            orig_images=x_orig,
-                            watermarked_images=x_water,
-                            diff_images=diff_images if diff_images is not None else (x_water - x_orig),
-                            output_dir=os.path.join(self.config.output_dir, "comparisons"),
-                            prefix=f"batch_{self.batch_counter}"
-                        )
-                    self.batch_counter += 1
-                
-                # Extract features based on the approach - do this once and reuse
+                # Extract features based on approach
                 if self.use_image_pixels:
-                    # Extract pixel values from both images at once
                     features_water = self.extract_image_partial(x_water)
                     features_orig = self.extract_image_partial(x_orig)
                 else:
-                    # Extract latent features efficiently
                     if w_water.ndim == 3:
                         w_water_single = w_water[:, 0, :]
                         w_orig_single = w_orig[:, 0, :]
@@ -404,10 +412,8 @@ class WatermarkEvaluator:
                         w_water_single = w_water
                         w_orig_single = w_orig
                     
-                    # Use the precomputed indices tensor for faster indexing
                     if isinstance(self.latent_indices, np.ndarray):
                         latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
-                        # Cache for future use
                         self.latent_indices = latent_indices
                     else:
                         latent_indices = self.latent_indices
@@ -415,32 +421,37 @@ class WatermarkEvaluator:
                     features_water = w_water_single.index_select(1, latent_indices)
                     features_orig = w_orig_single.index_select(1, latent_indices)
                 
-                # Generate true key from watermarked model features
+                if self.rank == 0 and self.enable_timing:
+                    logging.info(f"Feature extraction completed in {time.time() - feat_start:.2f}s")
+                    key_start = time.time()
+                
+                # Generate true key and predictions
                 true_key = self.key_mapper(features_water)
                 
-                # Compute predicted keys based on decoder mode
-                # Handle both image-based and direct feature decoder modes
                 if self.direct_feature_decoder:
-                    # Use features directly as input to the decoder
                     pred_key_water_logits = self.decoder(features_water)
                     pred_key_orig_logits = self.decoder(features_orig)
                 else:
-                    # Use the full image as input
                     pred_key_water_logits = self.decoder(x_water)
                     pred_key_orig_logits = self.decoder(x_orig)
+                
+                if self.rank == 0 and self.enable_timing:
+                    logging.info(f"Key generation and prediction completed in {time.time() - key_start:.2f}s")
+                    metric_start = time.time()
                 
                 # Convert to probabilities
                 pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
                 pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
                 
-                # Calculate MSE distance metrics efficiently using torch operations
+                # Calculate metrics
                 watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
                 original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
-                
-                # Calculate LPIPS loss efficiently
                 lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze()
                 
-                # Return metrics data
+                if self.rank == 0 and self.enable_timing:
+                    logging.info(f"Metric calculation completed in {time.time() - metric_start:.2f}s")
+                    logging.info(f"Total batch processing time: {time.time() - start_time:.2f}s")
+                
                 return {
                     'watermarked_mse_distances': watermarked_mse_distance.cpu().numpy(),
                     'original_mse_distances': original_mse_distance.cpu().numpy(),
@@ -452,196 +463,157 @@ class WatermarkEvaluator:
                     'features_orig': features_orig,
                     'diff_images': diff_images
                 }
+                
             except Exception as e:
                 if self.rank == 0:
-                    logging.error(f"Error processing batch with model_name={model_name}, transformation={transformation}: {str(e)}")
+                    logging.error(f"Error in batch processing: {str(e)}")
                     logging.error(str(e), exc_info=True)
-                # Return minimal empty results to avoid downstream errors
-                batch_size = z.size(0)
-                return {
-                    'watermarked_mse_distances': np.ones(batch_size) * 0.5,
-                    'original_mse_distances': np.ones(batch_size) * 0.5,
-                    'batch_size': batch_size,
-                    'lpips_losses': np.ones(batch_size) * 0.5,
-                    'x_orig': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
-                    'x_water': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
-                    'features_water': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device),
-                    'features_orig': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device),
-                    'diff_images': None
-                }
+                return self._get_empty_batch_result(z.size(0))
     
     def _process_negative_sample_batch(self, z, model_name=None, transformation=None):
         """
-        Process a batch specifically for negative sample evaluation (pretrained models or transformations).
-        This function avoids redundant computation by only evaluating the negative samples themselves.
-        
-        Args:
-            z (torch.Tensor): Batch of latent vectors.
-            model_name (str, optional): Name of the pretrained model to use.
-            transformation (str, optional): Name of the transformation to apply.
-            
-        Returns:
-            dict: Dictionary containing evaluation results.
+        Process a batch specifically for negative sample evaluation.
         """
+        start_time = time.time()
+        
+        if self.rank == 0 and self.enable_timing:
+            logging.info(f"Starting negative sample processing: model={model_name}, transform={transformation}")
+        
         try:
-            # Cache commonly accessed watermarked reference - compute only once per batch
-            # We need this for all negative sample evaluations as a reference point
+            # Cache watermarked reference
+            if self.rank == 0 and self.enable_timing:
+                ref_start = time.time()
+            
             w_water_ref = self.watermarked_model.mapping(z, None)
             
-            # Extract watermarked reference latent features for key mapping
             if self.use_image_pixels:
-                # Need to generate the watermarked images for pixel extraction
                 x_water_ref = self.watermarked_model.synthesis(w_water_ref, noise_mode="const")
                 features_water = self.extract_image_partial(x_water_ref)
             else:
-                # Extract latent features without generating images
                 if w_water_ref.ndim == 3:
                     w_water_single = w_water_ref[:, 0, :]
                 else:
                     w_water_single = w_water_ref
                 
-                # Convert latent_indices to tensor if needed
                 if isinstance(self.latent_indices, np.ndarray):
                     latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
-                    # Cache for future use
                     self.latent_indices = latent_indices
                 else:
                     latent_indices = self.latent_indices
                     
                 features_water = w_water_single.index_select(1, latent_indices)
             
-            # Generate true key using features from the watermarked model - reused for all comparisons
+            if self.rank == 0 and self.enable_timing:
+                logging.info(f"Reference generation completed in {time.time() - ref_start:.2f}s")
+                neg_start = time.time()
+            
+            # Generate true key
             true_key = self.key_mapper(features_water)
             
-            # Select the negative model/transformation to use
+            # Process negative samples
             if model_name is not None:
-                # Use the pretrained model
-                if model_name not in self.pretrained_models:
-                    if self.rank == 0:
-                        logging.warning(f"Pretrained model '{model_name}' not found. Falling back to original model.")
-                    negative_model = self.gan_model
-                else:
-                    negative_model = self.pretrained_models[model_name]
-                    
-                # Generate images from the negative model
+                negative_model = self.pretrained_models.get(model_name, self.gan_model)
                 w_neg = negative_model.mapping(z, None)
                 x_neg = negative_model.synthesis(w_neg, noise_mode="const")
-                
-            else:  # transformation is not None
-                # Determine which base model to use based on the transformation
+            else:
                 is_watermarked = '_watermarked' in transformation
                 base_model = self.watermarked_model if is_watermarked else self.gan_model
                 transformation_base = transformation.replace('_watermarked', '').replace('_original', '')
                 
-                # Pre-load weights for necessary operations
-                # This avoids recreating objects in memory for each batch
+                if self.rank == 0 and self.enable_timing:
+                    logging.info(f"Applying transformation: {transformation_base}")
+                
+                # Apply appropriate transformation
                 if transformation_base == 'truncation':
-                    # Apply truncation to the image generation
                     truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
                     x_neg, w_neg = apply_truncation(base_model, z, truncation_psi, return_w=True)
-                    
                 elif transformation_base.startswith('quantization'):
-                    # Extract the bit precision from the transformation name
-                    if transformation_base == 'quantization':
-                        precision = 'int8'
-                    elif transformation_base == 'quantization_int4':
-                        precision = 'int4'
-                    else:  # quantization_int2
-                        precision = 'int2'
-                        
-                    # Use the appropriate quantized model
-                    if is_watermarked:
-                        if precision not in self.quantized_watermarked_models:
-                            if self.rank == 0:
-                                logging.warning(f"Quantized watermarked model with precision {precision} not found. Falling back to original watermarked model.")
-                            w_neg = self.watermarked_model.mapping(z, None)
-                            x_neg = self.watermarked_model.synthesis(w_neg, noise_mode="const")
-                        else:
-                            quantized_model = self.quantized_watermarked_models[precision]
-                            w_neg = quantized_model.mapping(z, None)
-                            x_neg = quantized_model.synthesis(w_neg, noise_mode="const")
-                    else:
-                        if precision not in self.quantized_models:
-                            if self.rank == 0:
-                                logging.warning(f"Quantized model with precision {precision} not found. Falling back to original model.")
-                            w_neg = self.gan_model.mapping(z, None)
-                            x_neg = self.gan_model.synthesis(w_neg, noise_mode="const")
-                        else:
-                            quantized_model = self.quantized_models[precision]
-                            w_neg = quantized_model.mapping(z, None)
-                            x_neg = quantized_model.synthesis(w_neg, noise_mode="const")
-                            
+                    precision = 'int8' if transformation_base == 'quantization' else transformation_base.split('_')[1]
+                    model_dict = self.quantized_watermarked_models if is_watermarked else self.quantized_models
+                    quantized_model = model_dict.get(precision, base_model)
+                    w_neg = quantized_model.mapping(z, None)
+                    x_neg = quantized_model.synthesis(w_neg, noise_mode="const")
                 elif transformation_base == 'downsample':
-                    # Generate image from the base model first
                     w_neg = base_model.mapping(z, None)
                     x_orig = base_model.synthesis(w_neg, noise_mode="const")
-                    
-                    # Then apply downsampling and upsampling
                     downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
                     x_neg = downsample_and_upsample(x_orig, downsample_size)
-                    
                 elif transformation_base == 'jpeg':
-                    # Generate image from the base model first
                     w_neg = base_model.mapping(z, None)
                     x_orig = base_model.synthesis(w_neg, noise_mode="const")
-                    
-                    # Then apply JPEG compression
                     jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 75)
                     x_neg = apply_jpeg_compression(x_orig, jpeg_quality)
-                    
                 else:
-                    # Fallback for unknown transformation - use the base model directly
-                    if self.rank == 0:
-                        logging.warning(f"Unknown transformation '{transformation_base}'. Using base model directly.")
                     w_neg = base_model.mapping(z, None)
                     x_neg = base_model.synthesis(w_neg, noise_mode="const")
             
-            # Extract features from the negative sample
+            if self.rank == 0 and self.enable_timing:
+                logging.info(f"Negative sample generation completed in {time.time() - neg_start:.2f}s")
+                feat_start = time.time()
+            
+            # Extract features from negative sample
             if self.use_image_pixels:
                 features_neg = self.extract_image_partial(x_neg)
             else:
-                # Extract latent features
                 if w_neg.ndim == 3:
                     w_neg_single = w_neg[:, 0, :]
                 else:
                     w_neg_single = w_neg
-                
                 features_neg = w_neg_single.index_select(1, latent_indices)
             
-            # Compute the predicted key based on the decoder mode
+            if self.rank == 0 and self.enable_timing:
+                logging.info(f"Feature extraction completed in {time.time() - feat_start:.2f}s")
+                pred_start = time.time()
+            
+            # Generate predictions
             if self.direct_feature_decoder:
-                # Use features directly as input to the decoder
                 pred_key_neg_logits = self.decoder(features_neg)
             else:
-                # Use the full image as input
                 pred_key_neg_logits = self.decoder(x_neg)
-                
-            # Convert to probabilities
-            pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
             
-            # Calculate MSE distance metrics efficiently
+            pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
             negative_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
             
-            # Return metrics data
+            if self.rank == 0 and self.enable_timing:
+                logging.info(f"Prediction and metrics completed in {time.time() - pred_start:.2f}s")
+                logging.info(f"Total negative sample processing time: {time.time() - start_time:.2f}s")
+            
             return {
                 'negative_mse_distances': negative_mse_distance.cpu().numpy(),
                 'batch_size': z.size(0),
                 'x_neg': x_neg,
                 'features_neg': features_neg
             }
+            
         except Exception as e:
             if self.rank == 0:
-                logging.error(f"Error processing negative sample batch with model_name={model_name}, transformation={transformation}: {str(e)}")
+                logging.error(f"Error in negative sample processing: {str(e)}")
                 logging.error(str(e), exc_info=True)
-            # Return minimal empty results
-            batch_size = z.size(0)
-            return {
-                'negative_mse_distances': np.ones(batch_size) * 0.5,
-                'batch_size': batch_size,
-                'x_neg': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
-                'features_neg': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device)
-            }
-    
+            return self._get_empty_negative_batch_result(z.size(0))
+
+    def _get_empty_batch_result(self, batch_size):
+        """Helper method to return empty batch results on error."""
+        return {
+            'watermarked_mse_distances': np.ones(batch_size) * 0.5,
+            'original_mse_distances': np.ones(batch_size) * 0.5,
+            'batch_size': batch_size,
+            'lpips_losses': np.ones(batch_size) * 0.5,
+            'x_orig': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
+            'x_water': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
+            'features_water': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device),
+            'features_orig': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device),
+            'diff_images': None
+        }
+
+    def _get_empty_negative_batch_result(self, batch_size):
+        """Helper method to return empty negative batch results on error."""
+        return {
+            'negative_mse_distances': np.ones(batch_size) * 0.5,
+            'batch_size': batch_size,
+            'x_neg': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
+            'features_neg': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device)
+        }
+
     def evaluate_batch(self) -> Dict[str, float]:
         """
         Run batch evaluation to compute metrics.

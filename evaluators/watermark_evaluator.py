@@ -1331,16 +1331,8 @@ class WatermarkEvaluator:
                                 distances = np.concatenate([distances])
                             fpr = self.calculate_fpr_at_threshold(distances, threshold_95tpr)
                             avg_mse = np.mean(distances)
-                            # Log detailed stats for verification
-                            below_threshold = np.sum(distances <= threshold_95tpr)
-                            total_samples = len(distances)
-                            if self.rank == 0 and self.enable_timing:
-                                logging.info(f"  {sample_type}:")
-                                logging.info(f"    Total samples: {total_samples}")
-                                logging.info(f"    Samples below threshold: {below_threshold}")
-                                logging.info(f"    Threshold: {threshold_95tpr:.4f}")
-                                logging.info(f"    Computed FPR: {fpr:.2f}%")
-                            # For negative samples, we use '-' for LPIPS as it's not applicable
+                            
+                            # Only log the main table row, skip the detailed stats
                             logging.info(f"{sample_type:<40}{fpr:>15.2f}{avg_mse:>15.4f}{'-':>15}{'-':>15}")
                     else:
                         logging.warning("No negative samples were evaluated. Check if negative sample evaluation is enabled.")

@@ -624,92 +624,115 @@ class WatermarkEvaluator:
         if self.rank == 0:
             logging.info(f"Running batch evaluation with {self.config.evaluate.num_samples} samples...")
         
-        # Set seed for reproducibility
-        if hasattr(self.config.evaluate, 'seed') and self.config.evaluate.seed is not None:
-            np.random.seed(self.config.evaluate.seed)
-            torch.manual_seed(self.config.evaluate.seed)
+        try:
+            # Set seed for reproducibility
+            if hasattr(self.config.evaluate, 'seed') and self.config.evaluate.seed is not None:
+                np.random.seed(self.config.evaluate.seed)
+                torch.manual_seed(self.config.evaluate.seed)
+                if self.rank == 0:
+                    logging.info(f"Using fixed random seed {self.config.evaluate.seed} for evaluation")
+            
+            # Create empty accumulators
+            batch_size = self.config.evaluate.batch_size
+            num_samples = self.config.evaluate.num_samples
+            num_batches = (num_samples + batch_size - 1) // batch_size  # Ceiling division
+            
+            # Generate all latent vectors upfront for consistency across evaluations
+            all_z = torch.randn(num_samples, self.latent_dim, device=self.device)
+            
+            # Process comparison batches (original vs watermarked)
+            watermarked_distances_all = []
+            original_distances_all = []
+            lpips_losses_all = []
+            
+            # Process in batches
+            with torch.no_grad():
+                for i in range(num_batches):
+                    start_idx = i * batch_size
+                    end_idx = min((i + 1) * batch_size, num_samples)
+                    current_batch_size = end_idx - start_idx
+                    
+                    # Extract batch of latent vectors
+                    z = all_z[start_idx:end_idx]
+                    
+                    # Process the comparison batch
+                    batch_results = self.process_batch(z)
+                    
+                    if not all(k in batch_results for k in ['watermarked_mse_distances', 'original_mse_distances', 'lpips_losses']):
+                        if self.rank == 0:
+                            logging.error(f"Missing metrics in batch results: {batch_results.keys()}")
+                        continue
+                    
+                    # Accumulate results
+                    watermarked_distances_all.append(batch_results['watermarked_mse_distances'])
+                    original_distances_all.append(batch_results['original_mse_distances'])
+                    lpips_losses_all.append(batch_results['lpips_losses'])
+                    
+                    # Progress reporting for long running evaluation
+                    if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
+                        logging.info(f"Processed {i+1}/{num_batches} batches for original vs watermarked comparison")
+            
+            # Verify we have results before proceeding
+            if not watermarked_distances_all or not original_distances_all or not lpips_losses_all:
+                if self.rank == 0:
+                    logging.error("No valid results accumulated during batch processing")
+                return {}
+            
+            # Negative sample evaluation - only if enabled and we have samples to process
+            negative_distances_all = {}
+            if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
+                negative_distances_all = self._evaluate_negative_samples(all_z)
+            
+            # Concatenate results across batches
+            watermarked_distances = np.concatenate(watermarked_distances_all)
+            original_distances = np.concatenate(original_distances_all)
+            lpips_losses = np.concatenate(lpips_losses_all)
+            
+            # Calculate metrics
+            threshold = 0.25  # Typical threshold for correct key detection
+            watermarked_correct = np.sum(watermarked_distances < threshold)
+            original_correct = np.sum(original_distances < threshold)
+            total_samples = len(watermarked_distances)
+            
+            # Use MSE distances as MAE distances for backward compatibility
+            watermarked_mae_distances = watermarked_distances
+            original_mae_distances = original_distances
+            
+            # Calculate metrics
+            metrics, roc_data = calculate_metrics(
+                watermarked_distances, 
+                original_distances,
+                watermarked_mae_distances, 
+                original_mae_distances,
+                watermarked_correct,
+                original_correct,
+                total_samples,
+                lpips_losses
+            )
+            
+            # Add raw distances to metrics
+            metrics['watermarked_mse_distances'] = watermarked_distances
+            metrics['original_mse_distances'] = original_distances
+            metrics['lpips_losses'] = lpips_losses
+            
+            if negative_distances_all:
+                metrics['negative_distances_all'] = negative_distances_all
+            
+            metrics['roc_data'] = roc_data
+            
             if self.rank == 0:
-                logging.info(f"Using fixed random seed {self.config.evaluate.seed} for evaluation")
-        
-        # Create empty accumulators
-        batch_size = self.config.evaluate.batch_size
-        num_samples = self.config.evaluate.num_samples
-        num_batches = (num_samples + batch_size - 1) // batch_size  # Ceiling division
-        
-        # Generate all latent vectors upfront for consistency across evaluations
-        all_z = torch.randn(num_samples, self.latent_dim, device=self.device)
-        
-        # Process comparison batches (original vs watermarked)
-        watermarked_distances_all = []
-        original_distances_all = []
-        lpips_losses_all = []
-        
-        # Process in batches
-        with torch.no_grad():
-            for i in range(num_batches):
-                start_idx = i * batch_size
-                end_idx = min((i + 1) * batch_size, num_samples)
-                current_batch_size = end_idx - start_idx
-                
-                # Extract batch of latent vectors
-                z = all_z[start_idx:end_idx]
-                
-                # Process the comparison batch
-                batch_results = self.process_batch(z)
-                
-                # Accumulate results
-                watermarked_distances_all.append(batch_results['watermarked_mse_distances'])
-                original_distances_all.append(batch_results['original_mse_distances'])
-                lpips_losses_all.append(batch_results['lpips_losses'])
-                
-                # Progress reporting for long running evaluation
-                if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
-                    logging.info(f"Processed {i+1}/{num_batches} batches for original vs watermarked comparison")
-        
-        # Negative sample evaluation - only if enabled and we have samples to process
-        negative_distances_all = {}
-        if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
-            negative_distances_all = self._evaluate_negative_samples(all_z)
-        
-        # Concatenate results across batches
-        watermarked_distances = np.concatenate(watermarked_distances_all)
-        original_distances = np.concatenate(original_distances_all)
-        lpips_losses = np.concatenate(lpips_losses_all)
-        
-        # Calculate metrics
-        threshold = 0.25  # Typical threshold for correct key detection
-        watermarked_correct = np.sum(watermarked_distances < threshold)
-        original_correct = np.sum(original_distances < threshold)
-        total_samples = len(watermarked_distances)
-        
-        # Use MSE distances as MAE distances for backward compatibility
-        watermarked_mae_distances = watermarked_distances
-        original_mae_distances = original_distances
-        
-        # Calculate metrics
-        metrics, roc_data = calculate_metrics(
-            watermarked_distances, 
-            original_distances,
-            watermarked_mae_distances, 
-            original_mae_distances,
-            watermarked_correct,
-            original_correct,
-            total_samples,
-            lpips_losses
-        )
-        
-        if negative_distances_all:
-            metrics['negative_distances_all'] = negative_distances_all
-        
-        metrics['roc_data'] = roc_data
-        
-        if self.rank == 0:
-            # Save metrics
-            save_metrics_text(metrics, self.config.output_dir)
-            save_metrics_plots(metrics, roc_data, watermarked_distances, original_distances, 
-                              watermarked_mae_distances, original_mae_distances, self.config.output_dir)
-        
-        return metrics
+                # Save metrics
+                save_metrics_text(metrics, self.config.output_dir)
+                save_metrics_plots(metrics, roc_data, watermarked_distances, original_distances, 
+                                  watermarked_mae_distances, original_mae_distances, self.config.output_dir)
+            
+            return metrics
+            
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error in batch evaluation: {str(e)}")
+                logging.error(str(e), exc_info=True)
+            return {}
 
     def _evaluate_negative_samples(self, all_z):
         """

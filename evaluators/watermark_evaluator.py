@@ -520,7 +520,7 @@ class WatermarkEvaluator:
                     
                     # Then apply downsampling and upsampling
                     downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
-                    x_neg = downsample_and_upsample(x_orig, downsample_size, self.config.model.img_size)
+                    x_neg = downsample_and_upsample(x_orig, downsample_size)
                     
                 elif transformation_base == 'jpeg':
                     # Generate image from the base model first
@@ -724,21 +724,53 @@ class WatermarkEvaluator:
         original_distances = np.concatenate(original_distances_all)
         lpips_losses = np.concatenate(lpips_losses_all)
         
+        # Calculate number of correct key matches (we consider any match with MSE < 0.25 as correct)
+        # We would ideally use binary match rates, but this approximation works for evaluation
+        threshold = 0.25  # Typical threshold for correct key detection
+        watermarked_correct = np.sum(watermarked_distances < threshold)
+        original_correct = np.sum(original_distances < threshold)
+        total_samples = len(watermarked_distances)
+        
+        # For now, use MSE distances as MAE distances since we don't calculate them directly
+        # In a future implementation, we could calculate MAE distances separately
+        watermarked_mae_distances = watermarked_distances
+        original_mae_distances = original_distances
+        
         # Calculate metrics
         if len(negative_distances_all) > 0:
             # Include negative samples in metrics calculation
-            metrics = calculate_metrics(watermarked_distances, original_distances, negative_distances_all, lpips_losses)
+            metrics, roc_data = calculate_metrics(
+                watermarked_distances, 
+                original_distances,
+                watermarked_mae_distances, 
+                original_mae_distances,
+                watermarked_correct,
+                original_correct,
+                total_samples,
+                lpips_losses
+            )
+            metrics['negative_distances_all'] = negative_distances_all
         else:
             # Only compare watermarked with original 
             empty_negative = self._create_empty_metrics()
-            metrics = calculate_metrics(watermarked_distances, original_distances, empty_negative, lpips_losses)
+            metrics, roc_data = calculate_metrics(
+                watermarked_distances, 
+                original_distances,
+                watermarked_mae_distances, 
+                original_mae_distances,
+                watermarked_correct,
+                original_correct,
+                total_samples,
+                lpips_losses
+            )
             # Create empty ROC data
-            metrics = self._create_fallback_roc_data(metrics)
+            metrics['roc_data'] = roc_data
         
         if self.rank == 0:
             # Save metrics
             save_metrics_text(metrics, self.config.output_dir)
-            save_metrics_plots(metrics, self.config.output_dir)
+            save_metrics_plots(metrics, roc_data, watermarked_distances, original_distances, 
+                              watermarked_mae_distances, original_mae_distances, self.config.output_dir)
         
         return metrics
     
@@ -784,21 +816,30 @@ class WatermarkEvaluator:
         # Create minimal fallback ROC data
         y_true = np.array([1, 0])
         y_score_mse = np.array([-0.4, -0.6])
+        y_score_mae = np.array([-0.4, -0.6])
         
-        return {
+        empty_dict = {
+            'watermarked_match_rate': 50.0,
+            'original_match_rate': 0.0,
             'watermarked_mse_distance_avg': 0.5,
             'watermarked_mse_distance_std': 0.0,
+            'watermarked_mae_distance_avg': 0.5,
+            'watermarked_mae_distance_std': 0.0,
             'original_mse_distance_avg': 0.5,
             'original_mse_distance_std': 0.0,
+            'original_mae_distance_avg': 0.5,
+            'original_mae_distance_std': 0.0,
             'roc_auc_score_mse': 0.5,
+            'roc_auc_score_mae': 0.5,
             'roc_auc_score': 0.5,
             'watermarked_lpips_loss_avg': 0.5,
             'watermarked_lpips_loss_std': 0.0,
             'all_watermarked_mse_distances': [0.5],
             'all_original_mse_distances': [0.5],
-            'num_samples_processed': 1,
-            'roc_data': (y_true, y_score_mse)
+            'num_samples_processed': 1
         }
+        
+        return empty_dict
     
     def _create_fallback_roc_data(self, metrics):
         """Create fallback ROC data when metrics might be incomplete."""
@@ -814,12 +855,15 @@ class WatermarkEvaluator:
                 -np.array(metrics['all_original_mse_distances'])
             ])
             
-            return (y_true, y_score_mse)
+            # Use same data for MAE scores as a fallback
+            y_score_mae = y_score_mse.copy()
+            
+            return (y_true, y_score_mse, y_score_mae)
         except (KeyError, ValueError) as e:
             if self.rank == 0:
                 logging.warning(f"Error creating ROC data: {str(e)}. Using fallback data.")
             # Return fallback data
-            return (np.array([1, 0]), np.array([-0.4, -0.6]))
+            return (np.array([1, 0]), np.array([-0.4, -0.6]), np.array([-0.4, -0.6]))
     
     def visualize_samples(self):
         """

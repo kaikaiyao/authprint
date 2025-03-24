@@ -75,16 +75,15 @@ spec:
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
                       scripts/evaluate.py \
-                      --checkpoint_path "/nfs-user-029/pixel_based/num_pixel_32/key_length_128/checkpoint_iter160000.pth" \
-                      --evaluation_mode "both" \
+                      --checkpoint_path "/nfs-user-029/w_based/key_length_32/checkpoint_iter200000.pth" \
+                      --evaluation_mode "batch" \
                       --num_samples 500 \
-                      --num_vis_samples 4 \
                       --batch_size 32 \
-                      --key_length 128 \
+                      --key_length 32 \
                       --key_mapper_seed 2025 \
-                      --use_image_pixels \
-                      --image_pixel_count 32 \
-                      --image_pixel_set_seed 42
+                      --w_partial_length 32 \
+                      --selected_indices "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31"
+
               
               exit_status=$?
               echo "Evaluation finished with exit status $exit_status"

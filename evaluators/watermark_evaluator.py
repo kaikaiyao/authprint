@@ -1247,23 +1247,19 @@ class WatermarkEvaluator:
         """
         metrics = None
         
+        # Log evaluation configuration
         if self.rank == 0:
-            # Log configuration information
             logging.info("Starting evaluation with the following configuration:")
             logging.info(f"  Evaluation mode: {evaluation_mode}")
             logging.info(f"  Approach: {'Image-based' if self.use_image_pixels else 'Latent-based'}")
             logging.info(f"  Direct feature decoder: {self.direct_feature_decoder}")
-            if self.direct_feature_decoder and not self.use_image_pixels:
-                logging.warning("  WARNING: direct_feature_decoder is enabled but use_image_pixels is False. "
-                               "This configuration is not supported.")
-            
-            # Additional configuration information
             if self.use_image_pixels:
-                logging.info(f"  Image pixel count: {self.image_pixel_count}")
-                logging.info(f"  Image pixel seed: {self.image_pixel_set_seed}")
+                logging.info(f"  Pixel count: {len(self.image_pixel_indices)}")
             else:
-                logging.info(f"  Latent indices length: {len(self.latent_indices)}")
-                logging.info(f"  Latent indices seed: {self.w_partial_set_seed}")
+                if hasattr(self, 'latent_indices') and self.latent_indices is not None:
+                    logging.info(f"  Latent indices length: {len(self.latent_indices)}")
+                    if hasattr(self, 'w_partial_set_seed'):
+                        logging.info(f"  Latent indices seed: {self.w_partial_set_seed}")
             
             logging.info(f"  Key length: {self.config.model.key_length}")
             logging.info(f"  Key mapper seed: {self.config.model.key_mapper_seed}")

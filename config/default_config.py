@@ -76,11 +76,35 @@ class EvaluateConfig:
     batch_size: int = 16
     num_samples: int = 1000
     num_vis_samples: int = 10
-    evaluation_mode: str = 'both'
+    evaluation_mode: str = 'batch'  # Changed from 'both' to 'batch' as default
     
     # Visualization options
+    enable_visualization: bool = False  # Master switch for all visualizations
+    save_comparisons: bool = False  # Whether to save comparison visualizations
     visualization_seed: int = 42  # Random seed for consistent visualization samples
     verbose_visualization: bool = False  # Whether to log detailed per-sample information
+    
+    # Visualization flags for specific model types
+    visualize_pretrained: bool = False  # Master switch for pretrained model visualizations
+    visualize_transforms: bool = False  # Master switch for transformation visualizations
+    visualize_ffhq1k: bool = False
+    visualize_ffhq30k: bool = False
+    visualize_ffhq70k_bcr: bool = False
+    visualize_ffhq70k_noaug: bool = False
+    
+    # Visualization flags for specific transformations
+    visualize_truncation: bool = False
+    visualize_truncation_watermarked: bool = False
+    visualize_quantization: bool = False
+    visualize_quantization_watermarked: bool = False
+    visualize_quantization_int4: bool = False
+    visualize_quantization_int4_watermarked: bool = False
+    visualize_quantization_int2: bool = False
+    visualize_quantization_int2_watermarked: bool = False
+    visualize_downsample: bool = False
+    visualize_downsample_watermarked: bool = False
+    visualize_jpeg: bool = False
+    visualize_jpeg_watermarked: bool = False
     
     # Negative sample evaluation options
     evaluate_neg_samples: bool = True
@@ -209,7 +233,16 @@ class Config:
                 'evaluate_ffhq1k', 'evaluate_ffhq30k', 'evaluate_ffhq70k_bcr', 'evaluate_ffhq70k_noaug',
                 'evaluate_transforms', 'evaluate_truncation', 'truncation_psi',
                 'evaluate_quantization', 'evaluate_downsample', 'downsample_size',
-                'evaluate_jpeg', 'jpeg_quality', 'visualization_seed', 'verbose_visualization'
+                'evaluate_jpeg', 'jpeg_quality', 'visualization_seed', 'verbose_visualization',
+                # Add new visualization options
+                'enable_visualization', 'save_comparisons', 'visualize_pretrained', 'visualize_transforms',
+                'visualize_ffhq1k', 'visualize_ffhq30k', 'visualize_ffhq70k_bcr', 'visualize_ffhq70k_noaug',
+                'visualize_truncation', 'visualize_truncation_watermarked',
+                'visualize_quantization', 'visualize_quantization_watermarked',
+                'visualize_quantization_int4', 'visualize_quantization_int4_watermarked',
+                'visualize_quantization_int2', 'visualize_quantization_int2_watermarked',
+                'visualize_downsample', 'visualize_downsample_watermarked',
+                'visualize_jpeg', 'visualize_jpeg_watermarked'
             ]
             
             for option in evaluate_options:

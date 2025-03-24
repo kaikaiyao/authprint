@@ -130,6 +130,10 @@ class WatermarkEvaluator:
                 size=self.image_pixel_count, 
                 replace=False
             )
+        
+        # Convert to torch tensor and move to device for faster extraction
+        self.image_pixel_indices = torch.tensor(self.image_pixel_indices, dtype=torch.long, device=self.device)
+        
         if self.rank == 0:
             logging.info(f"Generated {len(self.image_pixel_indices)} pixel indices with seed {self.image_pixel_set_seed}")
 
@@ -145,11 +149,11 @@ class WatermarkEvaluator:
         """
         batch_size = images.shape[0]
         
-        # Flatten the spatial dimensions: [batch_size, channels*height*width]
-        flattened = images.reshape(batch_size, -1)
+        # Flatten the spatial dimensions using a view operation (more efficient than reshape)
+        flattened = images.view(batch_size, -1)
         
-        # Get values at selected indices: [batch_size, pixel_count]
-        image_partial = flattened[:, self.image_pixel_indices]
+        # Get values at selected indices: [batch_size, pixel_count] using index_select or direct indexing
+        image_partial = flattened.index_select(1, self.image_pixel_indices)
         
         return image_partial
     
@@ -197,11 +201,13 @@ class WatermarkEvaluator:
         if not self.use_image_pixels and self.latent_indices is None:
             self._generate_latent_indices(self.latent_dim)
         
-        # Generate pixel indices if using image-based approach (needed regardless of decoder type)
+        # Generate pixel indices if using image-based approach
         if self.use_image_pixels:
             self._generate_pixel_indices()
         
-        # Clone it to create watermarked model
+        # Clone it to create watermarked model - this avoids loading twice
+        if self.rank == 0:
+            logging.info("Creating watermarked model...")
         self.watermarked_model = clone_model(self.gan_model)
         self.watermarked_model.to(self.device)
         self.watermarked_model.eval()
@@ -257,7 +263,7 @@ class WatermarkEvaluator:
         ).to(self.device)
         self.key_mapper.eval()
         
-        # Load checkpoint (excluding key mapper)
+        # Load checkpoint (excluding key mapper) - do this before setting up quantized models
         if self.rank == 0:
             logging.info(f"Loading checkpoint from {self.config.checkpoint_path}...")
         load_checkpoint(
@@ -270,55 +276,56 @@ class WatermarkEvaluator:
         
         # Initialize LPIPS loss with the same network as in training
         self.lpips_loss_fn = lpips.LPIPS(net='alex').to(self.device)
+        self.lpips_loss_fn.eval()  # Ensure it's in eval mode
         
-        # Setup quantized models
+        # Setup quantized models - only if explicitly enabled
         self.quantized_models = {}
         self.quantized_watermarked_models = {}
         
-        # Setup int8 quantized versions if needed
-        if getattr(self.config.evaluate, 'evaluate_quantization', False):
-            # Setup int8 quantized version of the original model
+        # Lazy initialization for quantized models
+        need_int8_original = getattr(self.config.evaluate, 'evaluate_quantization', False)
+        need_int8_watermarked = getattr(self.config.evaluate, 'evaluate_quantization_watermarked', False)
+        need_int4_original = getattr(self.config.evaluate, 'evaluate_quantization_int4', False)
+        need_int4_watermarked = getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', False)
+        need_int2_original = getattr(self.config.evaluate, 'evaluate_quantization_int2', False)
+        need_int2_watermarked = getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', False)
+        
+        # Only set up the models we need
+        if need_int8_original:
             if self.rank == 0:
                 logging.info("Setting up int8 quantized model...")
             self.quantized_models['int8'] = quantize_model_weights(self.gan_model, 'int8')
             self.quantized_models['int8'].eval()
             
-            # Setup int8 quantized version of the watermarked model
-            if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', False):
-                if self.rank == 0:
-                    logging.info("Setting up int8 quantized watermarked model...")
-                self.quantized_watermarked_models['int8'] = quantize_model_weights(self.watermarked_model, 'int8')
-                self.quantized_watermarked_models['int8'].eval()
-                
-        # Setup int4 quantized versions if needed
-        if getattr(self.config.evaluate, 'evaluate_quantization_int4', False):
-            # Setup int4 quantized version of the original model
+        if need_int8_watermarked:
+            if self.rank == 0:
+                logging.info("Setting up int8 quantized watermarked model...")
+            self.quantized_watermarked_models['int8'] = quantize_model_weights(self.watermarked_model, 'int8')
+            self.quantized_watermarked_models['int8'].eval()
+            
+        if need_int4_original:
             if self.rank == 0:
                 logging.info("Setting up int4 quantized model...")
             self.quantized_models['int4'] = quantize_model_weights(self.gan_model, 'int4')
             self.quantized_models['int4'].eval()
             
-            # Setup int4 quantized version of the watermarked model
-            if getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', False):
-                if self.rank == 0:
-                    logging.info("Setting up int4 quantized watermarked model...")
-                self.quantized_watermarked_models['int4'] = quantize_model_weights(self.watermarked_model, 'int4')
-                self.quantized_watermarked_models['int4'].eval()
-                
-        # Setup int2 quantized versions if needed
-        if getattr(self.config.evaluate, 'evaluate_quantization_int2', False):
-            # Setup int2 quantized version of the original model
+        if need_int4_watermarked:
+            if self.rank == 0:
+                logging.info("Setting up int4 quantized watermarked model...")
+            self.quantized_watermarked_models['int4'] = quantize_model_weights(self.watermarked_model, 'int4')
+            self.quantized_watermarked_models['int4'].eval()
+            
+        if need_int2_original:
             if self.rank == 0:
                 logging.info("Setting up int2 quantized model...")
             self.quantized_models['int2'] = quantize_model_weights(self.gan_model, 'int2')
             self.quantized_models['int2'].eval()
             
-            # Setup int2 quantized version of the watermarked model
-            if getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', False):
-                if self.rank == 0:
-                    logging.info("Setting up int2 quantized watermarked model...")
-                self.quantized_watermarked_models['int2'] = quantize_model_weights(self.watermarked_model, 'int2')
-                self.quantized_watermarked_models['int2'].eval()
+        if need_int2_watermarked:
+            if self.rank == 0:
+                logging.info("Setting up int2 quantized watermarked model...")
+            self.quantized_watermarked_models['int2'] = quantize_model_weights(self.watermarked_model, 'int2')
+            self.quantized_watermarked_models['int2'].eval()
         
         # For backward compatibility
         if 'int8' in self.quantized_models:
@@ -353,41 +360,43 @@ class WatermarkEvaluator:
                     return self._process_negative_sample_batch(z, model_name, transformation)
                 
                 # This is the comparison case (original evaluation)
-                # Use watermarked model for watermarked images and original model for original images
-                watermarked_model = self.watermarked_model
-                original_model = self.gan_model
+                # Generate images and features in a single pass for efficiency
+                # Original Model
+                w_orig = self.gan_model.mapping(z, None)
+                x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
                 
-                # Generate watermarked images
-                w_water = watermarked_model.mapping(z, None)
-                x_water = watermarked_model.synthesis(w_water, noise_mode="const")
+                # Watermarked Model
+                w_water = self.watermarked_model.mapping(z, None)
+                x_water = self.watermarked_model.synthesis(w_water, noise_mode="const")
                 
-                # Generate original images
-                w_orig = original_model.mapping(z, None)
-                x_orig = original_model.synthesis(w_orig, noise_mode="const")
+                # Calculate difference images only if we need them for visualization
+                save_comparisons = getattr(self.config.evaluate, 'save_comparisons', False)
+                if save_comparisons:
+                    diff_images = x_water - x_orig
+                else:
+                    # Use None to save memory when visualizations aren't needed
+                    diff_images = None
                 
-                # Calculate difference images
-                diff_images = x_water - x_orig
+                # Save visualization if enabled (only infrequently to save time)
+                if save_comparisons and hasattr(self, 'batch_counter'):
+                    # Only save for a subset of batches to save time
+                    if self.batch_counter % 5 == 0:  # Save every 5th batch
+                        save_comparison_visualization(
+                            orig_images=x_orig,
+                            watermarked_images=x_water,
+                            diff_images=diff_images if diff_images is not None else (x_water - x_orig),
+                            output_dir=os.path.join(self.config.output_dir, "comparisons"),
+                            prefix=f"batch_{self.batch_counter}"
+                        )
+                    self.batch_counter += 1
                 
-                # Save comparison visualization if in visualization mode
-                if getattr(self.config.evaluate, 'save_comparisons', True):
-                    save_comparison_visualization(
-                        orig_images=x_orig,
-                        watermarked_images=x_water,
-                        diff_images=diff_images,
-                        output_dir=os.path.join(self.config.output_dir, "comparisons"),
-                        prefix=f"batch_{self.batch_counter}" if hasattr(self, 'batch_counter') else "batch"
-                    )
-                    if hasattr(self, 'batch_counter'):
-                        self.batch_counter += 1
-                
-                # Extract features based on the approach
+                # Extract features based on the approach - do this once and reuse
                 if self.use_image_pixels:
-                    # Extract pixel values from the watermarked image
+                    # Extract pixel values from both images at once
                     features_water = self.extract_image_partial(x_water)
-                    # Also extract features from original images for comparison
                     features_orig = self.extract_image_partial(x_orig)
                 else:
-                    # Extract latent features from w (original approach)
+                    # Extract latent features efficiently
                     if w_water.ndim == 3:
                         w_water_single = w_water[:, 0, :]
                         w_orig_single = w_orig[:, 0, :]
@@ -395,19 +404,22 @@ class WatermarkEvaluator:
                         w_water_single = w_water
                         w_orig_single = w_orig
                     
-                    # Convert latent_indices to tensor if it's a numpy array
+                    # Use the precomputed indices tensor for faster indexing
                     if isinstance(self.latent_indices, np.ndarray):
                         latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
+                        # Cache for future use
+                        self.latent_indices = latent_indices
                     else:
                         latent_indices = self.latent_indices
-                        
-                    features_water = w_water_single[:, latent_indices]
-                    features_orig = w_orig_single[:, latent_indices]
+                    
+                    features_water = w_water_single.index_select(1, latent_indices)
+                    features_orig = w_orig_single.index_select(1, latent_indices)
                 
-                # Generate true key using features from watermarked images
+                # Generate true key from watermarked model features
                 true_key = self.key_mapper(features_water)
                 
-                # Compute key based on decoder mode
+                # Compute predicted keys based on decoder mode
+                # Handle both image-based and direct feature decoder modes
                 if self.direct_feature_decoder:
                     # Use features directly as input to the decoder
                     pred_key_water_logits = self.decoder(features_water)
@@ -421,21 +433,19 @@ class WatermarkEvaluator:
                 pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
                 pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
                 
-                # Calculate MSE distance metrics for watermarked images
+                # Calculate MSE distance metrics efficiently using torch operations
                 watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
-                
-                # Calculate MSE distance metrics for original images
                 original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
                 
-                # Calculate LPIPS loss between original and watermarked images
-                lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze().detach().cpu().numpy()
+                # Calculate LPIPS loss efficiently
+                lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze()
                 
                 # Return metrics data
                 return {
-                    'watermarked_mse_distances': watermarked_mse_distance.detach().cpu().numpy(),
-                    'original_mse_distances': original_mse_distance.detach().cpu().numpy(),
+                    'watermarked_mse_distances': watermarked_mse_distance.cpu().numpy(),
+                    'original_mse_distances': original_mse_distance.cpu().numpy(),
                     'batch_size': z.size(0),
-                    'lpips_losses': lpips_losses,
+                    'lpips_losses': lpips_losses.cpu().numpy(),
                     'x_orig': x_orig,
                     'x_water': x_water,
                     'features_water': features_water,
@@ -446,20 +456,18 @@ class WatermarkEvaluator:
                 if self.rank == 0:
                     logging.error(f"Error processing batch with model_name={model_name}, transformation={transformation}: {str(e)}")
                     logging.error(str(e), exc_info=True)
-                # Return empty results with same shape as expected
+                # Return minimal empty results to avoid downstream errors
                 batch_size = z.size(0)
-                empty_features = torch.zeros(batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices), device=self.device)
-                empty_image = torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size))
                 return {
                     'watermarked_mse_distances': np.ones(batch_size) * 0.5,
                     'original_mse_distances': np.ones(batch_size) * 0.5,
                     'batch_size': batch_size,
                     'lpips_losses': np.ones(batch_size) * 0.5,
-                    'x_orig': empty_image,
-                    'x_water': empty_image,
-                    'features_water': empty_features,
-                    'features_orig': empty_features,
-                    'diff_images': torch.zeros_like(empty_image)
+                    'x_orig': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
+                    'x_water': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
+                    'features_water': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device),
+                    'features_orig': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device),
+                    'diff_images': None
                 }
     
     def _process_negative_sample_batch(self, z, model_name=None, transformation=None):
@@ -476,7 +484,36 @@ class WatermarkEvaluator:
             dict: Dictionary containing evaluation results.
         """
         try:
-            # Select the negative model to use
+            # Cache commonly accessed watermarked reference - compute only once per batch
+            # We need this for all negative sample evaluations as a reference point
+            w_water_ref = self.watermarked_model.mapping(z, None)
+            
+            # Extract watermarked reference latent features for key mapping
+            if self.use_image_pixels:
+                # Need to generate the watermarked images for pixel extraction
+                x_water_ref = self.watermarked_model.synthesis(w_water_ref, noise_mode="const")
+                features_water = self.extract_image_partial(x_water_ref)
+            else:
+                # Extract latent features without generating images
+                if w_water_ref.ndim == 3:
+                    w_water_single = w_water_ref[:, 0, :]
+                else:
+                    w_water_single = w_water_ref
+                
+                # Convert latent_indices to tensor if needed
+                if isinstance(self.latent_indices, np.ndarray):
+                    latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
+                    # Cache for future use
+                    self.latent_indices = latent_indices
+                else:
+                    latent_indices = self.latent_indices
+                    
+                features_water = w_water_single.index_select(1, latent_indices)
+            
+            # Generate true key using features from the watermarked model - reused for all comparisons
+            true_key = self.key_mapper(features_water)
+            
+            # Select the negative model/transformation to use
             if model_name is not None:
                 # Use the pretrained model
                 if model_name not in self.pretrained_models:
@@ -496,13 +533,14 @@ class WatermarkEvaluator:
                 base_model = self.watermarked_model if is_watermarked else self.gan_model
                 transformation_base = transformation.replace('_watermarked', '').replace('_original', '')
                 
-                # Handle transformations
+                # Pre-load weights for necessary operations
+                # This avoids recreating objects in memory for each batch
                 if transformation_base == 'truncation':
-                    # For truncation, apply truncation to the image generation
+                    # Apply truncation to the image generation
                     truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
                     x_neg, w_neg = apply_truncation(base_model, z, truncation_psi, return_w=True)
                     
-                elif transformation_base in ['quantization', 'quantization_int4', 'quantization_int2']:
+                elif transformation_base.startswith('quantization'):
                     # Extract the bit precision from the transformation name
                     if transformation_base == 'quantization':
                         precision = 'int8'
@@ -519,8 +557,9 @@ class WatermarkEvaluator:
                             w_neg = self.watermarked_model.mapping(z, None)
                             x_neg = self.watermarked_model.synthesis(w_neg, noise_mode="const")
                         else:
-                            w_neg = self.quantized_watermarked_models[precision].mapping(z, None)
-                            x_neg = self.quantized_watermarked_models[precision].synthesis(w_neg, noise_mode="const")
+                            quantized_model = self.quantized_watermarked_models[precision]
+                            w_neg = quantized_model.mapping(z, None)
+                            x_neg = quantized_model.synthesis(w_neg, noise_mode="const")
                     else:
                         if precision not in self.quantized_models:
                             if self.rank == 0:
@@ -528,8 +567,9 @@ class WatermarkEvaluator:
                             w_neg = self.gan_model.mapping(z, None)
                             x_neg = self.gan_model.synthesis(w_neg, noise_mode="const")
                         else:
-                            w_neg = self.quantized_models[precision].mapping(z, None)
-                            x_neg = self.quantized_models[precision].synthesis(w_neg, noise_mode="const")
+                            quantized_model = self.quantized_models[precision]
+                            w_neg = quantized_model.mapping(z, None)
+                            x_neg = quantized_model.synthesis(w_neg, noise_mode="const")
                             
                 elif transformation_base == 'downsample':
                     # Generate image from the base model first
@@ -556,7 +596,7 @@ class WatermarkEvaluator:
                     w_neg = base_model.mapping(z, None)
                     x_neg = base_model.synthesis(w_neg, noise_mode="const")
             
-            # Extract features from the image if using image-based approach or needed for direct feature decoder
+            # Extract features from the negative sample
             if self.use_image_pixels:
                 features_neg = self.extract_image_partial(x_neg)
             else:
@@ -566,33 +606,7 @@ class WatermarkEvaluator:
                 else:
                     w_neg_single = w_neg
                 
-                # Convert latent_indices to tensor if it's a numpy array
-                if isinstance(self.latent_indices, np.ndarray):
-                    latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
-                else:
-                    latent_indices = self.latent_indices
-                    
-                features_neg = w_neg_single[:, latent_indices]
-            
-            # Generate the reference key using the watermarked model
-            # We need to generate a watermarked image first to get its features
-            w_water = self.watermarked_model.mapping(z, None)
-            x_water = self.watermarked_model.synthesis(w_water, noise_mode="const")
-            
-            # Extract features from the watermarked image
-            if self.use_image_pixels:
-                features_water = self.extract_image_partial(x_water)
-            else:
-                # Extract latent features
-                if w_water.ndim == 3:
-                    w_water_single = w_water[:, 0, :]
-                else:
-                    w_water_single = w_water
-                
-                features_water = w_water_single[:, latent_indices]
-            
-            # Generate true key using features from the watermarked model
-            true_key = self.key_mapper(features_water)
+                features_neg = w_neg_single.index_select(1, latent_indices)
             
             # Compute the predicted key based on the decoder mode
             if self.direct_feature_decoder:
@@ -605,12 +619,12 @@ class WatermarkEvaluator:
             # Convert to probabilities
             pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
             
-            # Calculate MSE distance metrics
+            # Calculate MSE distance metrics efficiently
             negative_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
             
             # Return metrics data
             return {
-                'negative_mse_distances': negative_mse_distance.detach().cpu().numpy(),
+                'negative_mse_distances': negative_mse_distance.cpu().numpy(),
                 'batch_size': z.size(0),
                 'x_neg': x_neg,
                 'features_neg': features_neg
@@ -619,16 +633,13 @@ class WatermarkEvaluator:
             if self.rank == 0:
                 logging.error(f"Error processing negative sample batch with model_name={model_name}, transformation={transformation}: {str(e)}")
                 logging.error(str(e), exc_info=True)
-            # Return empty results with same shape as expected
+            # Return minimal empty results
             batch_size = z.size(0)
-            empty_features = torch.zeros(batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices), device=self.device)
-            # Create a properly sized empty tensor for x_neg
-            empty_image = torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device)
             return {
                 'negative_mse_distances': np.ones(batch_size) * 0.5,
                 'batch_size': batch_size,
-                'x_neg': empty_image,
-                'features_neg': empty_features
+                'x_neg': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
+                'features_neg': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device)
             }
     
     def evaluate_batch(self) -> Dict[str, float]:
@@ -653,136 +664,72 @@ class WatermarkEvaluator:
         num_samples = self.config.evaluate.num_samples
         num_batches = (num_samples + batch_size - 1) // batch_size  # Ceiling division
         
-        # Overall accumulators
+        # Generate all latent vectors upfront for consistency across evaluations
+        all_z = torch.randn(num_samples, self.latent_dim, device=self.device)
+        
+        # Process comparison batches (original vs watermarked)
         watermarked_distances_all = []
         original_distances_all = []
         lpips_losses_all = []
         
-        # Negative sample accumulators
+        # Process in batches
+        with torch.no_grad():
+            for i in range(num_batches):
+                start_idx = i * batch_size
+                end_idx = min((i + 1) * batch_size, num_samples)
+                current_batch_size = end_idx - start_idx
+                
+                # Extract batch of latent vectors
+                z = all_z[start_idx:end_idx]
+                
+                # Process the comparison batch
+                batch_results = self.process_batch(z)
+                
+                # Accumulate results
+                watermarked_distances_all.append(batch_results['watermarked_mse_distances'])
+                original_distances_all.append(batch_results['original_mse_distances'])
+                lpips_losses_all.append(batch_results['lpips_losses'])
+                
+                # Progress reporting for long running evaluation
+                if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
+                    logging.info(f"Processed {i+1}/{num_batches} batches for original vs watermarked comparison")
+        
+        # Negative sample evaluation - only if enabled and we have samples to process
         negative_distances_all = {}
-        
-        # Process data in batches
-        for i in range(num_batches):
-            # Determine batch size for the last batch which might be smaller
-            current_batch_size = min(batch_size, num_samples - i * batch_size)
-            
-            # Generate batch of latent vectors
-            z = torch.randn(current_batch_size, self.latent_dim, device=self.device)
-            
-            # Process batch - comparing original vs. watermarked
-            batch_results = self.process_batch(z)
-            
-            # Accumulate results
-            watermarked_distances_all.append(batch_results['watermarked_mse_distances'])
-            original_distances_all.append(batch_results['original_mse_distances'])
-            lpips_losses_all.append(batch_results['lpips_losses'])
-        
-        # Process negative samples if enabled
         if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
-            # Process negative samples from pretrained models
-            if getattr(self.config.evaluate, 'evaluate_pretrained', True):
-                if getattr(self.config.evaluate, 'evaluate_ffhq1k', True) and 'ffhq1k' in self.pretrained_models:
-                    negative_distances_all['ffhq1k'] = self.evaluate_model_batch(model_name='ffhq1k')
-                
-                if getattr(self.config.evaluate, 'evaluate_ffhq30k', True) and 'ffhq30k' in self.pretrained_models:
-                    negative_distances_all['ffhq30k'] = self.evaluate_model_batch(model_name='ffhq30k')
-                
-                if getattr(self.config.evaluate, 'evaluate_ffhq70k_bcr', True) and 'ffhq70k-bcr' in self.pretrained_models:
-                    negative_distances_all['ffhq70k_bcr'] = self.evaluate_model_batch(model_name='ffhq70k-bcr')
-                
-                if getattr(self.config.evaluate, 'evaluate_ffhq70k_noaug', True) and 'ffhq70k-noaug' in self.pretrained_models:
-                    negative_distances_all['ffhq70k_noaug'] = self.evaluate_model_batch(model_name='ffhq70k-noaug')
-                
-            # Process negative samples from transformed images
-            if getattr(self.config.evaluate, 'evaluate_transforms', True):
-                # Truncation transformation
-                if getattr(self.config.evaluate, 'evaluate_truncation', True):
-                    negative_distances_all['truncation_original'] = self.evaluate_model_batch(transformation='truncation_original')
-                    
-                if getattr(self.config.evaluate, 'evaluate_truncation_watermarked', True):
-                    negative_distances_all['truncation_watermarked'] = self.evaluate_model_batch(transformation='truncation_watermarked')
-                
-                # Int8 Quantization
-                if getattr(self.config.evaluate, 'evaluate_quantization', True):
-                    negative_distances_all['quantization_original'] = self.evaluate_model_batch(transformation='quantization_original')
-                    
-                if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', True):
-                    negative_distances_all['quantization_watermarked'] = self.evaluate_model_batch(transformation='quantization_watermarked')
-                
-                # Int4 Quantization
-                if getattr(self.config.evaluate, 'evaluate_quantization_int4', True):
-                    negative_distances_all['quantization_int4_original'] = self.evaluate_model_batch(transformation='quantization_int4_original')
-                    
-                if getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', True):
-                    negative_distances_all['quantization_int4_watermarked'] = self.evaluate_model_batch(transformation='quantization_int4_watermarked')
-                
-                # Int2 Quantization
-                if getattr(self.config.evaluate, 'evaluate_quantization_int2', True):
-                    negative_distances_all['quantization_int2_original'] = self.evaluate_model_batch(transformation='quantization_int2_original')
-                    
-                if getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', True):
-                    negative_distances_all['quantization_int2_watermarked'] = self.evaluate_model_batch(transformation='quantization_int2_watermarked')
-                
-                # Downsampling
-                if getattr(self.config.evaluate, 'evaluate_downsample', True):
-                    negative_distances_all['downsample_original'] = self.evaluate_model_batch(transformation='downsample_original')
-                    
-                if getattr(self.config.evaluate, 'evaluate_downsample_watermarked', True):
-                    negative_distances_all['downsample_watermarked'] = self.evaluate_model_batch(transformation='downsample_watermarked')
-                
-                # JPEG compression
-                if getattr(self.config.evaluate, 'evaluate_jpeg', True):
-                    negative_distances_all['jpeg_original'] = self.evaluate_model_batch(transformation='jpeg_original')
-                    
-                if getattr(self.config.evaluate, 'evaluate_jpeg_watermarked', True):
-                    negative_distances_all['jpeg_watermarked'] = self.evaluate_model_batch(transformation='jpeg_watermarked')
+            negative_distances_all = self._evaluate_negative_samples(all_z)
         
         # Concatenate results across batches
         watermarked_distances = np.concatenate(watermarked_distances_all)
         original_distances = np.concatenate(original_distances_all)
         lpips_losses = np.concatenate(lpips_losses_all)
         
-        # Calculate number of correct key matches (we consider any match with MSE < 0.25 as correct)
-        # We would ideally use binary match rates, but this approximation works for evaluation
+        # Calculate metrics
         threshold = 0.25  # Typical threshold for correct key detection
         watermarked_correct = np.sum(watermarked_distances < threshold)
         original_correct = np.sum(original_distances < threshold)
         total_samples = len(watermarked_distances)
         
-        # For now, use MSE distances as MAE distances since we don't calculate them directly
-        # In a future implementation, we could calculate MAE distances separately
+        # Use MSE distances as MAE distances for backward compatibility
         watermarked_mae_distances = watermarked_distances
         original_mae_distances = original_distances
         
         # Calculate metrics
-        if len(negative_distances_all) > 0:
-            # Include negative samples in metrics calculation
-            metrics, roc_data = calculate_metrics(
-                watermarked_distances, 
-                original_distances,
-                watermarked_mae_distances, 
-                original_mae_distances,
-                watermarked_correct,
-                original_correct,
-                total_samples,
-                lpips_losses
-            )
+        metrics, roc_data = calculate_metrics(
+            watermarked_distances, 
+            original_distances,
+            watermarked_mae_distances, 
+            original_mae_distances,
+            watermarked_correct,
+            original_correct,
+            total_samples,
+            lpips_losses
+        )
+        
+        if negative_distances_all:
             metrics['negative_distances_all'] = negative_distances_all
-        else:
-            # Only compare watermarked with original 
-            empty_negative = self._create_empty_metrics()
-            metrics, roc_data = calculate_metrics(
-                watermarked_distances, 
-                original_distances,
-                watermarked_mae_distances, 
-                original_mae_distances,
-                watermarked_correct,
-                original_correct,
-                total_samples,
-                lpips_losses
-            )
-            # Create empty ROC data
-            metrics['roc_data'] = roc_data
+        
+        metrics['roc_data'] = roc_data
         
         if self.rank == 0:
             # Save metrics
@@ -791,97 +738,116 @@ class WatermarkEvaluator:
                               watermarked_mae_distances, original_mae_distances, self.config.output_dir)
         
         return metrics
-    
-    def evaluate_model_batch(self, model_name=None, transformation=None):
+
+    def _evaluate_negative_samples(self, all_z):
         """
-        Evaluate a specific model or transformation.
+        Evaluate all negative sample types (pretrained models and transformations).
+        This is extracted to a separate method for better organization.
         
         Args:
-            model_name (str, optional): Name of the pretrained model to evaluate.
-            transformation (str, optional): Name of the transformation to apply.
+            all_z (torch.Tensor): All latent vectors to use for evaluation.
             
         Returns:
-            np.ndarray: Distances for the negative samples.
+            dict: Dictionary mapping negative sample types to their distances.
         """
-        # Initialize accumulators
+        negative_distances_all = {}
         batch_size = self.config.evaluate.batch_size
         num_samples = self.config.evaluate.num_samples
-        num_batches = (num_samples + batch_size - 1) // batch_size  # Ceiling division
+        num_batches = (num_samples + batch_size - 1) // batch_size
         
-        negative_distances_all = []
+        # Get the list of evaluations to run
+        evaluations_to_run = []
         
-        # Process data in batches
-        for i in range(num_batches):
-            # Determine batch size for the last batch which might be smaller
-            current_batch_size = min(batch_size, num_samples - i * batch_size)
+        # Add pretrained model evaluations
+        if getattr(self.config.evaluate, 'evaluate_pretrained', True):
+            if getattr(self.config.evaluate, 'evaluate_ffhq1k', True) and 'ffhq1k' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq1k', None))
             
-            # Generate batch of latent vectors
-            z = torch.randn(current_batch_size, self.latent_dim, device=self.device)
+            if getattr(self.config.evaluate, 'evaluate_ffhq30k', True) and 'ffhq30k' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq30k', None))
             
-            # Process batch using the specified model or transformation
-            batch_results = self._process_negative_sample_batch(z, model_name, transformation)
+            if getattr(self.config.evaluate, 'evaluate_ffhq70k_bcr', True) and 'ffhq70k-bcr' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq70k-bcr', None))
             
-            # Accumulate negative distances
-            negative_distances_all.append(batch_results['negative_mse_distances'])
+            if getattr(self.config.evaluate, 'evaluate_ffhq70k_noaug', True) and 'ffhq70k-noaug' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq70k-noaug', None))
         
-        # Concatenate results across batches
-        negative_distances = np.concatenate(negative_distances_all)
-        
-        return negative_distances
-    
-    def _create_empty_metrics(self):
-        """Create empty metrics for error cases."""
-        # Create minimal fallback ROC data
-        y_true = np.array([1, 0])
-        y_score_mse = np.array([-0.4, -0.6])
-        y_score_mae = np.array([-0.4, -0.6])
-        
-        empty_dict = {
-            'watermarked_match_rate': 50.0,
-            'original_match_rate': 0.0,
-            'watermarked_mse_distance_avg': 0.5,
-            'watermarked_mse_distance_std': 0.0,
-            'watermarked_mae_distance_avg': 0.5,
-            'watermarked_mae_distance_std': 0.0,
-            'original_mse_distance_avg': 0.5,
-            'original_mse_distance_std': 0.0,
-            'original_mae_distance_avg': 0.5,
-            'original_mae_distance_std': 0.0,
-            'roc_auc_score_mse': 0.5,
-            'roc_auc_score_mae': 0.5,
-            'roc_auc_score': 0.5,
-            'watermarked_lpips_loss_avg': 0.5,
-            'watermarked_lpips_loss_std': 0.0,
-            'all_watermarked_mse_distances': [0.5],
-            'all_original_mse_distances': [0.5],
-            'num_samples_processed': 1
-        }
-        
-        return empty_dict
-    
-    def _create_fallback_roc_data(self, metrics):
-        """Create fallback ROC data when metrics might be incomplete."""
-        try:
-            # Try to create ROC data from metrics
-            y_true = np.concatenate([
-                np.ones(len(metrics['all_watermarked_mse_distances'])), 
-                np.zeros(len(metrics['all_original_mse_distances']))
-            ])
+        # Add transformations
+        if getattr(self.config.evaluate, 'evaluate_transforms', True):
+            # Truncation
+            if getattr(self.config.evaluate, 'evaluate_truncation', True):
+                evaluations_to_run.append((None, 'truncation_original'))
+            if getattr(self.config.evaluate, 'evaluate_truncation_watermarked', True):
+                evaluations_to_run.append((None, 'truncation_watermarked'))
             
-            y_score_mse = np.concatenate([
-                -np.array(metrics['all_watermarked_mse_distances']), 
-                -np.array(metrics['all_original_mse_distances'])
-            ])
+            # Int8 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization', True):
+                evaluations_to_run.append((None, 'quantization_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_watermarked'))
             
-            # Use same data for MAE scores as a fallback
-            y_score_mae = y_score_mse.copy()
+            # Int4 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization_int4', True):
+                evaluations_to_run.append((None, 'quantization_int4_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_int4_watermarked'))
             
-            return (y_true, y_score_mse, y_score_mae)
-        except (KeyError, ValueError) as e:
-            if self.rank == 0:
-                logging.warning(f"Error creating ROC data: {str(e)}. Using fallback data.")
-            # Return fallback data
-            return (np.array([1, 0]), np.array([-0.4, -0.6]), np.array([-0.4, -0.6]))
+            # Int2 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization_int2', True):
+                evaluations_to_run.append((None, 'quantization_int2_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_int2_watermarked'))
+            
+            # Downsampling
+            if getattr(self.config.evaluate, 'evaluate_downsample', True):
+                evaluations_to_run.append((None, 'downsample_original'))
+            if getattr(self.config.evaluate, 'evaluate_downsample_watermarked', True):
+                evaluations_to_run.append((None, 'downsample_watermarked'))
+            
+            # JPEG compression
+            if getattr(self.config.evaluate, 'evaluate_jpeg', True):
+                evaluations_to_run.append((None, 'jpeg_original'))
+            if getattr(self.config.evaluate, 'evaluate_jpeg_watermarked', True):
+                evaluations_to_run.append((None, 'jpeg_watermarked'))
+        
+        # Run evaluations
+        total_evals = len(evaluations_to_run)
+        if self.rank == 0 and total_evals > 0:
+            logging.info(f"Running {total_evals} negative sample evaluations...")
+        
+        with torch.no_grad():
+            for idx, (model_name, transformation) in enumerate(evaluations_to_run):
+                key = model_name if model_name else transformation
+                
+                # Skip if we've already evaluated this configuration
+                if key in negative_distances_all:
+                    continue
+                
+                distances_per_batch = []
+                
+                # Process in batches
+                for i in range(num_batches):
+                    start_idx = i * batch_size
+                    end_idx = min((i + 1) * batch_size, num_samples)
+                    current_batch_size = end_idx - start_idx
+                    
+                    # Extract batch of latent vectors
+                    z = all_z[start_idx:end_idx]
+                    
+                    # Process batch with the specific model/transformation
+                    batch_results = self._process_negative_sample_batch(z, model_name, transformation)
+                    
+                    # Accumulate distances
+                    distances_per_batch.append(batch_results['negative_mse_distances'])
+                
+                # Combine results
+                negative_distances_all[key] = np.concatenate(distances_per_batch)
+                
+                # Progress reporting
+                if self.rank == 0 and (idx+1) % max(1, total_evals//5) == 0:
+                    logging.info(f"Completed {idx+1}/{total_evals} negative sample evaluations")
+        
+        return negative_distances_all
     
     def visualize_samples(self):
         """
@@ -889,7 +855,12 @@ class WatermarkEvaluator:
         """
         if self.rank != 0:
             return  # Only perform visualization on the master process
-            
+        
+        # Skip visualization if disabled
+        if not getattr(self.config.evaluate, 'enable_visualization', False):
+            logging.info("Skipping visualization (disabled by configuration)")
+            return
+        
         # Create main visualization directory
         vis_dir = os.path.join(self.config.output_dir, "visualizations")
         os.makedirs(vis_dir, exist_ok=True)
@@ -901,83 +872,114 @@ class WatermarkEvaluator:
             np.random.randn(num_vis_samples, self.latent_dim)
         ).float().to(self.device)
         
+        # Only visualize what's explicitly enabled
         # Visualize the watermarked model samples
         vis_subdir = os.path.join(vis_dir, "watermarked")
         self.visualize_model_samples(output_subdir=vis_subdir, z_vis=z_vis)
         
         # Visualize the pretrained model samples if enabled
-        if hasattr(self.config.evaluate, 'evaluate_pretrained') and self.config.evaluate.evaluate_pretrained:
+        evaluate_pretrained = getattr(self.config.evaluate, 'evaluate_pretrained', False)
+        if evaluate_pretrained and getattr(self.config.evaluate, 'visualize_pretrained', False):
             for model_name in self.pretrained_models:
-                vis_subdir = os.path.join(vis_dir, f"pretrained_{model_name}")
-                self.visualize_model_samples(model_name=model_name, output_subdir=vis_subdir, z_vis=z_vis)
+                # Only visualize explicitly enabled models
+                model_enabled = getattr(self.config.evaluate, f'evaluate_{model_name.replace("-", "_")}', False)
+                model_viz_enabled = getattr(self.config.evaluate, f'visualize_{model_name.replace("-", "_")}', False)
+                
+                if model_enabled and model_viz_enabled:
+                    vis_subdir = os.path.join(vis_dir, f"pretrained_{model_name}")
+                    self.visualize_model_samples(model_name=model_name, output_subdir=vis_subdir, z_vis=z_vis)
         
         # Visualize transformations if enabled
-        if hasattr(self.config.evaluate, 'evaluate_transforms') and self.config.evaluate.evaluate_transforms:
+        evaluate_transforms = getattr(self.config.evaluate, 'evaluate_transforms', False)
+        if evaluate_transforms and getattr(self.config.evaluate, 'visualize_transforms', False):
+            # For each transformation, only visualize if both evaluation and visualization are enabled
+            
             # Truncation
-            if getattr(self.config.evaluate, 'evaluate_truncation', False):
+            if self._should_visualize_transform('truncation'):
                 vis_subdir = os.path.join(vis_dir, "truncation_original")
                 self.visualize_model_samples(transformation='truncation_original', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
                 
-            if getattr(self.config.evaluate, 'evaluate_truncation_watermarked', False):
+            if self._should_visualize_transform('truncation_watermarked'):
                 vis_subdir = os.path.join(vis_dir, "truncation_watermarked")
                 self.visualize_model_samples(transformation='truncation_watermarked', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
             
             # Int8 Quantization
-            if getattr(self.config.evaluate, 'evaluate_quantization', False):
+            if self._should_visualize_transform('quantization'):
                 vis_subdir = os.path.join(vis_dir, "quantization_original")
                 self.visualize_model_samples(transformation='quantization_original', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
                 
-            if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', False):
+            if self._should_visualize_transform('quantization_watermarked'):
                 vis_subdir = os.path.join(vis_dir, "quantization_watermarked")
                 self.visualize_model_samples(transformation='quantization_watermarked', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
             
             # Int4 Quantization
-            if getattr(self.config.evaluate, 'evaluate_quantization_int4', False):
+            if self._should_visualize_transform('quantization_int4'):
                 vis_subdir = os.path.join(vis_dir, "quantization_int4_original")
                 self.visualize_model_samples(transformation='quantization_int4_original', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
                 
-            if getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', False):
+            if self._should_visualize_transform('quantization_int4_watermarked'):
                 vis_subdir = os.path.join(vis_dir, "quantization_int4_watermarked")
                 self.visualize_model_samples(transformation='quantization_int4_watermarked', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
             
             # Int2 Quantization
-            if getattr(self.config.evaluate, 'evaluate_quantization_int2', False):
+            if self._should_visualize_transform('quantization_int2'):
                 vis_subdir = os.path.join(vis_dir, "quantization_int2_original")
                 self.visualize_model_samples(transformation='quantization_int2_original', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
                 
-            if getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', False):
+            if self._should_visualize_transform('quantization_int2_watermarked'):
                 vis_subdir = os.path.join(vis_dir, "quantization_int2_watermarked")
                 self.visualize_model_samples(transformation='quantization_int2_watermarked', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
             
             # Downsampling
-            if getattr(self.config.evaluate, 'evaluate_downsample', False):
+            if self._should_visualize_transform('downsample'):
                 vis_subdir = os.path.join(vis_dir, "downsample_original")
                 self.visualize_model_samples(transformation='downsample_original', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
                 
-            if getattr(self.config.evaluate, 'evaluate_downsample_watermarked', False):
+            if self._should_visualize_transform('downsample_watermarked'):
                 vis_subdir = os.path.join(vis_dir, "downsample_watermarked")
                 self.visualize_model_samples(transformation='downsample_watermarked', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
             
             # JPEG compression
-            if getattr(self.config.evaluate, 'evaluate_jpeg', False):
+            if self._should_visualize_transform('jpeg'):
                 vis_subdir = os.path.join(vis_dir, "jpeg_original")
                 self.visualize_model_samples(transformation='jpeg_original', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
                 
-            if getattr(self.config.evaluate, 'evaluate_jpeg_watermarked', False):
+            if self._should_visualize_transform('jpeg_watermarked'):
                 vis_subdir = os.path.join(vis_dir, "jpeg_watermarked")
                 self.visualize_model_samples(transformation='jpeg_watermarked', 
                                            output_subdir=vis_subdir, z_vis=z_vis)
+        
+        logging.info("Visualization complete")
+
+    def _should_visualize_transform(self, transform_name):
+        """
+        Helper method to check if a transformation should be visualized.
+        
+        Args:
+            transform_name (str): The name of the transformation to check.
+            
+        Returns:
+            bool: True if the transformation should be visualized, False otherwise.
+        """
+        # Check if evaluation is enabled for this transform
+        eval_enabled = getattr(self.config.evaluate, f'evaluate_{transform_name}', False)
+        
+        # Check if visualization is enabled for this transform
+        viz_enabled = getattr(self.config.evaluate, f'visualize_{transform_name}', False)
+        
+        # Only visualize if both flags are True
+        return eval_enabled and viz_enabled
     
     def visualize_model_samples(self, model_name=None, transformation=None, output_subdir="watermarked", z_vis=None):
         """
@@ -1095,7 +1097,7 @@ class WatermarkEvaluator:
                         title=f"{output_subdir.split('/')[-1]} - Sample {i+1}",
                         match_status=matches_reference
                     )
-                
+            
             else:
                 # Standard comparison case - watermarked vs original
                 # Generate images from watermarked model
@@ -1194,7 +1196,7 @@ class WatermarkEvaluator:
                         title=f"Original - Sample {i+1}",
                         match_status=matches_original
                     )
-    
+
     def calculate_threshold_at_tpr(self, watermarked_distances, target_tpr=0.95):
         """
         Calculate the threshold where target_tpr (e.g. 95%) of watermarked images have MSE distances below it.
@@ -1217,7 +1219,7 @@ class WatermarkEvaluator:
         
         # Return the threshold
         return sorted_distances[idx]
-    
+
     def calculate_fpr_at_threshold(self, negative_distances, threshold):
         """
         Calculate the false positive rate (FPR) for negative samples at the given threshold.
@@ -1237,12 +1239,13 @@ class WatermarkEvaluator:
         
         return fpr
     
-    def evaluate(self, evaluation_mode='both'):
+    def evaluate(self, evaluation_mode='batch'):
         """
         Run evaluation based on the specified mode.
         
         Args:
             evaluation_mode (str): Evaluation mode, one of 'batch', 'visual', or 'both'.
+                Default is 'batch' for metrics-only evaluation.
             
         Returns:
             dict: Evaluation metrics (if batch evaluation was performed).
@@ -1269,11 +1272,28 @@ class WatermarkEvaluator:
             
             logging.info(f"  Key length: {self.config.model.key_length}")
             logging.info(f"  Key mapper seed: {self.config.model.key_mapper_seed}")
+            
+            # Report visualization settings
+            visualize_mode = evaluation_mode in ['visual', 'both']
+            logging.info(f"  Visualization enabled: {visualize_mode}")
+            if visualize_mode:
+                logging.info(f"  Comparisons enabled: {getattr(self.config.evaluate, 'save_comparisons', False)}")
         
+        # Initialize visualization batch counter if needed
+        if self.rank == 0 and evaluation_mode in ['visual', 'both']:
+            self.batch_counter = 0
+        
+        # Batch evaluation first if enabled
         if evaluation_mode in ['batch', 'both']:
             metrics = self.evaluate_batch()
+        
+        # Visual evaluation after batch if enabled
+        if evaluation_mode in ['visual', 'both'] and self.rank == 0:
+            # Use a reduced sample count for visualizations if not specified
+            if not hasattr(self.config.evaluate, 'num_vis_samples'):
+                self.config.evaluate.num_vis_samples = min(10, self.config.evaluate.num_samples)
             
-        if evaluation_mode in ['visual', 'both']:
+            # Only run visualizations if explicitly requested
             self.visualize_samples()
-            
+        
         return metrics 

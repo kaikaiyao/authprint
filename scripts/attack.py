@@ -1326,8 +1326,8 @@ def attack_case(
         # Store all distances for ASR calculation using probability values
         true_keys_tensor = torch.tensor(batch_results['true_keys'], device='cpu')
         pred_probs = torch.sigmoid(torch.tensor(batch_results['pred_logits'], device='cpu'))
-        mse_distances = torch.mean(torch.pow(pred_probs - true_keys_tensor, 2), dim=1).numpy()
-        mae_distances = torch.mean(torch.abs(pred_probs - true_keys_tensor), dim=1).numpy()
+        mse_distances = torch.mean(torch.pow(pred_probs - true_keys_tensor, 2), dim=1).detach().numpy()
+        mae_distances = torch.mean(torch.abs(pred_probs - true_keys_tensor), dim=1).detach().numpy()
         attack_metrics['all_mse_distances'].extend(mse_distances)
         attack_metrics['all_mae_distances'].extend(mae_distances)
     

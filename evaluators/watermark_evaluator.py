@@ -413,12 +413,12 @@ class WatermarkEvaluator:
                 original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
                 
                 # Calculate LPIPS loss between original and watermarked images
-                lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze().cpu().numpy()
+                lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze().detach().cpu().numpy()
                 
                 # Return metrics data
                 return {
-                    'watermarked_mse_distances': watermarked_mse_distance.cpu().numpy(),
-                    'original_mse_distances': original_mse_distance.cpu().numpy(),
+                    'watermarked_mse_distances': watermarked_mse_distance.detach().cpu().numpy(),
+                    'original_mse_distances': original_mse_distance.detach().cpu().numpy(),
                     'batch_size': z.size(0),
                     'lpips_losses': lpips_losses,
                     'x_orig': x_orig,
@@ -592,7 +592,7 @@ class WatermarkEvaluator:
             
             # Return metrics data
             return {
-                'negative_mse_distances': negative_mse_distance.cpu().numpy(),
+                'negative_mse_distances': negative_mse_distance.detach().cpu().numpy(),
                 'batch_size': z.size(0),
                 'x_neg': x_neg,
                 'features_neg': features_neg
@@ -604,10 +604,12 @@ class WatermarkEvaluator:
             # Return empty results with same shape as expected
             batch_size = z.size(0)
             empty_features = torch.zeros(batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices), device=self.device)
+            # Create a properly sized empty tensor for x_neg
+            empty_image = torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device)
             return {
                 'negative_mse_distances': np.ones(batch_size) * 0.5,
                 'batch_size': batch_size,
-                'x_neg': torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, self.config.model.img_size, self.config.model.img_size)),
+                'x_neg': empty_image,
                 'features_neg': empty_features
             }
     
@@ -949,7 +951,7 @@ class WatermarkEvaluator:
                 features_neg = batch_result['features_neg']
                 
                 # Convert to numpy for visualization
-                x_neg_np = x_neg.cpu().numpy()
+                x_neg_np = x_neg.detach().cpu().numpy()
                 
                 # Get the watermarked model images for reference comparison
                 w_water = self.watermarked_model.mapping(z_vis, None)
@@ -1016,17 +1018,17 @@ class WatermarkEvaluator:
                     # Log details
                     if getattr(self.config.evaluate, 'verbose_visualization', False):
                         logging.info(f"{output_subdir.split('/')[-1]} - Sample {i+1}:")
-                        logging.info(f"  True key: {true_keys[i].cpu().numpy().tolist()}")
-                        logging.info(f"  Predicted key: {pred_keys_neg[i].cpu().numpy().tolist()}")
+                        logging.info(f"  True key: {true_keys[i].detach().cpu().numpy().tolist()}")
+                        logging.info(f"  Predicted key: {pred_keys_neg[i].detach().cpu().numpy().tolist()}")
                         logging.info(f"  Matches reference: {matches_reference}")
                     
                     # Save image with annotations
                     sample_filename = os.path.join(output_subdir, f"sample_{i+1}.png")
                     save_visualization(
                         image=x_neg_np[i],
-                        true_key=true_keys[i].cpu().numpy(),
-                        pred_key=pred_keys_neg[i].cpu().numpy(),
-                        pred_probs=pred_keys_neg_probs[i].cpu().numpy(),
+                        true_key=true_keys[i].detach().cpu().numpy(),
+                        pred_key=pred_keys_neg[i].detach().cpu().numpy(),
+                        pred_probs=pred_keys_neg_probs[i].detach().cpu().numpy(),
                         output_path=sample_filename,
                         title=f"{output_subdir.split('/')[-1]} - Sample {i+1}",
                         match_status=matches_reference
@@ -1085,8 +1087,8 @@ class WatermarkEvaluator:
                 pred_keys_orig = pred_keys_orig_probs > 0.5
                 
                 # Convert images to numpy for visualization
-                x_water_np = x_water.cpu().numpy()
-                x_orig_np = x_orig.cpu().numpy()
+                x_water_np = x_water.detach().cpu().numpy()
+                x_orig_np = x_orig.detach().cpu().numpy()
                 
                 # Create subdirectories for watermarked vs original
                 watermarked_dir = os.path.join(output_subdir, "watermarked")
@@ -1103,17 +1105,17 @@ class WatermarkEvaluator:
                     # Log details
                     if getattr(self.config.evaluate, 'verbose_visualization', False):
                         logging.info(f"Sample {i+1}:")
-                        logging.info(f"  True key: {true_keys[i].cpu().numpy().tolist()}")
-                        logging.info(f"  Watermarked pred: {pred_keys_water[i].cpu().numpy().tolist()} (Match: {matches_watermarked})")
-                        logging.info(f"  Original pred: {pred_keys_orig[i].cpu().numpy().tolist()} (Match: {matches_original})")
+                        logging.info(f"  True key: {true_keys[i].detach().cpu().numpy().tolist()}")
+                        logging.info(f"  Watermarked pred: {pred_keys_water[i].detach().cpu().numpy().tolist()} (Match: {matches_watermarked})")
+                        logging.info(f"  Original pred: {pred_keys_orig[i].detach().cpu().numpy().tolist()} (Match: {matches_original})")
                     
                     # Save watermarked image with annotations
                     water_filename = os.path.join(watermarked_dir, f"sample_{i+1}.png")
                     save_visualization(
                         image=x_water_np[i],
-                        true_key=true_keys[i].cpu().numpy(),
-                        pred_key=pred_keys_water[i].cpu().numpy(),
-                        pred_probs=pred_keys_water_probs[i].cpu().numpy(),
+                        true_key=true_keys[i].detach().cpu().numpy(),
+                        pred_key=pred_keys_water[i].detach().cpu().numpy(),
+                        pred_probs=pred_keys_water_probs[i].detach().cpu().numpy(),
                         output_path=water_filename,
                         title=f"Watermarked - Sample {i+1}",
                         match_status=matches_watermarked
@@ -1123,9 +1125,9 @@ class WatermarkEvaluator:
                     orig_filename = os.path.join(original_dir, f"sample_{i+1}.png")
                     save_visualization(
                         image=x_orig_np[i],
-                        true_key=true_keys[i].cpu().numpy(),
-                        pred_key=pred_keys_orig[i].cpu().numpy(),
-                        pred_probs=pred_keys_orig_probs[i].cpu().numpy(),
+                        true_key=true_keys[i].detach().cpu().numpy(),
+                        pred_key=pred_keys_orig[i].detach().cpu().numpy(),
+                        pred_probs=pred_keys_orig_probs[i].detach().cpu().numpy(),
                         output_path=orig_filename,
                         title=f"Original - Sample {i+1}",
                         match_status=matches_original

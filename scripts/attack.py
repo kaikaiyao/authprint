@@ -958,13 +958,37 @@ def run_attack(config, local_rank, rank, world_size, device):
     if hasattr(config.evaluate, 'evaluate_pretrained') and config.evaluate.evaluate_pretrained:
         pretrained_models = load_pretrained_models(config, device, rank)
     
-    # Setup quantized model if needed
-    quantized_model = None
+    # Setup quantized models if needed
+    quantized_models = {}
     if getattr(config.evaluate, 'evaluate_quantization', False):
         if rank == 0:
-            logging.info("Setting up quantized model...")
-        quantized_model = quantize_model_weights(gan_model)
-        quantized_model.eval()
+            logging.info("Setting up INT8 quantized models...")
+        quantized_models['int8'] = {
+            'original': quantize_model_weights(gan_model, precision='int8'),
+            'watermarked': quantize_model_weights(watermarked_model, precision='int8')
+        }
+        quantized_models['int8']['original'].eval()
+        quantized_models['int8']['watermarked'].eval()
+
+    if getattr(config.evaluate, 'evaluate_quantization_int4', False):
+        if rank == 0:
+            logging.info("Setting up INT4 quantized models...")
+        quantized_models['int4'] = {
+            'original': quantize_model_weights(gan_model, precision='int4'),
+            'watermarked': quantize_model_weights(watermarked_model, precision='int4')
+        }
+        quantized_models['int4']['original'].eval()
+        quantized_models['int4']['watermarked'].eval()
+
+    if getattr(config.evaluate, 'evaluate_quantization_int2', False):
+        if rank == 0:
+            logging.info("Setting up INT2 quantized models...")
+        quantized_models['int2'] = {
+            'original': quantize_model_weights(gan_model, precision='int2'),
+            'watermarked': quantize_model_weights(watermarked_model, precision='int2')
+        }
+        quantized_models['int2']['original'].eval()
+        quantized_models['int2']['watermarked'].eval()
     
     # Step 1: Train surrogate decoders
     surrogate_decoders = train_surrogate_decoders(
@@ -1085,7 +1109,7 @@ def run_attack(config, local_rank, rank, world_size, device):
             # Attack truncation
             if hasattr(config.evaluate, 'evaluate_truncation') and config.evaluate.evaluate_truncation:
                 if rank == 0:
-                    logging.info("Attacking truncated images...")
+                    logging.info("Attacking truncated images (original model)...")
                 metrics = attack_case(
                     None, 'truncation',
                     gan_model, watermarked_model, decoder, key_mapper,
@@ -1094,27 +1118,109 @@ def run_attack(config, local_rank, rank, world_size, device):
                     latent_indices if not use_image_pixels else None,
                     alpha, watermarked_mse_distances, watermarked_mae_distances
                 )
-                case_metrics['truncation'] = metrics
-            
-            # Attack quantization
-            if hasattr(config.evaluate, 'evaluate_quantization') and config.evaluate.evaluate_quantization:
-                if rank == 0:
-                    logging.info("Attacking quantized model...")
-                if quantized_model is not None:
+                case_metrics['truncation_original'] = metrics
+
+                if hasattr(config.evaluate, 'evaluate_truncation_watermarked') and config.evaluate.evaluate_truncation_watermarked:
+                    if rank == 0:
+                        logging.info("Attacking truncated images (watermarked model)...")
                     metrics = attack_case(
-                        None, 'quantization',
-                        quantized_model, watermarked_model, decoder, key_mapper,
+                        None, 'truncation',
+                        watermarked_model, watermarked_model, decoder, key_mapper,
                         surrogate_decoders, config, device,
                         pixel_indices if use_image_pixels else None,
                         latent_indices if not use_image_pixels else None,
                         alpha, watermarked_mse_distances, watermarked_mae_distances
                     )
-                    case_metrics['quantization'] = metrics
+                    case_metrics['truncation_watermarked'] = metrics
             
+            # Attack quantization (INT8)
+            if hasattr(config.evaluate, 'evaluate_quantization') and config.evaluate.evaluate_quantization:
+                if rank == 0:
+                    logging.info("Attacking INT8 quantized model (original)...")
+                if 'int8' in quantized_models:
+                    metrics = attack_case(
+                        None, 'quantization_int8',
+                        quantized_models['int8']['original'], watermarked_model, decoder, key_mapper,
+                        surrogate_decoders, config, device,
+                        pixel_indices if use_image_pixels else None,
+                        latent_indices if not use_image_pixels else None,
+                        alpha, watermarked_mse_distances, watermarked_mae_distances
+                    )
+                    case_metrics['quantization_int8_original'] = metrics
+
+                    if hasattr(config.evaluate, 'evaluate_quantization_watermarked') and config.evaluate.evaluate_quantization_watermarked:
+                        if rank == 0:
+                            logging.info("Attacking INT8 quantized model (watermarked)...")
+                        metrics = attack_case(
+                            None, 'quantization_int8',
+                            quantized_models['int8']['watermarked'], watermarked_model, decoder, key_mapper,
+                            surrogate_decoders, config, device,
+                            pixel_indices if use_image_pixels else None,
+                            latent_indices if not use_image_pixels else None,
+                            alpha, watermarked_mse_distances, watermarked_mae_distances
+                        )
+                        case_metrics['quantization_int8_watermarked'] = metrics
+
+            # Attack quantization (INT4)
+            if hasattr(config.evaluate, 'evaluate_quantization_int4') and config.evaluate.evaluate_quantization_int4:
+                if rank == 0:
+                    logging.info("Attacking INT4 quantized model (original)...")
+                if 'int4' in quantized_models:
+                    metrics = attack_case(
+                        None, 'quantization_int4',
+                        quantized_models['int4']['original'], watermarked_model, decoder, key_mapper,
+                        surrogate_decoders, config, device,
+                        pixel_indices if use_image_pixels else None,
+                        latent_indices if not use_image_pixels else None,
+                        alpha, watermarked_mse_distances, watermarked_mae_distances
+                    )
+                    case_metrics['quantization_int4_original'] = metrics
+
+                    if hasattr(config.evaluate, 'evaluate_quantization_int4_watermarked') and config.evaluate.evaluate_quantization_int4_watermarked:
+                        if rank == 0:
+                            logging.info("Attacking INT4 quantized model (watermarked)...")
+                        metrics = attack_case(
+                            None, 'quantization_int4',
+                            quantized_models['int4']['watermarked'], watermarked_model, decoder, key_mapper,
+                            surrogate_decoders, config, device,
+                            pixel_indices if use_image_pixels else None,
+                            latent_indices if not use_image_pixels else None,
+                            alpha, watermarked_mse_distances, watermarked_mae_distances
+                        )
+                        case_metrics['quantization_int4_watermarked'] = metrics
+
+            # Attack quantization (INT2)
+            if hasattr(config.evaluate, 'evaluate_quantization_int2') and config.evaluate.evaluate_quantization_int2:
+                if rank == 0:
+                    logging.info("Attacking INT2 quantized model (original)...")
+                if 'int2' in quantized_models:
+                    metrics = attack_case(
+                        None, 'quantization_int2',
+                        quantized_models['int2']['original'], watermarked_model, decoder, key_mapper,
+                        surrogate_decoders, config, device,
+                        pixel_indices if use_image_pixels else None,
+                        latent_indices if not use_image_pixels else None,
+                        alpha, watermarked_mse_distances, watermarked_mae_distances
+                    )
+                    case_metrics['quantization_int2_original'] = metrics
+
+                    if hasattr(config.evaluate, 'evaluate_quantization_int2_watermarked') and config.evaluate.evaluate_quantization_int2_watermarked:
+                        if rank == 0:
+                            logging.info("Attacking INT2 quantized model (watermarked)...")
+                        metrics = attack_case(
+                            None, 'quantization_int2',
+                            quantized_models['int2']['watermarked'], watermarked_model, decoder, key_mapper,
+                            surrogate_decoders, config, device,
+                            pixel_indices if use_image_pixels else None,
+                            latent_indices if not use_image_pixels else None,
+                            alpha, watermarked_mse_distances, watermarked_mae_distances
+                        )
+                        case_metrics['quantization_int2_watermarked'] = metrics
+
             # Attack downsample
             if hasattr(config.evaluate, 'evaluate_downsample') and config.evaluate.evaluate_downsample:
                 if rank == 0:
-                    logging.info("Attacking downsampled images...")
+                    logging.info("Attacking downsampled images (original model)...")
                 metrics = attack_case(
                     None, 'downsample',
                     gan_model, watermarked_model, decoder, key_mapper,
@@ -1123,12 +1229,25 @@ def run_attack(config, local_rank, rank, world_size, device):
                     latent_indices if not use_image_pixels else None,
                     alpha, watermarked_mse_distances, watermarked_mae_distances
                 )
-                case_metrics['downsample'] = metrics
+                case_metrics['downsample_original'] = metrics
+
+                if hasattr(config.evaluate, 'evaluate_downsample_watermarked') and config.evaluate.evaluate_downsample_watermarked:
+                    if rank == 0:
+                        logging.info("Attacking downsampled images (watermarked model)...")
+                    metrics = attack_case(
+                        None, 'downsample',
+                        watermarked_model, watermarked_model, decoder, key_mapper,
+                        surrogate_decoders, config, device,
+                        pixel_indices if use_image_pixels else None,
+                        latent_indices if not use_image_pixels else None,
+                        alpha, watermarked_mse_distances, watermarked_mae_distances
+                    )
+                    case_metrics['downsample_watermarked'] = metrics
             
             # Attack JPEG compression
             if hasattr(config.evaluate, 'evaluate_jpeg') and config.evaluate.evaluate_jpeg:
                 if rank == 0:
-                    logging.info("Attacking JPEG compressed images...")
+                    logging.info("Attacking JPEG compressed images (original model)...")
                 metrics = attack_case(
                     None, 'jpeg',
                     gan_model, watermarked_model, decoder, key_mapper,
@@ -1137,7 +1256,20 @@ def run_attack(config, local_rank, rank, world_size, device):
                     latent_indices if not use_image_pixels else None,
                     alpha, watermarked_mse_distances, watermarked_mae_distances
                 )
-                case_metrics['jpeg'] = metrics
+                case_metrics['jpeg_original'] = metrics
+
+                if hasattr(config.evaluate, 'evaluate_jpeg_watermarked') and config.evaluate.evaluate_jpeg_watermarked:
+                    if rank == 0:
+                        logging.info("Attacking JPEG compressed images (watermarked model)...")
+                    metrics = attack_case(
+                        None, 'jpeg',
+                        watermarked_model, watermarked_model, decoder, key_mapper,
+                        surrogate_decoders, config, device,
+                        pixel_indices if use_image_pixels else None,
+                        latent_indices if not use_image_pixels else None,
+                        alpha, watermarked_mse_distances, watermarked_mae_distances
+                    )
+                    case_metrics['jpeg_watermarked'] = metrics
         
         # Store all case metrics for this alpha
         all_attack_metrics[alpha] = case_metrics

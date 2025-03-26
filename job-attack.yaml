@@ -69,23 +69,23 @@ spec:
               echo "Starting attack..."
               export PYTHONPATH=$PYTHONPATH:/workspace/kubernets
               
-              torchrun --nproc_per_node=2 \
+              torchrun --nproc_per_node=1 \
                       --nnodes=1 \
                       --node_rank=0 \
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
                       scripts/attack.py \
-                      --checkpoint_path "/nfs-user-029/pixel_based/num_pixel_4/key_length_256/checkpoint_iter160000.pth" \
+                      --checkpoint_path "/nfs-user-029/pixel_based/num_pixel_32/key_length_256/checkpoint_iter210000.pth" \
                       --num_samples 100 \
                       --pgd_alpha 0.001 \
                       --pgd_steps 200 \
                       --pgd_epsilon 1.0 \
                       --num_surrogate_models 10 \
                       --surrogate_num_samples 10000 \
-                      --key_length 256\
+                      --key_length 256 \
                       --key_mapper_seed 2025 \
                       --use_image_pixels \
-                      --image_pixel_count 4 \
+                      --image_pixel_count 32 \
                       --image_pixel_set_seed 42
               
               # --use_image_pixels 
@@ -102,7 +102,7 @@ spec:
               sleep infinity
           resources:
             limits:
-              nvidia.com/gpu: "2"
+              nvidia.com/gpu: "1"
               cpu: "8"
               memory: "32Gi"
           volumeMounts:

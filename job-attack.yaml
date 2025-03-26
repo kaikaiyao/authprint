@@ -78,7 +78,7 @@ spec:
                       --checkpoint_path "/nfs-user-029/pixel_based/num_pixel_32/key_length_256/checkpoint_iter210000.pth" \
                       --num_samples 100 \
                       --pgd_alpha 0.001 \
-                      --pgd_steps 200 \
+                      --pgd_steps 100 \
                       --pgd_epsilon 1.0 \
                       --num_surrogate_models 10 \
                       --surrogate_num_samples 10000 \

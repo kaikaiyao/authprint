@@ -69,7 +69,7 @@ spec:
               echo "Starting training..."
               export PYTHONPATH=$PYTHONPATH:/workspace/kubernets
               
-              torchrun --nproc_per_node=4 \
+              torchrun --nproc_per_node=1 \
                       --nnodes=1 \
                       --node_rank=0 \
                       --master_addr=127.0.0.1 \
@@ -82,7 +82,7 @@ spec:
                       --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
                       --use_image_pixels \
-                      --image_pixel_count 8 \
+                      --image_pixel_count 1 \
                       --image_pixel_set_seed 42 
               
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"
@@ -98,7 +98,7 @@ spec:
               echo "Training finished with exit status $exit_status"
           resources:
             limits:
-              nvidia.com/gpu: "4"
+              nvidia.com/gpu: "1"
               cpu: "4"
               memory: "32Gi"
           volumeMounts:

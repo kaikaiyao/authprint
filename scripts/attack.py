@@ -257,6 +257,8 @@ def generate_pixel_indices(img_size, channels, image_pixel_count, image_pixel_se
             replace=False
         )
     logging.info(f"Generated {len(pixel_indices)} pixel indices with seed {image_pixel_set_seed}")
+    # Add detailed logging of the actual indices
+    logging.info(f"Selected pixel indices: {pixel_indices.tolist()}")
     return pixel_indices
 
 

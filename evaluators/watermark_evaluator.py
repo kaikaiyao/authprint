@@ -147,6 +147,8 @@ class WatermarkEvaluator:
         
         if self.rank == 0:
             logging.info(f"Generated {len(self.image_pixel_indices)} pixel indices with seed {self.image_pixel_set_seed}")
+            # Add detailed logging of the actual indices
+            logging.info(f"Selected pixel indices: {self.image_pixel_indices.tolist()}")
 
     def extract_image_partial(self, images: torch.Tensor) -> torch.Tensor:
         """

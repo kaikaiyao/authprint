@@ -251,6 +251,9 @@ class WatermarkTrainer:
                 replace=False
             )
         logging.info(f"Generated {len(self.image_pixel_indices)} pixel indices with seed {self.image_pixel_set_seed}")
+        # Add detailed logging of the actual indices
+        if self.rank == 0:
+            logging.info(f"Selected pixel indices: {self.image_pixel_indices.tolist()}")
     
     def _generate_latent_indices(self, latent_dim: int) -> None:
         """

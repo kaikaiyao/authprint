@@ -81,6 +81,14 @@ class EvaluateConfig:
     # Process monitoring options
     enable_timing_logs: bool = True  # Enable detailed timing logs for process monitoring
     
+    # Multi-decoder mode options
+    enable_multi_decoder: bool = False  # Whether to enable multi-decoder mode
+    multi_decoder_checkpoints: List[str] = field(default_factory=list)  # List of checkpoint paths for multi-decoder mode
+    multi_decoder_key_lengths: List[int] = field(default_factory=list)  # List of key lengths for each decoder
+    multi_decoder_key_mapper_seeds: List[int] = field(default_factory=list)  # List of key mapper seeds for each decoder
+    multi_decoder_pixel_counts: List[int] = field(default_factory=list)  # List of pixel counts for each decoder
+    multi_decoder_pixel_seeds: List[int] = field(default_factory=list)  # List of pixel seeds for each decoder
+    
     # Visualization options
     enable_visualization: bool = False  # Master switch for all visualizations
     save_comparisons: bool = False  # Whether to save comparison visualizations

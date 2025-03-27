@@ -155,12 +155,41 @@ def parse_args():
     parser.add_argument("--disable_all_neg_samples", action="store_true", default=False,
                         help="Disable all negative sample evaluations (overrides individual settings)")
     
+    # Multi-decoder mode options
+    parser.add_argument("--enable_multi_decoder", action="store_true", default=False,
+                        help="Enable multi-decoder mode for evaluation")
+    parser.add_argument("--multi_decoder_checkpoints", type=str, default=None,
+                        help="Comma-separated list of checkpoint paths for multi-decoder mode")
+    parser.add_argument("--multi_decoder_key_lengths", type=str, default=None,
+                        help="Comma-separated list of key lengths for each decoder")
+    parser.add_argument("--multi_decoder_key_mapper_seeds", type=str, default=None,
+                        help="Comma-separated list of key mapper seeds for each decoder")
+    parser.add_argument("--multi_decoder_pixel_counts", type=str, default=None,
+                        help="Comma-separated list of pixel counts for each decoder")
+    parser.add_argument("--multi_decoder_pixel_seeds", type=str, default=None,
+                        help="Comma-separated list of pixel seeds for each decoder")
+    
     # Parse args and handle boolean flags properly
     args = parser.parse_args()
     
     # Handle disable flag
     if args.disable_all_neg_samples:
         args.evaluate_neg_samples = False
+    
+    # Handle multi-decoder mode arguments
+    if args.enable_multi_decoder:
+        if not args.multi_decoder_checkpoints:
+            raise ValueError("Multi-decoder mode requires --multi_decoder_checkpoints")
+        args.multi_decoder_checkpoints = args.multi_decoder_checkpoints.split(',')
+        
+        if args.multi_decoder_key_lengths:
+            args.multi_decoder_key_lengths = [int(x) for x in args.multi_decoder_key_lengths.split(',')]
+        if args.multi_decoder_key_mapper_seeds:
+            args.multi_decoder_key_mapper_seeds = [int(x) for x in args.multi_decoder_key_mapper_seeds.split(',')]
+        if args.multi_decoder_pixel_counts:
+            args.multi_decoder_pixel_counts = [int(x) for x in args.multi_decoder_pixel_counts.split(',')]
+        if args.multi_decoder_pixel_seeds:
+            args.multi_decoder_pixel_seeds = [int(x) for x in args.multi_decoder_pixel_seeds.split(',')]
     
     return args
 

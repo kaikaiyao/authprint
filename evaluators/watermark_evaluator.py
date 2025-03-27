@@ -72,13 +72,41 @@ class WatermarkEvaluator:
         if self.direct_feature_decoder and self.rank == 0:
             logging.info(f"Using direct feature decoder mode: decoder takes pixel features directly as input")
         
+        # Multi-decoder mode setup
+        self.enable_multi_decoder = getattr(self.config.evaluate, 'enable_multi_decoder', False)
+        if self.enable_multi_decoder:
+            if self.rank == 0:
+                logging.info("Multi-decoder mode enabled")
+            self.decoders = []
+            self.key_mappers = []
+            self.image_pixel_indices_list = []
+            self.key_lengths = self.config.evaluate.multi_decoder_key_lengths
+            self.key_mapper_seeds = self.config.evaluate.multi_decoder_key_mapper_seeds
+            self.pixel_counts = self.config.evaluate.multi_decoder_pixel_counts
+            self.pixel_seeds = self.config.evaluate.multi_decoder_pixel_seeds
+            
+            # Validate configurations
+            if not self.config.evaluate.multi_decoder_checkpoints:
+                raise ValueError("Multi-decoder mode requires checkpoint paths")
+            
+            num_decoders = len(self.config.evaluate.multi_decoder_checkpoints)
+            if self.key_lengths and len(self.key_lengths) != num_decoders:
+                raise ValueError(f"Number of key lengths ({len(self.key_lengths)}) must match number of checkpoints ({num_decoders})")
+            if self.key_mapper_seeds and len(self.key_mapper_seeds) != num_decoders:
+                raise ValueError(f"Number of key mapper seeds ({len(self.key_mapper_seeds)}) must match number of checkpoints ({num_decoders})")
+            if self.pixel_counts and len(self.pixel_counts) != num_decoders:
+                raise ValueError(f"Number of pixel counts ({len(self.pixel_counts)}) must match number of checkpoints ({num_decoders})")
+            if self.pixel_seeds and len(self.pixel_seeds) != num_decoders:
+                raise ValueError(f"Number of pixel seeds ({len(self.pixel_seeds)}) must match number of checkpoints ({num_decoders})")
+        
         if self.use_image_pixels:
             # For image-based approach
-            self.image_pixel_indices = None
-            self.image_pixel_count = self.config.model.image_pixel_count
-            self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
-            if self.rank == 0:
-                logging.info(f"Using image-based approach with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
+            if not self.enable_multi_decoder:
+                self.image_pixel_indices = None
+                self.image_pixel_count = self.config.model.image_pixel_count
+                self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
+                if self.rank == 0:
+                    logging.info(f"Using image-based approach with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
         else:
             # For latent-based approach
             self.latent_indices = None
@@ -150,12 +178,13 @@ class WatermarkEvaluator:
             # Add detailed logging of the actual indices
             logging.info(f"Selected pixel indices: {self.image_pixel_indices.tolist()}")
 
-    def extract_image_partial(self, images: torch.Tensor) -> torch.Tensor:
+    def extract_image_partial(self, images: torch.Tensor, pixel_indices: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Extract partial image using selected pixel indices.
         
         Args:
             images (torch.Tensor): Batch of images [batch_size, channels, height, width]
+            pixel_indices (torch.Tensor, optional): Indices of pixels to extract. If None, uses self.image_pixel_indices
             
         Returns:
             torch.Tensor: Batch of flattened pixel values at selected indices
@@ -165,8 +194,11 @@ class WatermarkEvaluator:
         # Flatten the spatial dimensions using a view operation (more efficient than reshape)
         flattened = images.view(batch_size, -1)
         
+        # Use provided indices or fall back to self.image_pixel_indices
+        indices = pixel_indices if pixel_indices is not None else self.image_pixel_indices
+        
         # Get values at selected indices: [batch_size, pixel_count] using index_select or direct indexing
-        image_partial = flattened.index_select(1, self.image_pixel_indices)
+        image_partial = flattened.index_select(1, indices)
         
         return image_partial
     
@@ -217,7 +249,7 @@ class WatermarkEvaluator:
             self._generate_latent_indices(self.latent_dim)
         
         # Generate pixel indices if using image-based approach
-        if self.use_image_pixels:
+        if self.use_image_pixels and not self.enable_multi_decoder:
             self._generate_pixel_indices()
         
         # Clone it to create watermarked model - this avoids loading twice
@@ -227,67 +259,147 @@ class WatermarkEvaluator:
         self.watermarked_model.to(self.device)
         self.watermarked_model.eval()
         
-        # Initialize appropriate decoder model based on mode
-        if self.direct_feature_decoder:
-            # Use FeatureDecoder that takes pixel features directly
-            if not self.use_image_pixels:
-                if self.rank == 0:
-                    logging.warning("direct_feature_decoder is enabled but use_image_pixels is False. "
-                                   "This configuration is not supported and may cause errors.")
-            
-            input_dim = self.image_pixel_count  # Number of selected pixels
+        if self.enable_multi_decoder:
+            # Setup multiple decoders and key mappers
+            checkpoints = self.config.evaluate.multi_decoder_checkpoints
             if self.rank == 0:
-                logging.info(f"Initializing enhanced FeatureDecoder with input_dim={input_dim}, output_dim={self.config.model.key_length}")
+                logging.info(f"Setting up {len(checkpoints)} decoders and key mappers...")
             
-            self.decoder = FeatureDecoder(
+            for i, checkpoint_path in enumerate(checkpoints):
+                # Get configuration for this decoder
+                key_length = self.key_lengths[i] if self.key_lengths else self.config.model.key_length
+                key_mapper_seed = self.key_mapper_seeds[i] if self.key_mapper_seeds else self.config.model.key_mapper_seed
+                pixel_count = self.pixel_counts[i] if self.pixel_counts else self.config.model.image_pixel_count
+                pixel_seed = self.pixel_seeds[i] if self.pixel_seeds else self.config.model.image_pixel_set_seed
+                
+                if self.rank == 0:
+                    logging.info(f"\nSetting up decoder {i+1}/{len(checkpoints)}:")
+                    logging.info(f"  Checkpoint: {checkpoint_path}")
+                    logging.info(f"  Key length: {key_length}")
+                    logging.info(f"  Key mapper seed: {key_mapper_seed}")
+                    logging.info(f"  Pixel count: {pixel_count}")
+                    logging.info(f"  Pixel seed: {pixel_seed}")
+                
+                # Generate pixel indices for this decoder
+                if self.use_image_pixels:
+                    np.random.seed(pixel_seed)
+                    img_size = self.config.model.img_size
+                    channels = 3
+                    total_pixels = channels * img_size * img_size
+                    
+                    if pixel_count > total_pixels:
+                        if self.rank == 0:
+                            logging.warning(f"Requested {pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
+                        pixel_count = total_pixels
+                        indices = np.arange(total_pixels)
+                    else:
+                        indices = np.random.choice(total_pixels, size=pixel_count, replace=False)
+                    
+                    # Convert to torch tensor and move to device
+                    pixel_indices = torch.tensor(indices, dtype=torch.long, device=self.device)
+                    self.image_pixel_indices_list.append(pixel_indices)
+                
+                # Initialize decoder
+                if self.direct_feature_decoder:
+                    input_dim = pixel_count if self.use_image_pixels else len(self.latent_indices)
+                    decoder = FeatureDecoder(
+                        input_dim=input_dim,
+                        output_dim=key_length,
+                        hidden_dims=self.config.decoder.hidden_dims,
+                        activation=self.config.decoder.activation,
+                        dropout_rate=self.config.decoder.dropout_rate,
+                        num_residual_blocks=self.config.decoder.num_residual_blocks,
+                        use_spectral_norm=self.config.decoder.use_spectral_norm,
+                        use_layer_norm=self.config.decoder.use_layer_norm,
+                        use_attention=self.config.decoder.use_attention
+                    ).to(self.device)
+                else:
+                    decoder = Decoder(
+                        image_size=self.config.model.img_size,
+                        channels=3,
+                        output_dim=key_length
+                    ).to(self.device)
+                decoder.eval()
+                
+                # Initialize key mapper
+                input_dim = pixel_count if self.use_image_pixels else len(self.latent_indices)
+                key_mapper = KeyMapper(
+                    input_dim=input_dim,
+                    output_dim=key_length,
+                    seed=key_mapper_seed,
+                    use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
+                    sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
+                ).to(self.device)
+                key_mapper.eval()
+                
+                # Load checkpoint for this decoder
+                if self.rank == 0:
+                    logging.info(f"Loading checkpoint from {checkpoint_path}...")
+                load_checkpoint(
+                    checkpoint_path=checkpoint_path,
+                    watermarked_model=self.watermarked_model if i == 0 else None,  # Only load watermarked model from first checkpoint
+                    decoder=decoder,
+                    key_mapper=None,  # Set to None to skip loading key mapper state
+                    device=self.device
+                )
+                
+                self.decoders.append(decoder)
+                self.key_mappers.append(key_mapper)
+        else:
+            # Standard single decoder setup
+            if self.direct_feature_decoder:
+                input_dim = self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)
+                if self.rank == 0:
+                    logging.info(f"Initializing enhanced FeatureDecoder with input_dim={input_dim}, output_dim={self.config.model.key_length}")
+                
+                self.decoder = FeatureDecoder(
+                    input_dim=input_dim,
+                    output_dim=self.config.model.key_length,
+                    hidden_dims=self.config.decoder.hidden_dims,
+                    activation=self.config.decoder.activation,
+                    dropout_rate=self.config.decoder.dropout_rate,
+                    num_residual_blocks=self.config.decoder.num_residual_blocks,
+                    use_spectral_norm=self.config.decoder.use_spectral_norm,
+                    use_layer_norm=self.config.decoder.use_layer_norm,
+                    use_attention=self.config.decoder.use_attention
+                ).to(self.device)
+            else:
+                self.decoder = Decoder(
+                    image_size=self.config.model.img_size,
+                    channels=3,
+                    output_dim=self.config.model.key_length
+                ).to(self.device)
+            self.decoder.eval()
+            
+            # Initialize key mapper with specified seed
+            if self.rank == 0:
+                logging.info(f"Initializing key mapper with seed {self.config.model.key_mapper_seed}")
+            
+            # Determine key mapper input dimension based on approach
+            if self.use_image_pixels:
+                input_dim = self.image_pixel_count
+            else:
+                input_dim = len(self.latent_indices)
+            
+            self.key_mapper = KeyMapper(
                 input_dim=input_dim,
                 output_dim=self.config.model.key_length,
-                hidden_dims=self.config.decoder.hidden_dims,
-                activation=self.config.decoder.activation,
-                dropout_rate=self.config.decoder.dropout_rate,
-                num_residual_blocks=self.config.decoder.num_residual_blocks,
-                use_spectral_norm=self.config.decoder.use_spectral_norm,
-                use_layer_norm=self.config.decoder.use_layer_norm,
-                use_attention=self.config.decoder.use_attention
+                seed=self.config.model.key_mapper_seed,
+                use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
+                sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
             ).to(self.device)
-        else:
-            # Use standard image-based Decoder
-            self.decoder = Decoder(
-                image_size=self.config.model.img_size,
-                channels=3,
-                output_dim=self.config.model.key_length
-            ).to(self.device)
-        self.decoder.eval()
-        
-        # Initialize key mapper with specified seed
-        if self.rank == 0:
-            logging.info(f"Initializing key mapper with seed {self.config.model.key_mapper_seed}")
-        
-        # Determine key mapper input dimension based on approach
-        if self.use_image_pixels:
-            input_dim = self.image_pixel_count
-        else:
-            input_dim = len(self.latent_indices)
-        
-        self.key_mapper = KeyMapper(
-            input_dim=input_dim,
-            output_dim=self.config.model.key_length,
-            seed=self.config.model.key_mapper_seed,
-            use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
-            sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
-        ).to(self.device)
-        self.key_mapper.eval()
-        
-        # Load checkpoint (excluding key mapper) - do this before setting up quantized models
-        if self.rank == 0:
-            logging.info(f"Loading checkpoint from {self.config.checkpoint_path}...")
-        load_checkpoint(
-            checkpoint_path=self.config.checkpoint_path,
-            watermarked_model=self.watermarked_model,
-            decoder=self.decoder,
-            key_mapper=None,  # Set to None to skip loading key mapper state
-            device=self.device
-        )
+            self.key_mapper.eval()
+            
+            # Load checkpoint (excluding key mapper) - do this before setting up quantized models
+            if self.rank == 0:
+                logging.info(f"Loading checkpoint from {self.config.checkpoint_path}...")
+            load_checkpoint(
+                checkpoint_path=self.config.checkpoint_path,
+                watermarked_model=self.watermarked_model,
+                decoder=self.decoder,
+                key_mapper=None,  # Set to None to skip loading key mapper state
+                device=self.device
+            )
         
         # Initialize LPIPS loss with the same network as in training
         self.lpips_loss_fn = lpips.LPIPS(net='alex').to(self.device)
@@ -406,52 +518,95 @@ class WatermarkEvaluator:
                 save_comparisons = getattr(self.config.evaluate, 'save_comparisons', False)
                 diff_images = (x_water - x_orig) if save_comparisons else None
                 
-                # Extract features based on approach
-                if self.use_image_pixels:
-                    features_water = self.extract_image_partial(x_water)
-                    features_orig = self.extract_image_partial(x_orig)
+                if self.enable_multi_decoder:
+                    # Process with multiple decoders
+                    watermarked_mse_distances_all = []
+                    original_mse_distances_all = []
+                    
+                    for i, (decoder, key_mapper) in enumerate(zip(self.decoders, self.key_mappers)):
+                        # Extract features based on approach
+                        if self.use_image_pixels:
+                            pixel_indices = self.image_pixel_indices_list[i]
+                            features_water = self.extract_image_partial(x_water, pixel_indices)
+                            features_orig = self.extract_image_partial(x_orig, pixel_indices)
+                        else:
+                            if w_water.ndim == 3:
+                                w_water_single = w_water[:, 0, :]
+                                w_orig_single = w_orig[:, 0, :]
+                            else:
+                                w_water_single = w_water
+                                w_orig_single = w_orig
+                            
+                            features_water = w_water_single.index_select(1, self.latent_indices)
+                            features_orig = w_orig_single.index_select(1, self.latent_indices)
+                        
+                        # Generate true key and predictions
+                        true_key = key_mapper(features_water)
+                        
+                        if self.direct_feature_decoder:
+                            pred_key_water_logits = decoder(features_water)
+                            pred_key_orig_logits = decoder(features_orig)
+                        else:
+                            pred_key_water_logits = decoder(x_water)
+                            pred_key_orig_logits = decoder(x_orig)
+                        
+                        # Convert to probabilities
+                        pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
+                        pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
+                        
+                        # Calculate metrics
+                        watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
+                        original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
+                        
+                        watermarked_mse_distances_all.append(watermarked_mse_distance)
+                        original_mse_distances_all.append(original_mse_distance)
+                    
+                    # Stack all distances and take max along decoder dimension
+                    watermarked_mse_distances = torch.stack(watermarked_mse_distances_all, dim=1)
+                    original_mse_distances = torch.stack(original_mse_distances_all, dim=1)
+                    
+                    watermarked_mse_distance = torch.max(watermarked_mse_distances, dim=1)[0]
+                    original_mse_distance = torch.max(original_mse_distances, dim=1)[0]
+                    
                 else:
-                    if w_water.ndim == 3:
-                        w_water_single = w_water[:, 0, :]
-                        w_orig_single = w_orig[:, 0, :]
+                    # Standard single decoder processing
+                    if self.use_image_pixels:
+                        features_water = self.extract_image_partial(x_water)
+                        features_orig = self.extract_image_partial(x_orig)
                     else:
-                        w_water_single = w_water
-                        w_orig_single = w_orig
+                        if w_water.ndim == 3:
+                            w_water_single = w_water[:, 0, :]
+                            w_orig_single = w_orig[:, 0, :]
+                        else:
+                            w_water_single = w_water
+                            w_orig_single = w_orig
+                        
+                        features_water = w_water_single.index_select(1, self.latent_indices)
+                        features_orig = w_orig_single.index_select(1, self.latent_indices)
                     
-                    if isinstance(self.latent_indices, np.ndarray):
-                        latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
-                        self.latent_indices = latent_indices
+                    # Generate true key and predictions
+                    true_key = self.key_mapper(features_water)
+                    
+                    if self.direct_feature_decoder:
+                        pred_key_water_logits = self.decoder(features_water)
+                        pred_key_orig_logits = self.decoder(features_orig)
                     else:
-                        latent_indices = self.latent_indices
+                        pred_key_water_logits = self.decoder(x_water)
+                        pred_key_orig_logits = self.decoder(x_orig)
                     
-                    features_water = w_water_single.index_select(1, self.latent_indices)
-                    features_orig = w_orig_single.index_select(1, self.latent_indices)
+                    # Convert to probabilities
+                    pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
+                    pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
+                    
+                    # Calculate metrics
+                    watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
+                    original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
                 
                 if self.rank == 0 and self.enable_timing:
-                    logging.info(f"Feature extraction completed in {time.time() - feat_start:.2f}s")
-                    key_start = time.time()
-                
-                # Generate true key and predictions
-                true_key = self.key_mapper(features_water)
-                
-                if self.direct_feature_decoder:
-                    pred_key_water_logits = self.decoder(features_water)
-                    pred_key_orig_logits = self.decoder(features_orig)
-                else:
-                    pred_key_water_logits = self.decoder(x_water)
-                    pred_key_orig_logits = self.decoder(x_orig)
-                
-                if self.rank == 0 and self.enable_timing:
-                    logging.info(f"Key generation and prediction completed in {time.time() - key_start:.2f}s")
+                    logging.info(f"Feature extraction and key prediction completed in {time.time() - feat_start:.2f}s")
                     metric_start = time.time()
                 
-                # Convert to probabilities
-                pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
-                pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
-                
-                # Calculate metrics
-                watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
-                original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
+                # Calculate LPIPS loss
                 lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze()
                 
                 if self.rank == 0 and self.enable_timing:

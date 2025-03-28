@@ -12,6 +12,7 @@ plt.rcParams['text.usetex'] = False
 
 # Data
 pixel_numbers = [1, 8, 32, 128]
+x_positions = np.arange(len(pixel_numbers))  # Create evenly spaced positions
 
 # Group cases by category
 training_cases = ['1K Train Data', '30K Train Data', 'BCR Augmentation', 'No Augmentation']
@@ -21,7 +22,7 @@ other_cases = ['Original Model', 'Truncation', 'Downsampling']
 # Define markers for each group
 training_markers = ['o', 's', '^', 'D']  # circle, square, triangle, diamond
 quantization_markers = ['o', 's', '^']    # circle, square, triangle
-other_markers = ['*', 'p', 'h']           # star, pentagon, hexagon
+other_markers = ['o', 'o', 'o']           # all circles for other cases
 
 # FPR@95%TPR values for each case (in order of pixel_numbers)
 values = {
@@ -45,30 +46,29 @@ training_color = '#2ecc71'    # green
 quantization_color = '#e74c3c' # red
 other_colors = ['#3498db', '#9b59b6', '#f1c40f']  # blue, purple, yellow
 
+# Plot other cases first (to appear at top of legend)
+for case, marker, color in zip(other_cases, other_markers, other_colors):
+    plt.plot(x_positions, values[case], marker=marker, linewidth=1.0, 
+             markersize=4, label=case, color=color, markerfacecolor=color)
+
 # Plot training cases
 for case, marker in zip(training_cases, training_markers):
-    plt.plot(pixel_numbers, values[case], marker=marker, linewidth=1.5, 
-             markersize=6, label=case, color=training_color, markerfacecolor=training_color)
+    plt.plot(x_positions, values[case], marker=marker, linewidth=1.0, 
+             markersize=4, label=case, color=training_color, markerfacecolor=training_color)
 
 # Plot quantization cases
 for case, marker in zip(quantization_cases, quantization_markers):
-    plt.plot(pixel_numbers, values[case], marker=marker, linewidth=1.5, 
-             markersize=6, label=case, color=quantization_color, markerfacecolor=quantization_color)
-
-# Plot other cases
-for case, marker, color in zip(other_cases, other_markers, other_colors):
-    plt.plot(pixel_numbers, values[case], marker=marker, linewidth=1.5, 
-             markersize=6, label=case, color=color, markerfacecolor=color)
+    plt.plot(x_positions, values[case], marker=marker, linewidth=1.0, 
+             markersize=4, label=case, color=quantization_color, markerfacecolor=quantization_color)
 
 # Customize the plot
-plt.xscale('log', base=2)  # Use log scale for x-axis
 plt.grid(True, which="both", ls="-", alpha=0.2)
-plt.xlabel('Number of Pixels (log scale)', fontsize=10)
+plt.xlabel('Number of Pixels', fontsize=10)
 plt.ylabel('FPR@95%TPR', fontsize=10)
 plt.title('FPR@95%TPR vs. Number of Pixels\n(Key Length = 128)', fontsize=11, pad=10)
 
 # Customize ticks
-plt.xticks(pixel_numbers, labels=pixel_numbers, fontsize=9)
+plt.xticks(x_positions, labels=pixel_numbers, fontsize=9)
 plt.yticks(fontsize=9)
 
 # Add legend inside the plot with smaller font

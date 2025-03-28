@@ -118,7 +118,7 @@ class WatermarkTrainer:
     def compute_zca_parameters(self) -> None:
         """
         Compute ZCA whitening parameters using batches of generated images.
-        This is done once at the start of training.
+        This is done once at the start of training using memory-efficient computation.
         """
         if not self.use_zca_whitening:
             return
@@ -130,14 +130,14 @@ class WatermarkTrainer:
         synthesis_batch_size = 16  # Small enough to avoid memory issues
         num_batches = (self.zca_batch_size + synthesis_batch_size - 1) // synthesis_batch_size
         
-        # Initialize accumulators
+        # First pass: compute mean
         sum_x = None
-        sum_xx = None
         total_samples = 0
         
         with torch.no_grad():
             latent_dim = self.gan_model.z_dim
             
+            # First pass to compute mean
             for batch_idx in range(num_batches):
                 current_batch_size = min(synthesis_batch_size, 
                                       self.zca_batch_size - batch_idx * synthesis_batch_size)
@@ -159,37 +159,82 @@ class WatermarkTrainer:
                 # Reshape images to 2D matrix
                 x_flat = x.view(x.size(0), -1)
                 
-                # Accumulate statistics
+                # Initialize or accumulate mean
                 if sum_x is None:
                     sum_x = torch.zeros(x_flat.size(1), device=self.device)
-                    sum_xx = torch.zeros(x_flat.size(1), x_flat.size(1), device=self.device)
                 
                 sum_x += x_flat.sum(dim=0)
-                sum_xx += torch.mm(x_flat.t(), x_flat)
                 total_samples += current_batch_size
                 
                 if self.rank == 0 and batch_idx % 10 == 0:
-                    logging.info(f"Processed batch {batch_idx + 1}/{num_batches} for ZCA statistics")
+                    logging.info(f"Computing mean: batch {batch_idx + 1}/{num_batches}")
             
             # Compute mean
             self.zca_mean = (sum_x / total_samples).unsqueeze(0)
             
-            # Compute covariance matrix
-            cov = sum_xx / total_samples - torch.mm(self.zca_mean.t(), self.zca_mean)
+            # Free memory
+            del sum_x
+            torch.cuda.empty_cache()
             
-            # Add small diagonal term for numerical stability
-            cov += self.zca_eps * torch.eye(cov.size(0), device=self.device)
+            if self.rank == 0:
+                logging.info("Mean computation completed. Starting PCA...")
+            
+            # Perform PCA for dimensionality reduction
+            max_components = min(4096, x_flat.size(1))  # Limit number of components
+            
+            # Initialize matrix for PCA
+            X_centered_chunks = []
+            max_chunk_size = 64  # Process in smaller chunks
+            
+            for batch_idx in range(num_batches):
+                current_batch_size = min(synthesis_batch_size, 
+                                      self.zca_batch_size - batch_idx * synthesis_batch_size)
+                
+                if current_batch_size <= 0:
+                    break
+                
+                z = torch.randn(current_batch_size, latent_dim, device=self.device)
+                
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z, None)
+                    x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z, None)
+                    x = self.watermarked_model.synthesis(w, noise_mode="const")
+                
+                x_flat = x.view(x.size(0), -1)
+                x_centered = x_flat - self.zca_mean
+                
+                # Process in chunks to save memory
+                for i in range(0, x_centered.size(0), max_chunk_size):
+                    chunk = x_centered[i:i + max_chunk_size]
+                    X_centered_chunks.append(chunk)
+                
+                if self.rank == 0 and batch_idx % 10 == 0:
+                    logging.info(f"Collecting data for PCA: batch {batch_idx + 1}/{num_batches}")
+            
+            # Concatenate all chunks
+            X_centered = torch.cat(X_centered_chunks, dim=0)
+            
+            if self.rank == 0:
+                logging.info(f"Computing SVD for dimensionality reduction to {max_components} components...")
             
             try:
-                # Compute SVD with higher precision
-                U, S, _ = torch.svd(cov.to(torch.float64))
+                # Compute SVD for PCA
+                U, S, _ = torch.svd(X_centered, some=True)
                 
-                # Convert back to original precision and compute transformation matrix
-                U = U.to(cov.dtype)
-                S = S.to(cov.dtype)
+                # Keep only top components
+                U = U[:, :max_components]
+                S = S[:max_components]
                 
-                # Compute ZCA transformation matrix
-                self.zca_transform = torch.mm(torch.mm(U, torch.diag(S.pow(-0.5))), U.t())
+                # Compute transformation matrix
+                self.zca_transform = torch.mm(
+                    U,
+                    torch.mm(
+                        torch.diag(torch.where(S > self.zca_eps, S.pow(-0.5), torch.zeros_like(S))),
+                        U.t()
+                    )
+                )
                 
                 if self.rank == 0:
                     logging.info("ZCA whitening parameters computed successfully")
@@ -198,13 +243,18 @@ class WatermarkTrainer:
                 logging.error(f"SVD computation failed: {str(e)}")
                 logging.warning("Falling back to simpler whitening approach")
                 
-                # Fallback to simpler whitening approach
-                D = torch.diagonal(cov)
-                D_inv_sqrt = torch.where(D > self.zca_eps, D.pow(-0.5), torch.zeros_like(D))
-                self.zca_transform = torch.diag(D_inv_sqrt)
+                # Fallback to simpler whitening approach using diagonal approximation
+                var = torch.var(X_centered, dim=0)
+                self.zca_transform = torch.diag(
+                    torch.where(var > self.zca_eps, var.pow(-0.5), torch.zeros_like(var))
+                )
                 
                 if self.rank == 0:
                     logging.info("Using fallback whitening approach")
+            
+            # Clean up
+            del X_centered, X_centered_chunks
+            torch.cuda.empty_cache()
     
     def apply_zca_whitening(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -219,16 +269,29 @@ class WatermarkTrainer:
         if not self.use_zca_whitening or self.zca_transform is None:
             return x
             
-        # Reshape to 2D matrix
-        x_shape = x.shape
-        x_flat = x.view(x.size(0), -1)
+        # Process in chunks to save memory
+        batch_size = x.size(0)
+        chunk_size = 16  # Process 16 images at a time
+        x_whitened_chunks = []
         
-        # Center and whiten
-        x_centered = x_flat - self.zca_mean
-        x_whitened = torch.mm(x_centered, self.zca_transform)
+        for i in range(0, batch_size, chunk_size):
+            # Get chunk
+            x_chunk = x[i:i + chunk_size]
+            
+            # Reshape to 2D matrix
+            x_shape = x_chunk.shape
+            x_flat = x_chunk.view(x_chunk.size(0), -1)
+            
+            # Center and whiten
+            x_centered = x_flat - self.zca_mean
+            x_whitened = torch.mm(x_centered, self.zca_transform)
+            
+            # Reshape back to image format
+            x_whitened = x_whitened.view(x_shape)
+            x_whitened_chunks.append(x_whitened)
         
-        # Reshape back to image format
-        return x_whitened.view(x_shape)
+        # Concatenate chunks
+        return torch.cat(x_whitened_chunks, dim=0)
     
     def setup_models(self) -> None:
         """

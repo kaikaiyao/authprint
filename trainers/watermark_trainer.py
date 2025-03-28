@@ -182,14 +182,10 @@ class WatermarkTrainer:
             torch.cuda.empty_cache()
             
             if self.rank == 0:
-                logging.info("Mean computation completed. Starting PCA...")
+                logging.info("Mean computation completed. Starting variance computation...")
             
-            # Perform PCA for dimensionality reduction
-            max_components = min(4096, input_dim)  # Limit number of components
-            
-            # Initialize matrix for PCA
-            X_centered_chunks = []
-            max_chunk_size = 64  # Process in smaller chunks
+            # Second pass: compute variance for diagonal whitening
+            sum_var = torch.zeros(input_dim, device=self.device)
             
             for batch_idx in range(num_batches):
                 current_batch_size = min(synthesis_batch_size, 
@@ -210,59 +206,28 @@ class WatermarkTrainer:
                 x_flat = x.view(x.size(0), -1)
                 x_centered = x_flat - self.zca_mean
                 
-                # Process in chunks to save memory
-                for i in range(0, x_centered.size(0), max_chunk_size):
-                    chunk = x_centered[i:i + max_chunk_size]
-                    X_centered_chunks.append(chunk)
+                # Accumulate variance
+                sum_var += torch.sum(x_centered ** 2, dim=0)
                 
                 if self.rank == 0 and batch_idx % 10 == 0:
-                    logging.info(f"Collecting data for PCA: batch {batch_idx + 1}/{num_batches}")
+                    logging.info(f"Computing variance: batch {batch_idx + 1}/{num_batches}")
             
-            # Concatenate all chunks
-            X_centered = torch.cat(X_centered_chunks, dim=0)
+            # Compute variance and create diagonal whitening matrix
+            var = sum_var / total_samples
+            
+            # Add epsilon for numerical stability
+            var += self.zca_eps
+            
+            # Store the whitening factors (sqrt of inverse variance)
+            self.whitening_factors = torch.where(var > self.zca_eps,
+                                               var.pow(-0.5),
+                                               torch.zeros_like(var))
             
             if self.rank == 0:
-                logging.info(f"Computing SVD for dimensionality reduction to {max_components} components...")
-            
-            try:
-                # Compute covariance matrix
-                cov = torch.mm(X_centered.t(), X_centered) / X_centered.size(0)
-                
-                # Add small diagonal term for numerical stability
-                cov.diagonal().add_(self.zca_eps)
-                
-                # Compute eigendecomposition
-                eigenvalues, eigenvectors = torch.linalg.eigh(cov)
-                
-                # Sort eigenvalues in descending order
-                sorted_indices = torch.argsort(eigenvalues, descending=True)
-                eigenvalues = eigenvalues[sorted_indices]
-                eigenvectors = eigenvectors[:, sorted_indices]
-                
-                # Keep only top components
-                self.zca_components = eigenvectors[:, :max_components]
-                self.zca_singular_values = eigenvalues[:max_components]
-                
-                if self.rank == 0:
-                    logging.info("ZCA whitening parameters computed successfully")
-                    
-            except RuntimeError as e:
-                logging.error(f"SVD computation failed: {str(e)}")
-                logging.warning("Falling back to simpler whitening approach")
-                
-                # Fallback to simpler whitening approach using diagonal approximation
-                var = torch.var(X_centered, dim=0)
-                self.zca_transform = torch.diag(
-                    torch.where(var > self.zca_eps, var.pow(-0.5), torch.zeros_like(var))
-                )
-                self.zca_components = None
-                self.zca_singular_values = None
-                
-                if self.rank == 0:
-                    logging.info("Using fallback whitening approach")
+                logging.info("Whitening parameters computed successfully")
             
             # Clean up
-            del X_centered, X_centered_chunks
+            del var, sum_var
             torch.cuda.empty_cache()
     
     def apply_zca_whitening(self, x: torch.Tensor) -> torch.Tensor:
@@ -294,16 +259,8 @@ class WatermarkTrainer:
             # Center the data
             x_centered = x_flat - self.zca_mean
             
-            if self.zca_components is not None:
-                # Project onto principal components
-                x_projected = torch.mm(x_centered, self.zca_components)
-                
-                # Apply whitening transformation and project back
-                x_whitened = torch.mm(x_projected * (self.zca_singular_values + self.zca_eps).pow(-0.5), 
-                                    self.zca_components.t())
-            else:
-                # Use diagonal whitening (fallback approach)
-                x_whitened = torch.mm(x_centered, self.zca_transform)
+            # Apply diagonal whitening
+            x_whitened = x_centered * self.whitening_factors
             
             # Reshape back to image format
             x_whitened = x_whitened.view(x_shape)

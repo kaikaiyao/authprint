@@ -89,7 +89,7 @@ spec:
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"
 
               # --use_image_pixels 
-              # --image_pixel_count 98304
+              # --image_pixel_count 8192
               # --image_pixel_set_seed 2025
 
               # --w_partial_length 256

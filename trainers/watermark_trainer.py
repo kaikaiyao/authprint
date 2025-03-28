@@ -133,6 +133,7 @@ class WatermarkTrainer:
         # First pass: compute mean
         sum_x = None
         total_samples = 0
+        input_dim = None
         
         with torch.no_grad():
             latent_dim = self.gan_model.z_dim
@@ -159,9 +160,13 @@ class WatermarkTrainer:
                 # Reshape images to 2D matrix
                 x_flat = x.view(x.size(0), -1)
                 
+                # Store input dimension
+                if input_dim is None:
+                    input_dim = x_flat.size(1)
+                
                 # Initialize or accumulate mean
                 if sum_x is None:
-                    sum_x = torch.zeros(x_flat.size(1), device=self.device)
+                    sum_x = torch.zeros(input_dim, device=self.device)
                 
                 sum_x += x_flat.sum(dim=0)
                 total_samples += current_batch_size
@@ -180,7 +185,7 @@ class WatermarkTrainer:
                 logging.info("Mean computation completed. Starting PCA...")
             
             # Perform PCA for dimensionality reduction
-            max_components = min(4096, x_flat.size(1))  # Limit number of components
+            max_components = min(4096, input_dim)  # Limit number of components
             
             # Initialize matrix for PCA
             X_centered_chunks = []
@@ -220,16 +225,23 @@ class WatermarkTrainer:
                 logging.info(f"Computing SVD for dimensionality reduction to {max_components} components...")
             
             try:
-                # Compute SVD for PCA
-                U, S, _ = torch.svd(X_centered, some=True)
+                # Compute covariance matrix
+                cov = torch.mm(X_centered.t(), X_centered) / X_centered.size(0)
+                
+                # Add small diagonal term for numerical stability
+                cov.diagonal().add_(self.zca_eps)
+                
+                # Compute eigendecomposition
+                eigenvalues, eigenvectors = torch.linalg.eigh(cov)
+                
+                # Sort eigenvalues in descending order
+                sorted_indices = torch.argsort(eigenvalues, descending=True)
+                eigenvalues = eigenvalues[sorted_indices]
+                eigenvectors = eigenvectors[:, sorted_indices]
                 
                 # Keep only top components
-                U = U[:, :max_components]
-                S = S[:max_components]
-                
-                # Store U and S separately for efficient transformation
-                self.zca_components = U
-                self.zca_singular_values = S
+                self.zca_components = eigenvectors[:, :max_components]
+                self.zca_singular_values = eigenvalues[:max_components]
                 
                 if self.rank == 0:
                     logging.info("ZCA whitening parameters computed successfully")
@@ -286,7 +298,7 @@ class WatermarkTrainer:
                 # Project onto principal components
                 x_projected = torch.mm(x_centered, self.zca_components)
                 
-                # Apply whitening transformation
+                # Apply whitening transformation and project back
                 x_whitened = torch.mm(x_projected * (self.zca_singular_values + self.zca_eps).pow(-0.5), 
                                     self.zca_components.t())
             else:

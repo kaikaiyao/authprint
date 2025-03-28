@@ -82,7 +82,7 @@ spec:
                       --key_length 256 \
                       --key_mapper_seed 2025 \
                       --use_image_pixels \
-                      --image_pixel_count 4\
+                      --image_pixel_count 4 \
                       --image_pixel_set_seed 42
               
               exit_status=$?

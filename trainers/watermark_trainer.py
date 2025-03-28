@@ -17,6 +17,7 @@ from models.decoder import Decoder, FeatureDecoder
 from models.key_mapper import KeyMapper
 from models.model_utils import clone_model, load_stylegan2_model
 from utils.checkpoint import save_checkpoint, load_checkpoint
+from utils.mutual_info import estimate_mutual_information
 
 
 class WatermarkTrainer:
@@ -670,6 +671,60 @@ class WatermarkTrainer:
             if self.gan_model is None:
                 self.setup_models()
                 self.validate_indices()
+            
+            # Estimate mutual information if enabled
+            if self.config.model.estimate_mutual_info and self.use_image_pixels:
+                if self.rank == 0:
+                    logging.info("Estimating mutual information between selected pixels and full images...")
+                
+                # Generate samples for MI estimation
+                n_samples = self.config.model.mi_n_samples
+                batch_size = min(16, n_samples)  # Use smaller batches to avoid memory issues
+                features_list = []
+                images_list = []
+                
+                with torch.no_grad():
+                    for i in range(0, n_samples, batch_size):
+                        current_batch_size = min(batch_size, n_samples - i)
+                        # Generate random latents
+                        z = torch.randn(current_batch_size, self.gan_model.z_dim, device=self.device)
+                        
+                        # Generate images
+                        if hasattr(self.watermarked_model, 'module'):
+                            w = self.watermarked_model.module.mapping(z, None)
+                            x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                        else:
+                            w = self.watermarked_model.mapping(z, None)
+                            x = self.watermarked_model.synthesis(w, noise_mode="const")
+                        
+                        # Extract features
+                        features = self.extract_image_partial(x)
+                        
+                        features_list.append(features)
+                        images_list.append(x)
+                        
+                        if self.rank == 0 and i % 100 == 0:
+                            logging.info(f"Generated {i + current_batch_size}/{n_samples} samples for MI estimation")
+                
+                # Concatenate all samples
+                features = torch.cat(features_list, dim=0)
+                images = torch.cat(images_list, dim=0)
+                
+                # Estimate mutual information
+                mutual_info, h_features, h_images = estimate_mutual_information(
+                    features=features,
+                    images=images,
+                    n_samples=n_samples,
+                    k=self.config.model.mi_k_neighbors,
+                    device=self.device
+                )
+                
+                if self.rank == 0:
+                    logging.info(f"Mutual Information Estimation Results:")
+                    logging.info(f"  I(features; images) = {mutual_info:.4f} bits")
+                    logging.info(f"  H(features) = {h_features:.4f} bits")
+                    logging.info(f"  H(images) = {h_images:.4f} bits")
+                    logging.info(f"  Normalized MI = {mutual_info / min(h_features, h_images):.4f}")
             
             start_time = time.time()
             

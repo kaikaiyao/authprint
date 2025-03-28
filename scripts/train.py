@@ -54,6 +54,14 @@ def parse_args():
     parser.add_argument("--direct_feature_decoder", action="store_true", default=False,
                         help="When true and using image pixels with a frozen watermarked model, train decoder directly on pixel features instead of full images")
     
+    # New: Mutual information estimation parameters
+    parser.add_argument("--estimate_mutual_info", action="store_true", default=False,
+                        help="Estimate mutual information between selected pixels and full images at the start of training")
+    parser.add_argument("--mi_n_samples", type=int, default=1000,
+                        help="Number of samples to use for mutual information estimation")
+    parser.add_argument("--mi_k_neighbors", type=int, default=3,
+                        help="Number of nearest neighbors for k-NN entropy estimation")
+    
     # Enhanced FeatureDecoder configuration
     parser.add_argument("--decoder_hidden_dims", type=str, default="1024,2048,1024,512,256",
                         help="Comma-separated list of hidden layer dimensions for FeatureDecoder")

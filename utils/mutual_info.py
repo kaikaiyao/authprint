@@ -45,10 +45,13 @@ def estimate_mutual_information(
     n_samples: int = 1000,
     k: int = 3,
     device: torch.device = 'cpu'
-) -> Tuple[float, float, float]:
+) -> Tuple[float, float, float, float, float]:
     """
-    Estimate mutual information I(features; images) using k-NN entropy estimation.
-    Uses the relation: I(X;Y) = H(X) + H(Y) - H(X,Y)
+    Estimate mutual information I(features; images) and conditional entropy H(features|images)
+    using k-NN entropy estimation.
+    Uses the relations:
+    - I(X;Y) = H(X) + H(Y) - H(X,Y)
+    - H(X|Y) = H(X,Y) - H(Y)
     
     Args:
         features (torch.Tensor): Selected pixel features tensor [n_samples, n_features]
@@ -58,7 +61,8 @@ def estimate_mutual_information(
         device (torch.device): Device to use for computation
         
     Returns:
-        Tuple[float, float, float]: (mutual_info, feature_entropy, image_entropy)
+        Tuple[float, float, float, float, float]: 
+            (mutual_info, h_features, h_images, h_joint, h_features_given_images)
     """
     # Move tensors to CPU for numpy processing
     features = features.detach().cpu().numpy()
@@ -82,4 +86,7 @@ def estimate_mutual_information(
     # Calculate mutual information
     mutual_info = h_features + h_images - h_joint
     
-    return mutual_info, h_features, h_images 
+    # Calculate conditional entropy H(features|images)
+    h_features_given_images = h_joint - h_images
+    
+    return mutual_info, h_features, h_images, h_joint, h_features_given_images 

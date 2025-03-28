@@ -711,7 +711,7 @@ class WatermarkTrainer:
                 images = torch.cat(images_list, dim=0)
                 
                 # Estimate mutual information
-                mutual_info, h_features, h_images = estimate_mutual_information(
+                mutual_info, h_features, h_images, h_joint, h_features_given_images = estimate_mutual_information(
                     features=features,
                     images=images,
                     n_samples=n_samples,
@@ -724,6 +724,8 @@ class WatermarkTrainer:
                     logging.info(f"  I(features; images) = {mutual_info:.4f} bits")
                     logging.info(f"  H(features) = {h_features:.4f} bits")
                     logging.info(f"  H(images) = {h_images:.4f} bits")
+                    logging.info(f"  H(features, images) = {h_joint:.4f} bits")
+                    logging.info(f"  H(features|images) = {h_features_given_images:.4f} bits")
                     logging.info(f"  Normalized MI = {mutual_info / min(h_features, h_images):.4f}")
             
             start_time = time.time()

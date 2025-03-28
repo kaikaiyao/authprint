@@ -227,14 +227,9 @@ class WatermarkTrainer:
                 U = U[:, :max_components]
                 S = S[:max_components]
                 
-                # Compute transformation matrix
-                self.zca_transform = torch.mm(
-                    U,
-                    torch.mm(
-                        torch.diag(torch.where(S > self.zca_eps, S.pow(-0.5), torch.zeros_like(S))),
-                        U.t()
-                    )
-                )
+                # Store U and S separately for efficient transformation
+                self.zca_components = U
+                self.zca_singular_values = S
                 
                 if self.rank == 0:
                     logging.info("ZCA whitening parameters computed successfully")
@@ -248,6 +243,8 @@ class WatermarkTrainer:
                 self.zca_transform = torch.diag(
                     torch.where(var > self.zca_eps, var.pow(-0.5), torch.zeros_like(var))
                 )
+                self.zca_components = None
+                self.zca_singular_values = None
                 
                 if self.rank == 0:
                     logging.info("Using fallback whitening approach")
@@ -266,7 +263,7 @@ class WatermarkTrainer:
         Returns:
             torch.Tensor: Whitened images
         """
-        if not self.use_zca_whitening or self.zca_transform is None:
+        if not self.use_zca_whitening:
             return x
             
         # Process in chunks to save memory
@@ -282,9 +279,19 @@ class WatermarkTrainer:
             x_shape = x_chunk.shape
             x_flat = x_chunk.view(x_chunk.size(0), -1)
             
-            # Center and whiten
+            # Center the data
             x_centered = x_flat - self.zca_mean
-            x_whitened = torch.mm(x_centered, self.zca_transform)
+            
+            if self.zca_components is not None:
+                # Project onto principal components
+                x_projected = torch.mm(x_centered, self.zca_components)
+                
+                # Apply whitening transformation
+                x_whitened = torch.mm(x_projected * (self.zca_singular_values + self.zca_eps).pow(-0.5), 
+                                    self.zca_components.t())
+            else:
+                # Use diagonal whitening (fallback approach)
+                x_whitened = torch.mm(x_centered, self.zca_transform)
             
             # Reshape back to image format
             x_whitened = x_whitened.view(x_shape)

@@ -117,7 +117,7 @@ class WatermarkTrainer:
     
     def compute_zca_parameters(self) -> None:
         """
-        Compute ZCA whitening parameters using a batch of generated images.
+        Compute ZCA whitening parameters using batches of generated images.
         This is done once at the start of training.
         """
         if not self.use_zca_whitening:
@@ -125,38 +125,86 @@ class WatermarkTrainer:
             
         if self.rank == 0:
             logging.info("Computing ZCA whitening parameters...")
-            
+        
+        # Use smaller batch size for synthesis to avoid memory issues
+        synthesis_batch_size = 16  # Small enough to avoid memory issues
+        num_batches = (self.zca_batch_size + synthesis_batch_size - 1) // synthesis_batch_size
+        
+        # Initialize accumulators
+        sum_x = None
+        sum_xx = None
+        total_samples = 0
+        
         with torch.no_grad():
-            # Generate images for computing statistics
             latent_dim = self.gan_model.z_dim
-            z = torch.randn(self.zca_batch_size, latent_dim, device=self.device)
             
-            # Generate images using watermarked model
-            if hasattr(self.watermarked_model, 'module'):
-                w = self.watermarked_model.module.mapping(z, None)
-                x = self.watermarked_model.module.synthesis(w, noise_mode="const")
-            else:
-                w = self.watermarked_model.mapping(z, None)
-                x = self.watermarked_model.synthesis(w, noise_mode="const")
+            for batch_idx in range(num_batches):
+                current_batch_size = min(synthesis_batch_size, 
+                                      self.zca_batch_size - batch_idx * synthesis_batch_size)
+                
+                if current_batch_size <= 0:
+                    break
+                
+                # Generate latent vectors for this batch
+                z = torch.randn(current_batch_size, latent_dim, device=self.device)
+                
+                # Generate images using watermarked model
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z, None)
+                    x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z, None)
+                    x = self.watermarked_model.synthesis(w, noise_mode="const")
+                
+                # Reshape images to 2D matrix
+                x_flat = x.view(x.size(0), -1)
+                
+                # Accumulate statistics
+                if sum_x is None:
+                    sum_x = torch.zeros(x_flat.size(1), device=self.device)
+                    sum_xx = torch.zeros(x_flat.size(1), x_flat.size(1), device=self.device)
+                
+                sum_x += x_flat.sum(dim=0)
+                sum_xx += torch.mm(x_flat.t(), x_flat)
+                total_samples += current_batch_size
+                
+                if self.rank == 0 and batch_idx % 10 == 0:
+                    logging.info(f"Processed batch {batch_idx + 1}/{num_batches} for ZCA statistics")
             
-            # Reshape images to 2D matrix
-            x_flat = x.view(x.size(0), -1)
-            
-            # Compute mean and center the data
-            self.zca_mean = x_flat.mean(dim=0, keepdim=True)
-            x_centered = x_flat - self.zca_mean
+            # Compute mean
+            self.zca_mean = (sum_x / total_samples).unsqueeze(0)
             
             # Compute covariance matrix
-            cov = torch.mm(x_centered.t(), x_centered) / (x_centered.size(0) - 1)
+            cov = sum_xx / total_samples - torch.mm(self.zca_mean.t(), self.zca_mean)
             
-            # Compute SVD
-            U, S, _ = torch.svd(cov + self.zca_eps * torch.eye(cov.size(0), device=self.device))
+            # Add small diagonal term for numerical stability
+            cov += self.zca_eps * torch.eye(cov.size(0), device=self.device)
             
-            # Compute ZCA transformation matrix
-            self.zca_transform = torch.mm(torch.mm(U, torch.diag(S.pow(-0.5))), U.t())
-            
-            if self.rank == 0:
-                logging.info("ZCA whitening parameters computed successfully")
+            try:
+                # Compute SVD with higher precision
+                U, S, _ = torch.svd(cov.to(torch.float64))
+                
+                # Convert back to original precision and compute transformation matrix
+                U = U.to(cov.dtype)
+                S = S.to(cov.dtype)
+                
+                # Compute ZCA transformation matrix
+                self.zca_transform = torch.mm(torch.mm(U, torch.diag(S.pow(-0.5))), U.t())
+                
+                if self.rank == 0:
+                    logging.info("ZCA whitening parameters computed successfully")
+                    
+            except RuntimeError as e:
+                logging.error(f"SVD computation failed: {str(e)}")
+                logging.warning("Falling back to simpler whitening approach")
+                
+                # Fallback to simpler whitening approach
+                D = torch.diagonal(cov)
+                D_inv_sqrt = torch.where(D > self.zca_eps, D.pow(-0.5), torch.zeros_like(D))
+                self.zca_transform = torch.diag(D_inv_sqrt)
+                
+                if self.rank == 0:
+                    logging.info("Using fallback whitening approach")
     
     def apply_zca_whitening(self, x: torch.Tensor) -> torch.Tensor:
         """

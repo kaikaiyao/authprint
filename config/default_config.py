@@ -21,6 +21,11 @@ class ModelConfig:
     key_mapper_use_sine: bool = False  # Whether to use sine-based mapping in KeyMapper (more sensitive to input changes)
     key_mapper_sensitivity: float = 20.0  # Sensitivity parameter for sine-based mapping
     
+    # ZCA whitening configuration
+    use_zca_whitening: bool = False  # Whether to apply ZCA whitening to decoder input
+    zca_eps: float = 1e-5  # Epsilon for numerical stability in ZCA whitening
+    zca_batch_size: int = 1000  # Batch size for computing ZCA statistics
+    
     # Latent-based watermarking configuration
     w_partial_set_seed: int = 42  # Seed for selecting random latent indices
     w_partial_length: int = 32  # Number of dimensions to select from the latent vector

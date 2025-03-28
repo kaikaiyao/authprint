@@ -64,6 +64,13 @@ class WatermarkTrainer:
         self.global_step = 0
         self.start_iteration = 1  # Track starting iteration for resuming
         
+        # ZCA whitening parameters
+        self.use_zca_whitening = getattr(self.config.model, 'use_zca_whitening', False)
+        self.zca_eps = getattr(self.config.model, 'zca_eps', 1e-5)
+        self.zca_batch_size = getattr(self.config.model, 'zca_batch_size', 1000)
+        self.zca_mean = None
+        self.zca_transform = None
+        
         # Flag to control watermarked model freezing
         self.freeze_watermarked_model = getattr(self.config.training, 'freeze_watermarked_model', False)
         if self.freeze_watermarked_model and self.rank == 0:
@@ -107,6 +114,73 @@ class WatermarkTrainer:
                 # Default seed for backward compatibility
                 self.w_partial_set_seed = getattr(self.config.model, 'w_partial_set_seed', 42)
                 logging.info(f"Will generate {self.w_partial_length} latent indices with seed {self.w_partial_set_seed}")
+    
+    def compute_zca_parameters(self) -> None:
+        """
+        Compute ZCA whitening parameters using a batch of generated images.
+        This is done once at the start of training.
+        """
+        if not self.use_zca_whitening:
+            return
+            
+        if self.rank == 0:
+            logging.info("Computing ZCA whitening parameters...")
+            
+        with torch.no_grad():
+            # Generate images for computing statistics
+            latent_dim = self.gan_model.z_dim
+            z = torch.randn(self.zca_batch_size, latent_dim, device=self.device)
+            
+            # Generate images using watermarked model
+            if hasattr(self.watermarked_model, 'module'):
+                w = self.watermarked_model.module.mapping(z, None)
+                x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+            else:
+                w = self.watermarked_model.mapping(z, None)
+                x = self.watermarked_model.synthesis(w, noise_mode="const")
+            
+            # Reshape images to 2D matrix
+            x_flat = x.view(x.size(0), -1)
+            
+            # Compute mean and center the data
+            self.zca_mean = x_flat.mean(dim=0, keepdim=True)
+            x_centered = x_flat - self.zca_mean
+            
+            # Compute covariance matrix
+            cov = torch.mm(x_centered.t(), x_centered) / (x_centered.size(0) - 1)
+            
+            # Compute SVD
+            U, S, _ = torch.svd(cov + self.zca_eps * torch.eye(cov.size(0), device=self.device))
+            
+            # Compute ZCA transformation matrix
+            self.zca_transform = torch.mm(torch.mm(U, torch.diag(S.pow(-0.5))), U.t())
+            
+            if self.rank == 0:
+                logging.info("ZCA whitening parameters computed successfully")
+    
+    def apply_zca_whitening(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply ZCA whitening to input images.
+        
+        Args:
+            x (torch.Tensor): Input images [batch_size, channels, height, width]
+            
+        Returns:
+            torch.Tensor: Whitened images
+        """
+        if not self.use_zca_whitening or self.zca_transform is None:
+            return x
+            
+        # Reshape to 2D matrix
+        x_shape = x.shape
+        x_flat = x.view(x.size(0), -1)
+        
+        # Center and whiten
+        x_centered = x_flat - self.zca_mean
+        x_whitened = torch.mm(x_centered, self.zca_transform)
+        
+        # Reshape back to image format
+        return x_whitened.view(x_shape)
     
     def setup_models(self) -> None:
         """
@@ -226,6 +300,10 @@ class WatermarkTrainer:
             )
             if self.rank == 0:
                 logging.info("Optimizer initialized with both watermarked model and decoder parameters")
+        
+        # After setting up models, compute ZCA parameters if needed
+        if self.use_zca_whitening:
+            self.compute_zca_parameters()
     
     def _generate_pixel_indices(self) -> None:
         """
@@ -328,7 +406,6 @@ class WatermarkTrainer:
         z = torch.randn(self.config.training.batch_size, latent_dim, device=self.device)
         
         # Generate watermarked image
-        # Use torch.no_grad for the watermarked model when it's frozen
         with torch.no_grad() if self.freeze_watermarked_model else torch.enable_grad():
             if hasattr(self.watermarked_model, 'module'):
                 w = self.watermarked_model.module.mapping(z, None)
@@ -342,12 +419,10 @@ class WatermarkTrainer:
             w_orig = self.gan_model.mapping(z, None)
             x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
 
-        # Extract features based on the approach
+        # Extract features based on the approach (using original non-whitened image)
         if self.use_image_pixels:
-            # Extract pixel values from the watermarked image
             features = self.extract_image_partial(x_water)
         else:
-            # Extract latent features from w (original approach)
             if w.ndim == 3:
                 w_single = w[:, 0, :]
             else:
@@ -380,16 +455,19 @@ class WatermarkTrainer:
                     logging.info(f"    Raw activations: {activations[i].tolist()}")
                     logging.info(f"    Binary key:      {binary_keys[i].tolist()}")
         
-        # Generate true key using the key mapper
-        true_key = self.key_mapper(features)  # shape: (batch_size, key_length) with binary values
+        # Generate true key using the key mapper (using original non-whitened features)
+        true_key = self.key_mapper(features)
 
+        # Apply ZCA whitening to decoder input if enabled
+        x_water_decoder = self.apply_zca_whitening(x_water) if self.use_zca_whitening else x_water
+        
         # Predict key based on the decoder mode
         if self.direct_feature_decoder:
             # Use features directly as input to the decoder
             pred_key_logits = self.decoder(features)
         else:
-            # Use the full watermarked image as input
-            pred_key_logits = self.decoder(x_water)
+            # Use the whitened watermarked image as input
+            pred_key_logits = self.decoder(x_water_decoder)
         
         # Get predicted probabilities (before thresholding)
         pred_key_probs = torch.sigmoid(pred_key_logits)

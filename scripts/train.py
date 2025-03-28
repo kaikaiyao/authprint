@@ -85,6 +85,14 @@ def parse_args():
     # Other configuration
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     
+    # ZCA whitening configuration
+    parser.add_argument("--use_zca_whitening", action="store_true", default=False,
+                        help="Apply ZCA whitening to decoder input images")
+    parser.add_argument("--zca_eps", type=float, default=1e-5,
+                        help="Epsilon for numerical stability in ZCA whitening")
+    parser.add_argument("--zca_batch_size", type=int, default=1000,
+                        help="Batch size for computing ZCA statistics")
+    
     return parser.parse_args()
 
 

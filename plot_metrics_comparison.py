@@ -71,7 +71,7 @@ def plot_metric(ax, values, title, ylabel):
     for case, marker, color in zip(other_cases, other_markers, other_colors):
         ax.plot(x_positions, values[case], marker=marker, linewidth=1.0, 
                 markersize=4, label=case, color=color, markerfacecolor=color,
-                linestyle=dashed_line)
+                linestyle=dashed_line, alpha=0.5)
 
     # Plot training cases
     for case, marker in zip(training_cases, training_markers):
@@ -89,7 +89,7 @@ def plot_metric(ax, values, title, ylabel):
     for case, marker in zip(quantization_cases, quantization_markers):
         ax.plot(x_positions, values[case], marker=marker, linewidth=1.0, 
                 markersize=4, label=case, color=quantization_color, markerfacecolor=quantization_color,
-                linestyle=dashed_line)
+                linestyle=dashed_line, alpha=0.5)
 
     # Customize the plot
     ax.grid(True, which="both", ls="-", alpha=0.2)

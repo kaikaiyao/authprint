@@ -66,6 +66,23 @@ spec:
               echo "Downloading pretrained models..."
               curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
               
+              # Define common parameters for all runs
+              TORCHRUN_CMD="torchrun --nproc_per_node=1 \
+                          --nnodes=1 \
+                          --node_rank=0 \
+                          --master_addr=127.0.0.1 \
+                          --master_port=12345"
+              
+              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/pixel_based/num_pixel_4/key_length_128/checkpoint_iter180000.pth' \
+                          --evaluation_mode 'batch' \
+                          --num_samples 500 \
+                          --batch_size 32 \
+                          --key_length 128 \
+                          --key_mapper_seed 2025 \
+                          --use_image_pixels \
+                          --image_pixel_count 4 \
+                          --image_pixel_set_seed 42"
+              
               # Run evaluation 10 times
               for run in {1..10}; do
                 echo "Starting evaluation run $run/10..."
@@ -77,21 +94,13 @@ spec:
                   echo "Started at: $(date)"
                   echo ""
                   
-                  torchrun --nproc_per_node=1 \
-                          --nnodes=1 \
-                          --node_rank=0 \
-                          --master_addr=127.0.0.1 \
-                          --master_port=12345 \
-                          scripts/evaluate.py \
-                          --checkpoint_path "/nfs-user-107/pixel_based/num_pixel_4/key_length_128/checkpoint_iter180000.pth" \
-                          --evaluation_mode "batch" \
-                          --num_samples 500 \
-                          --batch_size 32 \
-                          --key_length 128 \
-                          --key_mapper_seed 2025 \
-                          --use_image_pixels \
-                          --image_pixel_count 4 \
-                          --image_pixel_set_seed 42
+                  if [ $run -eq 1 ]; then
+                    # Show full logs only for first run
+                    eval "$TORCHRUN_CMD scripts/evaluate.py $SCRIPT_ARGS"
+                  else
+                    # Suppress torchrun logs for subsequent runs
+                    eval "$TORCHRUN_CMD scripts/evaluate.py $SCRIPT_ARGS" > /dev/null 2>&1
+                  fi
                   
                   echo ""
                   echo "Finished at: $(date)"

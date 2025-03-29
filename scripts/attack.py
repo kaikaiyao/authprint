@@ -81,6 +81,22 @@ def parse_args():
                         help="Number of pixels to select from the image (default: 8192)")
     parser.add_argument("--key_mapper_seed", type=int, default=2025, 
                         help="Specific random seed for KeyMapper initialization for reproducibility")
+    parser.add_argument("--key_mapper_use_sine", type=bool, default=False,
+                        help="Whether to use sine activation in key mapper")
+    parser.add_argument("--key_mapper_sensitivity", type=float, default=20.0,
+                        help="Sensitivity parameter for key mapper")
+    parser.add_argument("--use_zca_whitening", action="store_true", default=False,
+                        help="Whether to use ZCA whitening")
+    parser.add_argument("--zca_eps", type=float, default=1e-5,
+                        help="Epsilon for ZCA whitening")
+    parser.add_argument("--zca_batch_size", type=int, default=1000,
+                        help="Batch size for ZCA whitening")
+    parser.add_argument("--estimate_mutual_info", action="store_true", default=False,
+                        help="Whether to estimate mutual information")
+    parser.add_argument("--mi_n_samples", type=int, default=1000,
+                        help="Number of samples for mutual information estimation")
+    parser.add_argument("--mi_k_neighbors", type=int, default=3,
+                        help="Number of neighbors for mutual information estimation")
     
     # Attack configuration
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for attack")

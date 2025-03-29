@@ -246,7 +246,7 @@ class Config:
         if hasattr(args, 'decoder_no_attention'):
             self.decoder.use_attention = not args.decoder_no_attention
         
-        # Training configuration
+        # Mode-specific configuration
         if mode == 'train':
             self.training.batch_size = args.batch_size
             self.training.total_iterations = args.total_iterations
@@ -256,6 +256,52 @@ class Config:
             self.training.checkpoint_interval = args.checkpoint_interval
             self.training.freeze_watermarked_model = args.freeze_watermarked_model
             self.training.direct_feature_decoder = args.direct_feature_decoder
+        elif mode == 'evaluate':
+            # Update evaluation-specific parameters
+            if hasattr(args, 'evaluation_mode'):
+                self.evaluate.evaluation_mode = args.evaluation_mode
+            if hasattr(args, 'num_samples'):
+                self.evaluate.num_samples = args.num_samples
+            if hasattr(args, 'num_vis_samples'):
+                self.evaluate.num_vis_samples = args.num_vis_samples
+            if hasattr(args, 'batch_size'):
+                self.evaluate.batch_size = args.batch_size
+            if hasattr(args, 'evaluate_neg_samples'):
+                self.evaluate.evaluate_neg_samples = args.evaluate_neg_samples
+            if hasattr(args, 'evaluate_pretrained'):
+                self.evaluate.evaluate_pretrained = args.evaluate_pretrained
+            if hasattr(args, 'evaluate_transforms'):
+                self.evaluate.evaluate_transforms = args.evaluate_transforms
+            if hasattr(args, 'truncation_psi'):
+                self.evaluate.truncation_psi = args.truncation_psi
+            if hasattr(args, 'downsample_size'):
+                self.evaluate.downsample_size = args.downsample_size
+            if hasattr(args, 'jpeg_quality'):
+                self.evaluate.jpeg_quality = args.jpeg_quality
+        elif mode == 'attack':
+            # Update attack-specific parameters
+            if hasattr(args, 'batch_size'):
+                self.attack.batch_size = args.batch_size
+            if hasattr(args, 'num_samples'):
+                self.attack.num_samples = args.num_samples
+            if hasattr(args, 'pgd_alpha'):
+                self.attack.pgd_alpha = args.pgd_alpha
+            if hasattr(args, 'pgd_steps'):
+                self.attack.pgd_steps = args.pgd_steps
+            if hasattr(args, 'pgd_epsilon'):
+                self.attack.pgd_epsilon = args.pgd_epsilon
+            if hasattr(args, 'surrogate_lr'):
+                self.attack.surrogate_lr = args.surrogate_lr
+            if hasattr(args, 'surrogate_batch_size'):
+                self.attack.surrogate_batch_size = args.surrogate_batch_size
+            if hasattr(args, 'surrogate_epochs'):
+                self.attack.surrogate_epochs = args.surrogate_epochs
+            if hasattr(args, 'surrogate_num_samples'):
+                self.attack.surrogate_num_samples = args.surrogate_num_samples
+            if hasattr(args, 'num_surrogate_models'):
+                self.attack.num_surrogate_models = args.num_surrogate_models
+            if hasattr(args, 'use_combined_surrogate_input'):
+                self.attack.use_combined_surrogate_input = args.use_combined_surrogate_input
         
         # Other configuration
         self.output_dir = args.output_dir

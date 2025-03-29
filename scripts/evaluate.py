@@ -52,6 +52,14 @@ def parse_args():
     parser.add_argument("--direct_feature_decoder", action="store_true", default=False,
                         help="Whether the decoder was trained directly on pixel features instead of full images")
     
+    # New: Mutual information estimation parameters
+    parser.add_argument("--estimate_mutual_info", action="store_true", default=False,
+                        help="Estimate mutual information between selected pixels and full images")
+    parser.add_argument("--mi_n_samples", type=int, default=1000,
+                        help="Number of samples for mutual information estimation")
+    parser.add_argument("--mi_k_neighbors", type=int, default=3,
+                        help="Number of neighbors for k-NN entropy estimation")
+    
     # ZCA whitening configuration
     parser.add_argument("--use_zca_whitening", action="store_true", default=False,
                         help="Apply ZCA whitening to decoder input images")

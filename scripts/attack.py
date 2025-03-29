@@ -81,7 +81,7 @@ def parse_args():
                         help="Number of pixels to select from the image (default: 8192)")
     parser.add_argument("--key_mapper_seed", type=int, default=2025, 
                         help="Specific random seed for KeyMapper initialization for reproducibility")
-    parser.add_argument("--key_mapper_use_sine", type=bool, default=False,
+    parser.add_argument("--key_mapper_use_sine", action="store_true", default=False,
                         help="Whether to use sine activation in key mapper")
     parser.add_argument("--key_mapper_sensitivity", type=float, default=20.0,
                         help="Sensitivity parameter for key mapper")

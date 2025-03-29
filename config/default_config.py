@@ -190,6 +190,8 @@ class Config:
     model: ModelConfig = field(default_factory=ModelConfig)
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
+    evaluate: EvaluateConfig = field(default_factory=EvaluateConfig)
+    attack: AttackConfig = field(default_factory=AttackConfig)
     output_dir: str = "results"
     checkpoint_path: Optional[str] = None
     seed: Optional[int] = None

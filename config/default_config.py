@@ -197,29 +197,47 @@ class Config:
     def update_from_args(self, args, mode='train'):
         """Update config from command line arguments."""
         # Model configuration
-        self.model.stylegan2_url = args.stylegan2_url
-        self.model.stylegan2_local_path = args.stylegan2_local_path
-        self.model.img_size = args.img_size
-        self.model.key_length = args.key_length
-        self.model.w_partial_set_seed = args.w_partial_set_seed
-        self.model.w_partial_length = args.w_partial_length
-        self.model.use_image_pixels = args.use_image_pixels
-        self.model.image_pixel_set_seed = args.image_pixel_set_seed
-        self.model.image_pixel_count = args.image_pixel_count
-        self.model.key_mapper_seed = args.key_mapper_seed
-        self.model.key_mapper_use_sine = args.key_mapper_use_sine
-        self.model.key_mapper_sensitivity = args.key_mapper_sensitivity
-        self.model.use_zca_whitening = args.use_zca_whitening
-        self.model.zca_eps = args.zca_eps
-        self.model.zca_batch_size = args.zca_batch_size
+        if hasattr(args, 'stylegan2_url'):
+            self.model.stylegan2_url = args.stylegan2_url
+        if hasattr(args, 'stylegan2_local_path'):
+            self.model.stylegan2_local_path = args.stylegan2_local_path
+        if hasattr(args, 'img_size'):
+            self.model.img_size = args.img_size
+        if hasattr(args, 'key_length'):
+            self.model.key_length = args.key_length
+        if hasattr(args, 'w_partial_set_seed'):
+            self.model.w_partial_set_seed = args.w_partial_set_seed
+        if hasattr(args, 'w_partial_length'):
+            self.model.w_partial_length = args.w_partial_length
+        if hasattr(args, 'use_image_pixels'):
+            self.model.use_image_pixels = args.use_image_pixels
+        if hasattr(args, 'image_pixel_set_seed'):
+            self.model.image_pixel_set_seed = args.image_pixel_set_seed
+        if hasattr(args, 'image_pixel_count'):
+            self.model.image_pixel_count = args.image_pixel_count
+        if hasattr(args, 'key_mapper_seed'):
+            self.model.key_mapper_seed = args.key_mapper_seed
+        if hasattr(args, 'key_mapper_use_sine'):
+            self.model.key_mapper_use_sine = args.key_mapper_use_sine
+        if hasattr(args, 'key_mapper_sensitivity'):
+            self.model.key_mapper_sensitivity = args.key_mapper_sensitivity
+        if hasattr(args, 'use_zca_whitening'):
+            self.model.use_zca_whitening = args.use_zca_whitening
+        if hasattr(args, 'zca_eps'):
+            self.model.zca_eps = args.zca_eps
+        if hasattr(args, 'zca_batch_size'):
+            self.model.zca_batch_size = args.zca_batch_size
         
         # New: Mutual information estimation parameters
-        self.model.estimate_mutual_info = args.estimate_mutual_info
-        self.model.mi_n_samples = args.mi_n_samples
-        self.model.mi_k_neighbors = args.mi_k_neighbors
+        if hasattr(args, 'estimate_mutual_info'):
+            self.model.estimate_mutual_info = args.estimate_mutual_info
+        if hasattr(args, 'mi_n_samples'):
+            self.model.mi_n_samples = args.mi_n_samples
+        if hasattr(args, 'mi_k_neighbors'):
+            self.model.mi_k_neighbors = args.mi_k_neighbors
         
         # Parse selected indices if provided
-        if args.selected_indices:
+        if hasattr(args, 'selected_indices') and args.selected_indices:
             try:
                 self.model.selected_indices = [int(idx) for idx in args.selected_indices.split(',')]
             except:
@@ -248,14 +266,22 @@ class Config:
         
         # Mode-specific configuration
         if mode == 'train':
-            self.training.batch_size = args.batch_size
-            self.training.total_iterations = args.total_iterations
-            self.training.lr = args.lr
-            self.training.lambda_lpips = args.lambda_lpips
-            self.training.log_interval = args.log_interval
-            self.training.checkpoint_interval = args.checkpoint_interval
-            self.training.freeze_watermarked_model = args.freeze_watermarked_model
-            self.training.direct_feature_decoder = args.direct_feature_decoder
+            if hasattr(args, 'batch_size'):
+                self.training.batch_size = args.batch_size
+            if hasattr(args, 'total_iterations'):
+                self.training.total_iterations = args.total_iterations
+            if hasattr(args, 'lr'):
+                self.training.lr = args.lr
+            if hasattr(args, 'lambda_lpips'):
+                self.training.lambda_lpips = args.lambda_lpips
+            if hasattr(args, 'log_interval'):
+                self.training.log_interval = args.log_interval
+            if hasattr(args, 'checkpoint_interval'):
+                self.training.checkpoint_interval = args.checkpoint_interval
+            if hasattr(args, 'freeze_watermarked_model'):
+                self.training.freeze_watermarked_model = args.freeze_watermarked_model
+            if hasattr(args, 'direct_feature_decoder'):
+                self.training.direct_feature_decoder = args.direct_feature_decoder
         elif mode == 'evaluate':
             # Update evaluation-specific parameters
             if hasattr(args, 'evaluation_mode'):
@@ -278,6 +304,69 @@ class Config:
                 self.evaluate.downsample_size = args.downsample_size
             if hasattr(args, 'jpeg_quality'):
                 self.evaluate.jpeg_quality = args.jpeg_quality
+            
+            # ZCA whitening evaluation parameters
+            if hasattr(args, 'evaluate_zca_whitening'):
+                self.evaluate.evaluate_zca_whitening = args.evaluate_zca_whitening
+            if hasattr(args, 'evaluate_zca_whitening_watermarked'):
+                self.evaluate.evaluate_zca_whitening_watermarked = args.evaluate_zca_whitening_watermarked
+            
+            # Detailed evaluation options
+            if hasattr(args, 'evaluate_ffhq1k'):
+                self.evaluate.evaluate_ffhq1k = args.evaluate_ffhq1k
+            if hasattr(args, 'evaluate_ffhq30k'):
+                self.evaluate.evaluate_ffhq30k = args.evaluate_ffhq30k
+            if hasattr(args, 'evaluate_ffhq70k_bcr'):
+                self.evaluate.evaluate_ffhq70k_bcr = args.evaluate_ffhq70k_bcr
+            if hasattr(args, 'evaluate_ffhq70k_noaug'):
+                self.evaluate.evaluate_ffhq70k_noaug = args.evaluate_ffhq70k_noaug
+            
+            # Specific transformations
+            if hasattr(args, 'evaluate_truncation'):
+                self.evaluate.evaluate_truncation = args.evaluate_truncation
+            if hasattr(args, 'evaluate_truncation_watermarked'):
+                self.evaluate.evaluate_truncation_watermarked = args.evaluate_truncation_watermarked
+            if hasattr(args, 'evaluate_quantization'):
+                self.evaluate.evaluate_quantization = args.evaluate_quantization
+            if hasattr(args, 'evaluate_quantization_watermarked'):
+                self.evaluate.evaluate_quantization_watermarked = args.evaluate_quantization_watermarked
+            if hasattr(args, 'evaluate_quantization_int4'):
+                self.evaluate.evaluate_quantization_int4 = args.evaluate_quantization_int4
+            if hasattr(args, 'evaluate_quantization_int4_watermarked'):
+                self.evaluate.evaluate_quantization_int4_watermarked = args.evaluate_quantization_int4_watermarked
+            if hasattr(args, 'evaluate_quantization_int2'):
+                self.evaluate.evaluate_quantization_int2 = args.evaluate_quantization_int2
+            if hasattr(args, 'evaluate_quantization_int2_watermarked'):
+                self.evaluate.evaluate_quantization_int2_watermarked = args.evaluate_quantization_int2_watermarked
+            if hasattr(args, 'evaluate_downsample'):
+                self.evaluate.evaluate_downsample = args.evaluate_downsample
+            if hasattr(args, 'evaluate_downsample_watermarked'):
+                self.evaluate.evaluate_downsample_watermarked = args.evaluate_downsample_watermarked
+            if hasattr(args, 'evaluate_jpeg'):
+                self.evaluate.evaluate_jpeg = args.evaluate_jpeg
+            if hasattr(args, 'evaluate_jpeg_watermarked'):
+                self.evaluate.evaluate_jpeg_watermarked = args.evaluate_jpeg_watermarked
+            
+            # Multi-decoder mode parameters
+            if hasattr(args, 'enable_multi_decoder'):
+                self.evaluate.enable_multi_decoder = args.enable_multi_decoder
+            if hasattr(args, 'multi_decoder_checkpoints'):
+                self.evaluate.multi_decoder_checkpoints = args.multi_decoder_checkpoints
+            if hasattr(args, 'multi_decoder_key_lengths'):
+                self.evaluate.multi_decoder_key_lengths = args.multi_decoder_key_lengths
+            if hasattr(args, 'multi_decoder_key_mapper_seeds'):
+                self.evaluate.multi_decoder_key_mapper_seeds = args.multi_decoder_key_mapper_seeds
+            if hasattr(args, 'multi_decoder_pixel_counts'):
+                self.evaluate.multi_decoder_pixel_counts = args.multi_decoder_pixel_counts
+            if hasattr(args, 'multi_decoder_pixel_seeds'):
+                self.evaluate.multi_decoder_pixel_seeds = args.multi_decoder_pixel_seeds
+                
+            # Visualization parameters
+            if hasattr(args, 'visualization_seed'):
+                self.evaluate.visualization_seed = args.visualization_seed
+            if hasattr(args, 'verbose_visualization'):
+                self.evaluate.verbose_visualization = args.verbose_visualization
+                
         elif mode == 'attack':
             # Update attack-specific parameters
             if hasattr(args, 'batch_size'):
@@ -302,11 +391,18 @@ class Config:
                 self.attack.num_surrogate_models = args.num_surrogate_models
             if hasattr(args, 'use_combined_surrogate_input'):
                 self.attack.use_combined_surrogate_input = args.use_combined_surrogate_input
+            if hasattr(args, 'log_interval'):
+                self.attack.log_interval = args.log_interval
+            if hasattr(args, 'visualization_samples'):
+                self.attack.visualization_samples = args.visualization_samples
         
         # Other configuration
-        self.output_dir = args.output_dir
-        self.checkpoint_path = args.checkpoint_path
-        self.seed = args.seed
+        if hasattr(args, 'output_dir'):
+            self.output_dir = args.output_dir
+        if hasattr(args, 'checkpoint_path'):
+            self.checkpoint_path = args.checkpoint_path
+        if hasattr(args, 'seed'):
+            self.seed = args.seed
 
 
 def get_default_config() -> Config:

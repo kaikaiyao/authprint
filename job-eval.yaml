@@ -60,35 +60,53 @@ spec:
             - |
               echo "Setting up environment..."
               mkdir -p /workspace/kubernets/evaluation_results
+              mkdir -p /workspace/kubernets/evaluation_results/logs
               
               # Download pretrained models
               echo "Downloading pretrained models..."
               curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
               
-              # Run evaluation using torchrun for consistency with training
-              echo "Starting evaluation..."
-              export PYTHONPATH=$PYTHONPATH:/workspace/kubernets
+              # Run evaluation 10 times
+              for run in {1..10}; do
+                echo "Starting evaluation run $run/10..."
+                log_file="/workspace/kubernets/evaluation_results/logs/run_${run}.log"
+                
+                # Run evaluation using torchrun for consistency with training
+                (
+                  echo "=== Evaluation Run $run/10 ===" 
+                  echo "Started at: $(date)"
+                  echo ""
+                  
+                  torchrun --nproc_per_node=1 \
+                          --nnodes=1 \
+                          --node_rank=0 \
+                          --master_addr=127.0.0.1 \
+                          --master_port=12345 \
+                          scripts/evaluate.py \
+                          --checkpoint_path "/nfs-user-107/pixel_based/num_pixel_4/key_length_128/checkpoint_iter180000.pth" \
+                          --evaluation_mode "batch" \
+                          --num_samples 500 \
+                          --batch_size 32 \
+                          --key_length 128 \
+                          --key_mapper_seed 2025 \
+                          --use_image_pixels \
+                          --image_pixel_count 4 \
+                          --image_pixel_set_seed 42
+                  
+                  echo ""
+                  echo "Finished at: $(date)"
+                  echo "Exit status: $?"
+                ) 2>&1 | tee "$log_file"
+                
+                # Also append to a combined log file
+                cat "$log_file" >> "/workspace/kubernets/evaluation_results/logs/combined.log"
+                echo -e "\n\n" >> "/workspace/kubernets/evaluation_results/logs/combined.log"
+                
+                echo "Completed run $run/10. Logs saved to $log_file"
+                echo "-------------------------------------------"
+              done
               
-              torchrun --nproc_per_node=1 \
-                      --nnodes=1 \
-                      --node_rank=0 \
-                      --master_addr=127.0.0.1 \
-                      --master_port=12345 \
-                      scripts/evaluate.py \
-                      --checkpoint_path "/nfs-user-107/pixel_based/num_pixel_4/key_length_128/checkpoint_iter180000.pth" \
-                      --evaluation_mode "batch" \
-                      --num_samples 500 \
-                      --batch_size 32 \
-                      --key_length 128 \
-                      --key_mapper_seed 2025 \
-                      --use_image_pixels \
-                      --image_pixel_count 4 \
-                      --image_pixel_set_seed 42
-              
-              exit_status=$?
-              echo "Evaluation finished with exit status $exit_status"
-              
-              sleep infinity
+              echo "All evaluation runs completed. Logs are available in /workspace/kubernets/evaluation_results/logs/"
           resources:
             limits:
               nvidia.com/gpu: "1"

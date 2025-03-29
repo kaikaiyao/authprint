@@ -64,7 +64,23 @@ class WatermarkEvaluator:
         # Initialize timing dictionary for tracking durations
         self.timing_stats = {}
         
-        # Determine which approach to use
+        # Initialize models
+        self.gan_model = None
+        self.watermarked_model = None
+        self.decoder = None
+        self.key_mapper = None
+        
+        # Initialize loss functions
+        self.lpips_loss_fn = None
+        
+        # ZCA whitening parameters
+        self.use_zca_whitening = getattr(self.config.model, 'use_zca_whitening', False)
+        self.zca_eps = getattr(self.config.model, 'zca_eps', 1e-5)
+        self.zca_batch_size = getattr(self.config.model, 'zca_batch_size', 1000)
+        self.zca_mean = None
+        self.whitening_factors = None
+        
+        # Handle selected indices based on the approach
         self.use_image_pixels = self.config.model.use_image_pixels
         
         # Track if we're using direct feature decoder mode
@@ -464,6 +480,164 @@ class WatermarkEvaluator:
             self.quantized_watermarked_model = self.quantized_watermarked_models['int8'] 
         else:
             self.quantized_watermarked_model = None
+        
+        # After setting up models, compute ZCA parameters if needed
+        if self.use_zca_whitening:
+            self.compute_zca_parameters()
+    
+    def compute_zca_parameters(self) -> None:
+        """
+        Compute ZCA whitening parameters using batches of generated images.
+        This is done once at the start of evaluation using memory-efficient computation.
+        """
+        if not self.use_zca_whitening:
+            return
+            
+        if self.rank == 0:
+            logging.info("Computing ZCA whitening parameters...")
+        
+        # Use smaller batch size for synthesis to avoid memory issues
+        synthesis_batch_size = 16  # Small enough to avoid memory issues
+        num_batches = (self.zca_batch_size + synthesis_batch_size - 1) // synthesis_batch_size
+        
+        # First pass: compute mean
+        sum_x = None
+        total_samples = 0
+        input_dim = None
+        
+        with torch.no_grad():
+            latent_dim = self.gan_model.z_dim
+            
+            # First pass to compute mean
+            for batch_idx in range(num_batches):
+                current_batch_size = min(synthesis_batch_size, 
+                                      self.zca_batch_size - batch_idx * synthesis_batch_size)
+                
+                if current_batch_size <= 0:
+                    break
+                
+                # Generate latent vectors for this batch
+                z = torch.randn(current_batch_size, latent_dim, device=self.device)
+                
+                # Generate images using watermarked model
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z, None)
+                    x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z, None)
+                    x = self.watermarked_model.synthesis(w, noise_mode="const")
+                
+                # Reshape images to 2D matrix
+                x_flat = x.view(x.size(0), -1)
+                
+                # Store input dimension
+                if input_dim is None:
+                    input_dim = x_flat.size(1)
+                
+                # Initialize or accumulate mean
+                if sum_x is None:
+                    sum_x = torch.zeros(input_dim, device=self.device)
+                
+                sum_x += x_flat.sum(dim=0)
+                total_samples += current_batch_size
+                
+                if self.rank == 0 and batch_idx % 10 == 0:
+                    logging.info(f"Computing mean: batch {batch_idx + 1}/{num_batches}")
+            
+            # Compute mean
+            self.zca_mean = (sum_x / total_samples).unsqueeze(0)
+            
+            # Free memory
+            del sum_x
+            torch.cuda.empty_cache()
+            
+            if self.rank == 0:
+                logging.info("Mean computation completed. Starting variance computation...")
+            
+            # Second pass: compute variance for diagonal whitening
+            sum_var = torch.zeros(input_dim, device=self.device)
+            
+            for batch_idx in range(num_batches):
+                current_batch_size = min(synthesis_batch_size, 
+                                      self.zca_batch_size - batch_idx * synthesis_batch_size)
+                
+                if current_batch_size <= 0:
+                    break
+                
+                z = torch.randn(current_batch_size, latent_dim, device=self.device)
+                
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z, None)
+                    x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z, None)
+                    x = self.watermarked_model.synthesis(w, noise_mode="const")
+                
+                x_flat = x.view(x.size(0), -1)
+                x_centered = x_flat - self.zca_mean
+                
+                # Accumulate variance
+                sum_var += torch.sum(x_centered ** 2, dim=0)
+                
+                if self.rank == 0 and batch_idx % 10 == 0:
+                    logging.info(f"Computing variance: batch {batch_idx + 1}/{num_batches}")
+            
+            # Compute variance and create diagonal whitening matrix
+            var = sum_var / total_samples
+            
+            # Add epsilon for numerical stability
+            var += self.zca_eps
+            
+            # Store the whitening factors (sqrt of inverse variance)
+            self.whitening_factors = torch.where(var > self.zca_eps,
+                                               var.pow(-0.5),
+                                               torch.zeros_like(var))
+            
+            if self.rank == 0:
+                logging.info("Whitening parameters computed successfully")
+            
+            # Clean up
+            del var, sum_var
+            torch.cuda.empty_cache()
+    
+    def apply_zca_whitening(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply ZCA whitening to input images.
+        
+        Args:
+            x (torch.Tensor): Input images [batch_size, channels, height, width]
+            
+        Returns:
+            torch.Tensor: Whitened images
+        """
+        if not self.use_zca_whitening:
+            return x
+            
+        # Process in chunks to save memory
+        batch_size = x.size(0)
+        chunk_size = 16  # Process 16 images at a time
+        x_whitened_chunks = []
+        
+        for i in range(0, batch_size, chunk_size):
+            # Get chunk
+            x_chunk = x[i:i + chunk_size]
+            
+            # Reshape to 2D matrix
+            x_shape = x_chunk.shape
+            x_flat = x_chunk.view(x_chunk.size(0), -1)
+            
+            # Center the data
+            x_centered = x_flat - self.zca_mean
+            
+            # Apply diagonal whitening
+            x_whitened = x_centered * self.whitening_factors
+            
+            # Reshape back to image format
+            x_whitened = x_whitened.view(x_shape)
+            x_whitened_chunks.append(x_whitened)
+        
+        # Concatenate chunks
+        return torch.cat(x_whitened_chunks, dim=0)
     
     def process_batch(self, z, model_name=None, transformation=None):
         """
@@ -513,6 +687,10 @@ class WatermarkEvaluator:
                 if self.rank == 0 and self.enable_timing:
                     logging.info(f"Watermarked model generation completed in {time.time() - water_start:.2f}s")
                     feat_start = time.time()
+                
+                # Apply ZCA whitening if enabled and requested
+                if transformation == "zca_whitening":
+                    x_water = self.apply_zca_whitening(x_water)
                 
                 # Calculate difference images only if needed
                 save_comparisons = getattr(self.config.evaluate, 'save_comparisons', False)

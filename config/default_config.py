@@ -111,6 +111,8 @@ class EvaluateConfig:
     visualize_downsample_watermarked: bool = False
     visualize_jpeg: bool = False
     visualize_jpeg_watermarked: bool = False
+    visualize_zca_whitening: bool = False
+    visualize_zca_whitening_watermarked: bool = False
     
     # Negative sample evaluation options
     evaluate_neg_samples: bool = True
@@ -151,6 +153,10 @@ class EvaluateConfig:
     evaluate_jpeg: bool = False
     evaluate_jpeg_watermarked: bool = False
     jpeg_quality: int = 55
+    
+    # ZCA whitening options
+    evaluate_zca_whitening: bool = True
+    evaluate_zca_whitening_watermarked: bool = True
 
 
 @dataclass

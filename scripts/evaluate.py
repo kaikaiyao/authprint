@@ -51,6 +51,18 @@ def parse_args():
                         help="Sensitivity parameter for sine-based mapping (higher values: more sensitive to changes)")
     parser.add_argument("--direct_feature_decoder", action="store_true", default=False,
                         help="Whether the decoder was trained directly on pixel features instead of full images")
+    
+    # ZCA whitening configuration
+    parser.add_argument("--use_zca_whitening", action="store_true", default=False,
+                        help="Apply ZCA whitening to decoder input images")
+    parser.add_argument("--zca_eps", type=float, default=1e-5,
+                        help="Epsilon for numerical stability in ZCA whitening")
+    parser.add_argument("--zca_batch_size", type=int, default=1000,
+                        help="Batch size for computing ZCA statistics")
+    parser.add_argument("--evaluate_zca_whitening", action="store_true", default=True,
+                        help="Evaluate on ZCA whitened images")
+    parser.add_argument("--evaluate_zca_whitening_watermarked", action="store_true", default=True,
+                        help="Evaluate on ZCA whitened images from watermarked model")
 
     # Enhanced FeatureDecoder configuration
     parser.add_argument("--decoder_hidden_dims", type=str, default="1024,2048,1024,512,256",

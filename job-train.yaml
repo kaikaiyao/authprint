@@ -79,11 +79,11 @@ spec:
                       --total_iterations 5000000 \
                       --checkpoint_interval 10000 \
                       --key_length 128 \
-                      --key_mapper_seed 2030 \
+                      --key_mapper_seed 2031 \
                       --lambda_lpips 1.0 \
                       --use_image_pixels \
                       --image_pixel_count 32 \
-                      --image_pixel_set_seed 47 \
+                      --image_pixel_set_seed 48 \
                       --estimate_mutual_info \
                       --freeze_watermarked_model
               

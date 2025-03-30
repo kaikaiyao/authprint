@@ -74,11 +74,11 @@ spec:
                           --master_port=12345"
               
               SCRIPT_ARGS="--enable_multi_decoder \
-                          --multi_decoder_checkpoints '/nfs-user-029/pixel_based/num_pixel_32/key_length_128/no_watermark/k_2025_p_42/checkpoint_iter500000.pth,/nfs-user-029/pixel_based/num_pixel_32/key_length_128/no_watermark/k_2026_p_43/checkpoint_iter450000.pth,/nfs-user-029/pixel_based/num_pixel_32/key_length_128/no_watermark/k_2027_p_44/checkpoint_iter450000.pth' \
-                          --multi_decoder_key_lengths '128,128,128' \
-                          --multi_decoder_key_mapper_seeds '2025,2026,2027' \
-                          --multi_decoder_pixel_counts '32,32,32' \
-                          --multi_decoder_pixel_seeds '42,43,44' \
+                          --multi_decoder_checkpoints '/nfs-user-029/pixel_based/num_pixel_32/key_length_128/no_watermark/k_2025_p_42/checkpoint_iter500000.pth,/nfs-user-029/pixel_based/num_pixel_32/key_length_128/no_watermark/k_2026_p_43/checkpoint_iter450000.pth' \
+                          --multi_decoder_key_lengths '128,128' \
+                          --multi_decoder_key_mapper_seeds '2025,2026' \
+                          --multi_decoder_pixel_counts '32,32' \
+                          --multi_decoder_pixel_seeds '42,43' \
                           --evaluation_mode 'batch' \
                           --num_samples 500 \
                           --batch_size 32 \

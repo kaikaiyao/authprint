@@ -256,6 +256,11 @@ class WatermarkEvaluator:
             self.device
         )
         
+        # Store the latent dimension from the GAN model
+        self.latent_dim = self.gan_model.z_dim
+        if self.rank == 0:
+            logging.info(f"Using latent dimension: {self.latent_dim}")
+            
         # Create watermarked model
         self.watermarked_model = clone_model(self.gan_model)
         self.watermarked_model.eval()

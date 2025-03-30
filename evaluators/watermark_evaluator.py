@@ -256,21 +256,73 @@ class WatermarkEvaluator:
             self.device
         )
         
-        # Load checkpoint
-        checkpoint = load_checkpoint(
-            checkpoint_path=self.config.checkpoint_path,
-            watermarked_model=None,
-            decoder=None,
-            optimizer=None,
-            key_mapper=None,
-            device=self.device
-        )
-        
-        # Load watermarked model from checkpoint
+        # Create watermarked model
         self.watermarked_model = clone_model(self.gan_model)
-        self.watermarked_model.load_state_dict(checkpoint['watermarked_model'])
         self.watermarked_model.eval()
         self.watermarked_model.to(self.device)
+        
+        # Initialize decoder(s) based on mode
+        if self.enable_multi_decoder:
+            # Initialize decoders list for multi-decoder mode
+            self.decoders = []
+            self.key_mappers = []
+            self.image_pixel_indices_list = []
+        else:
+            # Initialize single decoder
+            if self.direct_feature_decoder:
+                input_dim = self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)
+                if self.rank == 0:
+                    logging.info(f"Initializing enhanced FeatureDecoder with input_dim={input_dim}, output_dim={self.config.model.key_length}")
+                
+                self.decoder = FeatureDecoder(
+                    input_dim=input_dim,
+                    output_dim=self.config.model.key_length,
+                    hidden_dims=self.config.decoder.hidden_dims,
+                    activation=self.config.decoder.activation,
+                    dropout_rate=self.config.decoder.dropout_rate,
+                    num_residual_blocks=self.config.decoder.num_residual_blocks,
+                    use_spectral_norm=self.config.decoder.use_spectral_norm,
+                    use_layer_norm=self.config.decoder.use_layer_norm,
+                    use_attention=self.config.decoder.use_attention
+                ).to(self.device)
+            else:
+                self.decoder = Decoder(
+                    image_size=self.config.model.img_size,
+                    channels=3,
+                    output_dim=self.config.model.key_length
+                ).to(self.device)
+            self.decoder.eval()
+            
+            # Initialize key mapper
+            if self.rank == 0:
+                logging.info(f"Initializing key mapper with seed {self.config.model.key_mapper_seed}")
+            
+            # Determine key mapper input dimension based on approach
+            if self.use_image_pixels:
+                input_dim = self.image_pixel_count
+            else:
+                input_dim = len(self.latent_indices)
+            
+            self.key_mapper = KeyMapper(
+                input_dim=input_dim,
+                output_dim=self.config.model.key_length,
+                seed=self.config.model.key_mapper_seed,
+                use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
+                sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
+            ).to(self.device)
+            self.key_mapper.eval()
+        
+        # Load main checkpoint
+        if self.rank == 0:
+            logging.info(f"Loading checkpoint from {self.config.checkpoint_path}...")
+        
+        checkpoint = load_checkpoint(
+            checkpoint_path=self.config.checkpoint_path,
+            watermarked_model=self.watermarked_model,
+            decoder=None if self.enable_multi_decoder else self.decoder,
+            key_mapper=None,  # Set to None to skip loading key mapper state
+            device=self.device
+        )
         
         # Load ZCA parameters from checkpoint if they exist
         if 'zca_mean' in checkpoint and 'whitening_factors' in checkpoint:
@@ -283,8 +335,8 @@ class WatermarkEvaluator:
                 logging.warning("No ZCA parameters found in checkpoint, will recompute if needed")
             self.zca_mean = None
             self.whitening_factors = None
-        
-        # Initialize or load decoder
+            
+        # Setup multiple decoders if in multi-decoder mode
         if self.enable_multi_decoder:
             # Setup multiple decoders and key mappers
             checkpoints = self.config.evaluate.multi_decoder_checkpoints
@@ -363,7 +415,7 @@ class WatermarkEvaluator:
                     logging.info(f"Loading checkpoint from {checkpoint_path}...")
                 load_checkpoint(
                     checkpoint_path=checkpoint_path,
-                    watermarked_model=self.watermarked_model if i == 0 else None,  # Only load watermarked model from first checkpoint
+                    watermarked_model=None,  # We already loaded the watermarked model
                     decoder=decoder,
                     key_mapper=None,  # Set to None to skip loading key mapper state
                     device=self.device
@@ -371,61 +423,6 @@ class WatermarkEvaluator:
                 
                 self.decoders.append(decoder)
                 self.key_mappers.append(key_mapper)
-        else:
-            # Standard single decoder setup
-            if self.direct_feature_decoder:
-                input_dim = self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)
-                if self.rank == 0:
-                    logging.info(f"Initializing enhanced FeatureDecoder with input_dim={input_dim}, output_dim={self.config.model.key_length}")
-                
-                self.decoder = FeatureDecoder(
-                    input_dim=input_dim,
-                    output_dim=self.config.model.key_length,
-                    hidden_dims=self.config.decoder.hidden_dims,
-                    activation=self.config.decoder.activation,
-                    dropout_rate=self.config.decoder.dropout_rate,
-                    num_residual_blocks=self.config.decoder.num_residual_blocks,
-                    use_spectral_norm=self.config.decoder.use_spectral_norm,
-                    use_layer_norm=self.config.decoder.use_layer_norm,
-                    use_attention=self.config.decoder.use_attention
-                ).to(self.device)
-            else:
-                self.decoder = Decoder(
-                    image_size=self.config.model.img_size,
-                    channels=3,
-                    output_dim=self.config.model.key_length
-                ).to(self.device)
-            self.decoder.eval()
-            
-            # Initialize key mapper with specified seed
-            if self.rank == 0:
-                logging.info(f"Initializing key mapper with seed {self.config.model.key_mapper_seed}")
-            
-            # Determine key mapper input dimension based on approach
-            if self.use_image_pixels:
-                input_dim = self.image_pixel_count
-            else:
-                input_dim = len(self.latent_indices)
-            
-            self.key_mapper = KeyMapper(
-                input_dim=input_dim,
-                output_dim=self.config.model.key_length,
-                seed=self.config.model.key_mapper_seed,
-                use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
-                sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
-            ).to(self.device)
-            self.key_mapper.eval()
-            
-            # Load checkpoint (excluding key mapper) - do this before setting up quantized models
-            if self.rank == 0:
-                logging.info(f"Loading checkpoint from {self.config.checkpoint_path}...")
-            load_checkpoint(
-                checkpoint_path=self.config.checkpoint_path,
-                watermarked_model=self.watermarked_model,
-                decoder=self.decoder,
-                key_mapper=None,  # Set to None to skip loading key mapper state
-                device=self.device
-            )
         
         # Initialize LPIPS loss with the same network as in training
         self.lpips_loss_fn = lpips.LPIPS(net='alex').to(self.device)

@@ -119,7 +119,7 @@ def check_key_mapper_attributes(checkpoint_path: str, device: torch.device = tor
 def load_checkpoint(
     checkpoint_path: str,
     watermarked_model: Union[nn.Module, DDP],
-    decoder: Union[nn.Module, DDP],
+    decoder: Optional[Union[nn.Module, DDP]] = None,
     optimizer: Optional[torch.optim.Optimizer] = None,
     key_mapper: Optional[nn.Module] = None,
     device: torch.device = torch.device('cpu')
@@ -130,7 +130,7 @@ def load_checkpoint(
     Args:
         checkpoint_path (str): Path to the checkpoint file.
         watermarked_model (nn.Module or DDP): The watermarked generator model.
-        decoder (nn.Module or DDP): The decoder model.
+        decoder (nn.Module or DDP, optional): The decoder model.
         optimizer (torch.optim.Optimizer, optional): Optimizer to load state into.
         key_mapper (nn.Module, optional): The key mapper model to load.
         device (torch.device): Device to load the checkpoint onto.
@@ -144,15 +144,15 @@ def load_checkpoint(
     # Load checkpoint to CPU first to avoid potential CUDA memory issues
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     
-    # Handle DDP-wrapped models
-    dec = decoder.module if hasattr(decoder, 'module') else decoder
-    
     # Only load watermarked model state if model is provided
     if watermarked_model is not None:
         w_model = watermarked_model.module if hasattr(watermarked_model, 'module') else watermarked_model
         w_model.load_state_dict(checkpoint['watermarked_model_state'])
     
-    dec.load_state_dict(checkpoint['decoder_state'])
+    # Only load decoder state if decoder is provided
+    if decoder is not None:
+        dec = decoder.module if hasattr(decoder, 'module') else decoder
+        dec.load_state_dict(checkpoint['decoder_state'])
     
     # Check for key_mapper compatibility if provided
     if key_mapper is not None and 'key_mapper_state' in checkpoint:

@@ -84,7 +84,8 @@ spec:
                       --use_image_pixels \
                       --image_pixel_count 32 \
                       --image_pixel_set_seed 47 \
-                      --estimate_mutual_info
+                      --estimate_mutual_info \
+                      --freeze_watermarked_model
               
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"
 

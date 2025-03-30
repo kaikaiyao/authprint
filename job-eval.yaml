@@ -82,9 +82,7 @@ spec:
                           --evaluation_mode 'batch' \
                           --num_samples 500 \
                           --batch_size 32 \
-                          --use_image_pixels \
-                          --stylegan2_url 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl' \
-                          --stylegan2_local_path 'ffhq70k-paper256-ada.pkl'"
+                          --use_image_pixels"
               
               # Run evaluation 10 times
               for run in {1..10}; do

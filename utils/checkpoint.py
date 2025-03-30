@@ -133,10 +133,13 @@ def load_checkpoint(
     checkpoint = torch.load(checkpoint_path, map_location=device)
     
     # Handle DDP-wrapped models
-    w_model = watermarked_model.module if hasattr(watermarked_model, 'module') else watermarked_model
     dec = decoder.module if hasattr(decoder, 'module') else decoder
     
-    w_model.load_state_dict(checkpoint['watermarked_model_state'])
+    # Only load watermarked model state if model is provided
+    if watermarked_model is not None:
+        w_model = watermarked_model.module if hasattr(watermarked_model, 'module') else watermarked_model
+        w_model.load_state_dict(checkpoint['watermarked_model_state'])
+    
     dec.load_state_dict(checkpoint['decoder_state'])
     
     # Check for key_mapper compatibility if provided

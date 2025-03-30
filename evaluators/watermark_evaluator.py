@@ -247,34 +247,44 @@ class WatermarkEvaluator:
             
     def setup_models(self):
         """
-        Setup models for evaluation.
+        Initialize and set up all models.
         """
-        # Load the original StyleGAN2 model
-        if self.rank == 0:
-            logging.info("Loading StyleGAN2 model...")
+        # Load pretrained StyleGAN2 model
         self.gan_model = load_stylegan2_model(
             self.config.model.stylegan2_url,
             self.config.model.stylegan2_local_path,
             self.device
         )
-        self.gan_model.eval()
-        self.latent_dim = self.gan_model.z_dim
         
-        # Generate latent indices if not provided explicitly
-        if not self.use_image_pixels and self.latent_indices is None:
-            self._generate_latent_indices(self.latent_dim)
+        # Load checkpoint
+        checkpoint = load_checkpoint(
+            checkpoint_path=self.config.checkpoint_path,
+            watermarked_model=None,
+            decoder=None,
+            optimizer=None,
+            key_mapper=None,
+            device=self.device
+        )
         
-        # Generate pixel indices if using image-based approach
-        if self.use_image_pixels and not self.enable_multi_decoder:
-            self._generate_pixel_indices()
-        
-        # Clone it to create watermarked model - this avoids loading twice
-        if self.rank == 0:
-            logging.info("Creating watermarked model...")
+        # Load watermarked model from checkpoint
         self.watermarked_model = clone_model(self.gan_model)
-        self.watermarked_model.to(self.device)
+        self.watermarked_model.load_state_dict(checkpoint['watermarked_model'])
         self.watermarked_model.eval()
+        self.watermarked_model.to(self.device)
         
+        # Load ZCA parameters from checkpoint if they exist
+        if 'zca_mean' in checkpoint and 'whitening_factors' in checkpoint:
+            self.zca_mean = checkpoint['zca_mean']
+            self.whitening_factors = checkpoint['whitening_factors']
+            if self.rank == 0:
+                logging.info("Loaded ZCA parameters from checkpoint")
+        else:
+            if self.rank == 0:
+                logging.warning("No ZCA parameters found in checkpoint, will recompute if needed")
+            self.zca_mean = None
+            self.whitening_factors = None
+        
+        # Initialize or load decoder
         if self.enable_multi_decoder:
             # Setup multiple decoders and key mappers
             checkpoints = self.config.evaluate.multi_decoder_checkpoints
@@ -490,11 +500,17 @@ class WatermarkEvaluator:
         Compute ZCA whitening parameters using batches of generated images.
         This is done once at the start of evaluation using memory-efficient computation.
         """
+        # If we already have ZCA parameters from the checkpoint, skip computation
+        if self.zca_mean is not None and self.whitening_factors is not None:
+            if self.rank == 0:
+                logging.info("Using ZCA parameters from checkpoint")
+            return
+            
         if not self.use_zca_whitening:
             return
             
         if self.rank == 0:
-            logging.info("Computing ZCA whitening parameters...")
+            logging.info("Computing ZCA whitening parameters (no parameters found in checkpoint)...")
         
         # Use smaller batch size for synthesis to avoid memory issues
         synthesis_batch_size = 16  # Small enough to avoid memory issues

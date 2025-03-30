@@ -18,8 +18,10 @@ def save_checkpoint(
     rank: int,
     key_mapper: Optional[nn.Module] = None,
     optimizer: Optional[torch.optim.Optimizer] = None,
+    metrics: Optional[Dict] = None,
     global_step: Optional[int] = None,
-    **kwargs
+    zca_mean: Optional[torch.Tensor] = None,
+    whitening_factors: Optional[torch.Tensor] = None
 ) -> None:
     """
     Save a checkpoint of the model and optimizer.
@@ -32,8 +34,10 @@ def save_checkpoint(
         rank (int): Process rank in distributed training.
         key_mapper (nn.Module, optional): The key mapper model to save.
         optimizer (torch.optim.Optimizer, optional): Optimizer to save.
+        metrics: Optional metrics to save.
         global_step (int, optional): Global step counter for training progress.
-        **kwargs: Additional items to save in the checkpoint.
+        zca_mean: Optional ZCA whitening mean tensor.
+        whitening_factors: Optional ZCA whitening factors tensor.
     """
     if rank != 0:
         return  # Only save from the master process
@@ -49,7 +53,8 @@ def save_checkpoint(
         'iteration': iteration,
         'watermarked_model_state': w_model.state_dict(),
         'decoder_state': dec.state_dict(),
-        'global_step': global_step
+        'global_step': global_step,
+        'metrics': metrics
     }
     
     # Save key_mapper state if provided
@@ -59,8 +64,11 @@ def save_checkpoint(
     if optimizer is not None:
         checkpoint['optimizer_state'] = optimizer.state_dict()
     
-    # Add any additional items
-    checkpoint.update(kwargs)
+    if zca_mean is not None:
+        checkpoint['zca_mean'] = zca_mean
+    
+    if whitening_factors is not None:
+        checkpoint['whitening_factors'] = whitening_factors
     
     torch.save(checkpoint, ckpt_path)
     logging.info(f"Saved checkpoint at iteration {iteration} to {ckpt_path}")
@@ -130,7 +138,11 @@ def load_checkpoint(
     Returns:
         dict: The loaded checkpoint with additional metadata.
     """
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    
+    # Load checkpoint to CPU first to avoid potential CUDA memory issues
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
     
     # Handle DDP-wrapped models
     dec = decoder.module if hasattr(decoder, 'module') else decoder
@@ -169,6 +181,13 @@ def load_checkpoint(
     
     if optimizer is not None and 'optimizer_state' in checkpoint:
         optimizer.load_state_dict(checkpoint['optimizer_state'])
+    
+    # Move ZCA parameters to device if they exist and device is specified
+    if device is not None:
+        if 'zca_mean' in checkpoint:
+            checkpoint['zca_mean'] = checkpoint['zca_mean'].to(device)
+        if 'whitening_factors' in checkpoint:
+            checkpoint['whitening_factors'] = checkpoint['whitening_factors'].to(device)
     
     logging.info(f"Loaded checkpoint from {checkpoint_path} (iteration {checkpoint.get('iteration', 'unknown')})")
     

@@ -79,14 +79,18 @@ spec:
                       --total_iterations 5000000 \
                       --checkpoint_interval 10000 \
                       --key_length 128 \
-                      --key_mapper_seed 2032 \
+                      --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
                       --use_image_pixels \
                       --image_pixel_count 32 \
-                      --image_pixel_set_seed 49 \
+                      --image_pixel_set_seed 42 \
                       --estimate_mutual_info \
-                      --freeze_watermarked_model
+                      --freeze_watermarked_model \
+                      --use_zca_whitening \
+                      --zca_eps 1e-5 \
+                      --zca_batch_size 10000
               
+
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"
 
               # --use_image_pixels 

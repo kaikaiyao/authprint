@@ -784,7 +784,9 @@ class WatermarkTrainer:
                         key_mapper=self.key_mapper,
                         optimizer=self.optimizer,
                         metrics=metrics,
-                        global_step=self.global_step
+                        global_step=self.global_step,
+                        zca_mean=self.zca_mean if self.use_zca_whitening else None,
+                        whitening_factors=self.whitening_factors if self.use_zca_whitening else None
                     )
             
             # Final checkpoint if not already saved
@@ -798,7 +800,9 @@ class WatermarkTrainer:
                     key_mapper=self.key_mapper,
                     optimizer=self.optimizer,
                     metrics=metrics,
-                    global_step=self.global_step
+                    global_step=self.global_step,
+                    zca_mean=self.zca_mean if self.use_zca_whitening else None,
+                    whitening_factors=self.whitening_factors if self.use_zca_whitening else None
                 )
                 
         except Exception as e:

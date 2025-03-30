@@ -311,6 +311,10 @@ class WatermarkEvaluator:
                 sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
             ).to(self.device)
             self.key_mapper.eval()
+            
+            # Generate pixel indices if using image-based approach
+            if self.use_image_pixels:
+                self._generate_pixel_indices()
         
         # Load main checkpoint
         if self.rank == 0:
@@ -1630,7 +1634,10 @@ class WatermarkEvaluator:
                     for i, pixel_indices in enumerate(self.image_pixel_indices_list):
                         logging.info(f"  Decoder {i+1} pixel count: {len(pixel_indices)}")
                 else:
-                    logging.info(f"  Pixel count: {len(self.image_pixel_indices)}")
+                    if self.image_pixel_indices is not None:
+                        logging.info(f"  Pixel count: {len(self.image_pixel_indices)}")
+                    else:
+                        logging.warning("  Pixel indices not initialized. This may cause issues with image-based evaluation.")
             else:
                 if hasattr(self, 'latent_indices') and self.latent_indices is not None:
                     logging.info(f"  Latent indices length: {len(self.latent_indices)}")

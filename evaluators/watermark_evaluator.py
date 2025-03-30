@@ -824,30 +824,11 @@ class WatermarkEvaluator:
                 ref_start = time.time()
             
             w_water_ref = self.watermarked_model.mapping(z, None)
-            
-            if self.use_image_pixels:
-                x_water_ref = self.watermarked_model.synthesis(w_water_ref, noise_mode="const")
-                features_water = self.extract_image_partial(x_water_ref)
-            else:
-                if w_water_ref.ndim == 3:
-                    w_water_single = w_water_ref[:, 0, :]
-                else:
-                    w_water_single = w_water_ref
-                
-                if isinstance(self.latent_indices, np.ndarray):
-                    latent_indices = torch.tensor(self.latent_indices, dtype=torch.long, device=self.device)
-                    self.latent_indices = latent_indices
-                else:
-                    latent_indices = self.latent_indices
-                    
-                features_water = w_water_single.index_select(1, latent_indices)
+            x_water_ref = self.watermarked_model.synthesis(w_water_ref, noise_mode="const")
             
             if self.rank == 0 and self.enable_timing:
                 logging.info(f"Reference generation completed in {time.time() - ref_start:.2f}s")
                 neg_start = time.time()
-            
-            # Generate true key
-            true_key = self.key_mapper(features_water)
             
             # Process negative samples
             if model_name is not None:
@@ -890,31 +871,70 @@ class WatermarkEvaluator:
                 logging.info(f"Negative sample generation completed in {time.time() - neg_start:.2f}s")
                 feat_start = time.time()
             
-            # Extract features from negative sample
-            if self.use_image_pixels:
-                features_neg = self.extract_image_partial(x_neg)
+            if self.enable_multi_decoder:
+                # Process with multiple decoders
+                negative_mse_distances_all = []
+                
+                for i, (decoder, key_mapper) in enumerate(zip(self.decoders, self.key_mappers)):
+                    # Extract features based on approach
+                    if self.use_image_pixels:
+                        pixel_indices = self.image_pixel_indices_list[i]
+                        features_water = self.extract_image_partial(x_water_ref, pixel_indices)
+                        features_neg = self.extract_image_partial(x_neg, pixel_indices)
+                    else:
+                        if w_water_ref.ndim == 3:
+                            w_water_single = w_water_ref[:, 0, :]
+                            w_neg_single = w_neg[:, 0, :]
+                        else:
+                            w_water_single = w_water_ref
+                            w_neg_single = w_neg
+                        
+                        features_water = w_water_single.index_select(1, self.latent_indices)
+                        features_neg = w_neg_single.index_select(1, self.latent_indices)
+                    
+                    # Generate true key and predictions
+                    true_key = key_mapper(features_water)
+                    
+                    if self.direct_feature_decoder:
+                        pred_key_neg_logits = decoder(features_neg)
+                    else:
+                        pred_key_neg_logits = decoder(x_neg)
+                    
+                    pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
+                    negative_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
+                    negative_mse_distances_all.append(negative_mse_distance)
+                
+                # Stack all distances and take max along decoder dimension
+                negative_mse_distances = torch.stack(negative_mse_distances_all, dim=1)
+                negative_mse_distance = torch.max(negative_mse_distances, dim=1)[0]
             else:
-                if w_neg.ndim == 3:
-                    w_neg_single = w_neg[:, 0, :]
+                # Standard single decoder processing
+                if self.use_image_pixels:
+                    features_water = self.extract_image_partial(x_water_ref)
+                    features_neg = self.extract_image_partial(x_neg)
                 else:
-                    w_neg_single = w_neg
-                features_neg = w_neg_single.index_select(1, self.latent_indices)
+                    if w_water_ref.ndim == 3:
+                        w_water_single = w_water_ref[:, 0, :]
+                        w_neg_single = w_neg[:, 0, :]
+                    else:
+                        w_water_single = w_water_ref
+                        w_neg_single = w_neg
+                    features_water = w_water_single.index_select(1, self.latent_indices)
+                    features_neg = w_neg_single.index_select(1, self.latent_indices)
+                
+                # Generate true key and predictions
+                true_key = self.key_mapper(features_water)
+                
+                if self.direct_feature_decoder:
+                    pred_key_neg_logits = self.decoder(features_neg)
+                else:
+                    pred_key_neg_logits = self.decoder(x_neg)
+                
+                pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
+                negative_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
             
             if self.rank == 0 and self.enable_timing:
-                logging.info(f"Feature extraction completed in {time.time() - feat_start:.2f}s")
-                pred_start = time.time()
-            
-            # Generate predictions
-            if self.direct_feature_decoder:
-                pred_key_neg_logits = self.decoder(features_neg)
-            else:
-                pred_key_neg_logits = self.decoder(x_neg)
-            
-            pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
-            negative_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
-            
-            if self.rank == 0 and self.enable_timing:
-                logging.info(f"Prediction and metrics completed in {time.time() - pred_start:.2f}s")
+                logging.info(f"Feature extraction and prediction completed in {time.time() - feat_start:.2f}s")
                 logging.info(f"Total negative sample processing time: {time.time() - start_time:.2f}s")
             
             return {
@@ -1593,7 +1613,11 @@ class WatermarkEvaluator:
             logging.info(f"  Approach: {'Image-based' if self.use_image_pixels else 'Latent-based'}")
             logging.info(f"  Direct feature decoder: {self.direct_feature_decoder}")
             if self.use_image_pixels:
-                logging.info(f"  Pixel count: {len(self.image_pixel_indices)}")
+                if self.enable_multi_decoder:
+                    for i, pixel_indices in enumerate(self.image_pixel_indices_list):
+                        logging.info(f"  Decoder {i+1} pixel count: {len(pixel_indices)}")
+                else:
+                    logging.info(f"  Pixel count: {len(self.image_pixel_indices)}")
             else:
                 if hasattr(self, 'latent_indices') and self.latent_indices is not None:
                     logging.info(f"  Latent indices length: {len(self.latent_indices)}")

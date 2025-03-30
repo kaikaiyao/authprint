@@ -73,10 +73,10 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--checkpoint_path '/nfs-user-029/pixel_based/num_pixel_32/key_length_128/zca/checkpoint_iter310000.pth' \
+              SCRIPT_ARGS="--checkpoint_path '/nfs-user-029/pixel_based/num_pixel_16/key_length_128/checkpoint_iter310000.pth' \
                           --key_length 128 \
                           --key_mapper_seed 2025 \
-                          --image_pixel_count 32 \
+                          --image_pixel_count 16 \
                           --image_pixel_set_seed 42 \
                           --evaluation_mode 'batch' \
                           --num_samples 500 \

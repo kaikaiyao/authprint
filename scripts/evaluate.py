@@ -27,8 +27,8 @@ def parse_args():
     parser.add_argument("--stylegan2_local_path", type=str,
                         default="ffhq70k-paper256-ada.pkl",
                         help="Local path to store/load the StyleGAN2 model")
-    parser.add_argument("--checkpoint_path", type=str, required=True,
-                        help="Path to checkpoint to evaluate")
+    parser.add_argument("--checkpoint_path", type=str,
+                        help="Path to checkpoint to evaluate (not required in multi-decoder mode)")
     parser.add_argument("--img_size", type=int, default=256, help="Image resolution")
     parser.add_argument("--key_length", type=int, default=4, help="Length of the binary key (output dimension)")
     parser.add_argument("--selected_indices", type=str, default=None,

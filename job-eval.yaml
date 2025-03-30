@@ -73,11 +73,11 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/pixel_based/num_pixel_32/key_length_128/no_watermark/k_2029_p_46/checkpoint_iter440000.pth' \
+              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/pixel_based/num_pixel_32/key_length_128/no_watermark/k_2028_p_45/checkpoint_iter440000.pth' \
                           --key_length 128 \
-                          --key_mapper_seed 2029 \
+                          --key_mapper_seed 2028 \
                           --image_pixel_count 32 \
-                          --image_pixel_set_seed 46 \
+                          --image_pixel_set_seed 45 \
                           --evaluation_mode 'batch' \
                           --num_samples 500 \
                           --batch_size 32 \

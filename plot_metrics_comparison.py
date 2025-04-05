@@ -11,8 +11,8 @@ plt.rcParams['ps.fonttype'] = 42
 plt.rcParams['text.usetex'] = False
 
 # Data
-pixel_numbers = [1, 4, 8, 32, 128, 1024]
-x_positions = np.arange(len(pixel_numbers))
+pixel_numbers = [1, 4, 8, 16, 32, 64, 128, 1024]
+x_positions = np.log2(pixel_numbers)
 
 # Group cases by category
 training_cases = ['1K Train Data', '30K Train Data']
@@ -38,32 +38,32 @@ quantization_color = '#7d3c98' # Dark purple
 
 # FPR@95%TPR values
 fpr_values = {
-    'Original Model': [0.292, 0.000, 0.000, 0.000, 0.000, 0.000],
-    '1K Train Data': [0.058, 0.000, 0.000, 0.000, 0.000, 0.000],
-    '30K Train Data': [0.074, 0.000, 0.000, 0.000, 0.000, 0.000],
-    'BCR Augmentation': [0.048, 0.000, 0.000, 0.000, 0.000, 0.000],
-    'No Augmentation': [0.058, 0.000, 0.000, 0.000, 0.000, 0.000],
-    'Quantization INT8': [0.490, 0.353, 0.288, 0.054, 0.084, 0.390],
-    'Quantization INT4': [0.050, 0.000, 0.000, 0.000, 0.000, 0.000],
-    'Truncation': [0.086, 0.000, 0.000, 0.000, 0.000, 0.000],
-    'Downsampling': [0.336, 0.000, 0.000, 0.000, 0.000, 0.000]
+    'Original Model': [0.292, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+    '1K Train Data': [0.058, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+    '30K Train Data': [0.074, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+    'BCR Augmentation': [0.048, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+    'No Augmentation': [0.058, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+    'Quantization INT8': [0.490, 0.282, 0.288, 0.092, 0.054, 0.062, 0.084, 0.390],
+    'Quantization INT4': [0.050, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+    'Truncation': [0.086, 0.020, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+    'Downsampling': [0.336, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000]
 }
 
 # ASR@95%TPR values
 asr_values = {
-    'Original Model': [0.74, 0.77, 0.40, 0.20, 0.29, 0.63],
-    '1K Train Data': [0.75, 0.18, 0.01, 0.00, 0.05, 0.41],
-    '30K Train Data': [0.81, 0.32, 0.08, 0.02, 0.12, 0.43],
-    'BCR Augmentation': [0.82, 0.48, 0.29, 0.06, 0.14, 0.45],
-    'No Augmentation': [0.75, 0.49, 0.20, 0.05, 0.21, 0.57],
-    'Quantization INT8': [0.94, 0.96, 0.94, 0.96, 0.92, 0.97],
-    'Quantization INT4': [0.38, 0.06, 0.07, 0.00, 0.04, 0.05],
-    'Truncation': [0.87, 0.81, 0.85, 0.87, 0.80, 0.82],
-    'Downsampling': [0.75, 0.65, 0.46, 0.23, 0.31, 0.75]
+    'Original Model': [0.74, 0.61, 0.40, 0.250, 0.20, 0.13, 0.29, 0.63],
+    '1K Train Data': [0.75, 0.05, 0.01, 0.030, 0.00, 0.08, 0.05, 0.41],
+    '30K Train Data': [0.81, 0.29, 0.08, 0.040, 0.02, 0.10, 0.12, 0.43],
+    'BCR Augmentation': [0.82, 0.47, 0.29, 0.100, 0.06, 0.13, 0.14, 0.45],
+    'No Augmentation': [0.75, 0.39, 0.20, 0.100, 0.05, 0.14, 0.21, 0.57],
+    'Quantization INT8': [0.94, 0.96, 0.94, 0.970, 0.96, 0.94, 0.92, 0.97],
+    'Quantization INT4': [0.38, 0.04, 0.07, 0.040, 0.00, 0.03, 0.04, 0.05],
+    'Truncation': [0.87, 0.86, 0.85, 0.900, 0.87, 0.86, 0.80, 0.82],
+    'Downsampling': [0.75, 0.56, 0.46, 0.180, 0.23, 0.21, 0.31, 0.75]
 }
 
 # Create figure with two subplots side by side
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
 # Function to plot data on a given axis
 def plot_metric(ax, values, title, ylabel):
@@ -93,12 +93,17 @@ def plot_metric(ax, values, title, ylabel):
 
     # Customize the plot
     ax.grid(True, which="both", ls="-", alpha=0.2)
-    ax.set_xlabel('Number of Pixels', fontsize=12)
+    ax.set_xlabel('Number of Pixels (log₂ scale)', fontsize=12)
     ax.set_ylabel(ylabel, fontsize=12)
     ax.set_title(title, fontsize=13, pad=10)
+    
+    # Set x-axis ticks and labels
     ax.set_xticks(x_positions)
     ax.set_xticklabels(pixel_numbers, fontsize=11)
     ax.tick_params(axis='y', labelsize=11)
+    
+    # Set y-axis limits with padding
+    ax.set_ylim(-0.05, 1.05)
 
 # Plot FPR
 plot_metric(ax1, fpr_values, 'FPR@95%TPR vs. Number of Pixels\n(Key Length = 128)', 'FPR@95%TPR')

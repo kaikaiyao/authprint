@@ -82,13 +82,10 @@ spec:
                       --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
                       --use_image_pixels \
-                      --image_pixel_count 32 \
+                      --image_pixel_count 1 \
                       --image_pixel_set_seed 42 \
                       --estimate_mutual_info \
-                      --freeze_watermarked_model \
-                      --use_zca_whitening \
-                      --zca_eps 1e-5 \
-                      --zca_batch_size 10000
+                      --freeze_watermarked_model
               
 
               # --checkpoint_path "/nfs-user-029/pixel_based/key_length_32/checkpoint_iter200000.pth"

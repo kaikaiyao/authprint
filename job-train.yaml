@@ -82,7 +82,7 @@ spec:
                       --key_mapper_seed 2025 \
                       --lambda_lpips 1.0 \
                       --use_image_pixels \
-                      --image_pixel_count 1 \
+                      --image_pixel_count 1024 \
                       --image_pixel_set_seed 42 \
                       --estimate_mutual_info \
                       --freeze_watermarked_model

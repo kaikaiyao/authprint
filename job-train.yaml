@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ${USER}-job-train-${JOB_SUFFIX}
+  generateName: ${USER}-job-train-${JOB_SUFFIX}
   labels:
     eidf/user: ${USER}
     kueue.x-k8s.io/queue-name: ${QUEUE_NAME}

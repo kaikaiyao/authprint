@@ -11,6 +11,7 @@ import lpips
 import numpy as np
 from tqdm import tqdm
 import sklearn.metrics as skmetrics
+import matplotlib.pyplot as plt
 
 from config.default_config import Config
 from models.decoder import Decoder, FeatureDecoder
@@ -902,6 +903,9 @@ class WatermarkEvaluator:
             # Process differently based on whether we're in direct pixel prediction mode
             if self.direct_pixel_pred:
                 # For direct pixel prediction, we need to measure pixel prediction accuracy
+                if self.rank == 0:
+                    logging.info(f"Evaluating in direct pixel prediction mode with {num_samples} samples and {self.image_pixel_count} pixels...")
+                
                 metrics = self._evaluate_direct_pixel_pred_batch(all_z, num_batches, batch_size, num_samples)
                 
                 if not metrics:
@@ -909,10 +913,25 @@ class WatermarkEvaluator:
                         logging.error("No valid results accumulated during batch processing")
                     return {}
                 
-                # Skip negative sample evaluation for direct pixel prediction mode
+                # Save metrics
                 if self.rank == 0:
-                    # Save metrics
                     save_metrics_text(metrics, self.config.output_dir)
+                    
+                    # Also create a simple visualization of pixel MSE distribution
+                    try:
+                        import matplotlib.pyplot as plt
+                        plt.figure(figsize=(10, 6))
+                        plt.hist(metrics['pixel_mse_values'], bins=50, alpha=0.75)
+                        plt.title('Pixel MSE Distribution')
+                        plt.xlabel('MSE')
+                        plt.ylabel('Frequency')
+                        plt.grid(True)
+                        plt.savefig(os.path.join(self.config.output_dir, 'pixel_mse_distribution.png'), dpi=300)
+                        plt.close()
+                        
+                        logging.info(f"Created pixel MSE distribution visualization in {self.config.output_dir}")
+                    except Exception as e:
+                        logging.warning(f"Failed to create pixel MSE distribution visualization: {str(e)}")
                 
                 return metrics
             else:
@@ -1080,16 +1099,194 @@ class WatermarkEvaluator:
                 'pixel_mae_values': mae_all
             }
             
+            # Evaluate negative samples if enabled
+            negative_results = {}
+            if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
+                negative_results = self._evaluate_negative_samples_direct_pixel(all_z)
+            
+            # Add negative results to metrics
+            if negative_results:
+                metrics['negative_results'] = negative_results
+            
             # Log summary metrics
             if self.rank == 0:
                 logging.info("\nDirect Pixel Prediction Results:")
                 logging.info("-" * 100)
-                logging.info(f"Pixel prediction MSE: {metrics['pixel_mse_mean']:.6f} ± {metrics['pixel_mse_std']:.6f}")
-                logging.info(f"Pixel prediction MAE: {metrics['pixel_mae_mean']:.6f} ± {metrics['pixel_mae_std']:.6f}")
+                logging.info(f"Watermarked Model - Pixel MSE: {metrics['pixel_mse_mean']:.6f} ± {metrics['pixel_mse_std']:.6f}")
+                logging.info(f"Watermarked Model - Pixel MAE: {metrics['pixel_mae_mean']:.6f} ± {metrics['pixel_mae_std']:.6f}")
+                
+                # Print negative sample results if available
+                if negative_results:
+                    logging.info("\nNegative Sample Results:")
+                    logging.info("-" * 100)
+                    logging.info(f"{'Model/Transform':<40}{'Pixel MSE':>20}{'Pixel MAE':>20}")
+                    logging.info("-" * 100)
+                    
+                    for name, result in negative_results.items():
+                        logging.info(f"{name:<40}{result['mse_mean']:>20.6f}{result['mae_mean']:>20.6f}")
+                
                 logging.info("-" * 100)
             
             return metrics
-
+    
+    def _evaluate_negative_samples_direct_pixel(self, all_z):
+        """
+        Evaluate negative samples for direct pixel prediction mode.
+        
+        Args:
+            all_z (torch.Tensor): All latent vectors
+            
+        Returns:
+            dict: Dictionary mapping negative sample types to their pixel prediction metrics
+        """
+        negative_results = {}
+        batch_size = self.config.evaluate.batch_size
+        num_samples = self.config.evaluate.num_samples
+        num_batches = (num_samples + batch_size - 1) // batch_size
+        
+        # Get the list of evaluations to run
+        evaluations_to_run = []
+        
+        # Add pretrained model evaluations
+        if getattr(self.config.evaluate, 'evaluate_pretrained', True):
+            if getattr(self.config.evaluate, 'evaluate_ffhq1k', True) and 'ffhq1k' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq1k', None))
+            
+            if getattr(self.config.evaluate, 'evaluate_ffhq30k', True) and 'ffhq30k' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq30k', None))
+            
+            if getattr(self.config.evaluate, 'evaluate_ffhq70k_bcr', True) and 'ffhq70k-bcr' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq70k-bcr', None))
+            
+            if getattr(self.config.evaluate, 'evaluate_ffhq70k_noaug', True) and 'ffhq70k-noaug' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq70k-noaug', None))
+        
+        # Add transformations
+        if getattr(self.config.evaluate, 'evaluate_transforms', True):
+            # Truncation
+            if getattr(self.config.evaluate, 'evaluate_truncation', True):
+                evaluations_to_run.append((None, 'truncation_original'))
+            if getattr(self.config.evaluate, 'evaluate_truncation_watermarked', True):
+                evaluations_to_run.append((None, 'truncation_watermarked'))
+            
+            # Int8 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization', True):
+                evaluations_to_run.append((None, 'quantization_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_watermarked'))
+            
+            # Int4 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization_int4', True):
+                evaluations_to_run.append((None, 'quantization_int4_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_int4_watermarked'))
+            
+            # Int2 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization_int2', True):
+                evaluations_to_run.append((None, 'quantization_int2_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_int2_watermarked'))
+            
+            # Downsampling
+            if getattr(self.config.evaluate, 'evaluate_downsample', True):
+                evaluations_to_run.append((None, 'downsample_original'))
+            if getattr(self.config.evaluate, 'evaluate_downsample_watermarked', True):
+                evaluations_to_run.append((None, 'downsample_watermarked'))
+            
+            # JPEG compression
+            if getattr(self.config.evaluate, 'evaluate_jpeg', True):
+                evaluations_to_run.append((None, 'jpeg_original'))
+            if getattr(self.config.evaluate, 'evaluate_jpeg_watermarked', True):
+                evaluations_to_run.append((None, 'jpeg_watermarked'))
+        
+        # Run evaluations
+        total_evals = len(evaluations_to_run)
+        if self.rank == 0 and total_evals > 0:
+            logging.info(f"Running {total_evals} negative sample evaluations for direct pixel prediction...")
+        
+        with torch.no_grad():
+            for idx, (model_name, transformation) in enumerate(evaluations_to_run):
+                key = model_name if model_name else transformation
+                
+                # Skip if we've already evaluated this configuration
+                if key in negative_results:
+                    continue
+                
+                mse_per_batch = []
+                mae_per_batch = []
+                
+                # Process in batches
+                for i in range(num_batches):
+                    start_idx = i * batch_size
+                    end_idx = min((i + 1) * batch_size, num_samples)
+                    
+                    # Extract batch of latent vectors
+                    z = all_z[start_idx:end_idx]
+                    
+                    # Generate negative sample images
+                    if model_name is not None:
+                        # Use pretrained model
+                        model = self.pretrained_models[model_name]
+                        
+                        if hasattr(model, 'module'):
+                            w = model.module.mapping(z, None)
+                            x = model.module.synthesis(w, noise_mode="const")
+                        else:
+                            w = model.mapping(z, None)
+                            x = model.synthesis(w, noise_mode="const")
+                    else:
+                        # Use transformation on watermarked or original model
+                        use_watermarked = "watermarked" in transformation
+                        
+                        if use_watermarked:
+                            if hasattr(self.watermarked_model, 'module'):
+                                w = self.watermarked_model.module.mapping(z, None)
+                                x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                            else:
+                                w = self.watermarked_model.mapping(z, None)
+                                x = self.watermarked_model.synthesis(w, noise_mode="const")
+                        else:
+                            w = self.gan_model.mapping(z, None)
+                            x = self.gan_model.synthesis(w, noise_mode="const")
+                        
+                        # Apply transformation
+                        x = self.apply_transformation(x, transformation)
+                    
+                    # Extract features (real pixel values)
+                    features = self.extract_image_partial(x)
+                    true_values = features
+                    
+                    # Apply ZCA whitening to decoder input if enabled
+                    x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
+                    
+                    # Predict pixel values
+                    pred_values = self.decoder(x_decoder)
+                    
+                    # Calculate metrics
+                    mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
+                    mae = torch.mean(torch.abs(pred_values - true_values), dim=1).cpu().numpy()
+                    
+                    mse_per_batch.append(mse)
+                    mae_per_batch.append(mae)
+                
+                # Combine results
+                mse_all = np.concatenate(mse_per_batch)
+                mae_all = np.concatenate(mae_per_batch)
+                
+                # Store metrics
+                negative_results[key] = {
+                    'mse_mean': np.mean(mse_all),
+                    'mse_std': np.std(mse_all),
+                    'mae_mean': np.mean(mae_all),
+                    'mae_std': np.std(mae_all)
+                }
+                
+                # Progress reporting
+                if self.rank == 0 and (idx+1) % max(1, total_evals//5) == 0:
+                    logging.info(f"Completed {idx+1}/{total_evals} negative sample evaluations")
+        
+        return negative_results
+    
     def _evaluate_negative_samples(self, all_z):
         """
         Evaluate all negative sample types (pretrained models and transformations).

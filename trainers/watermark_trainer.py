@@ -82,25 +82,9 @@ class WatermarkTrainer:
         
         # Flag for direct feature decoder mode
         self.direct_feature_decoder = getattr(self.config.model, 'direct_feature_decoder', False)
-        if self.direct_feature_decoder:
-            # Ensure that direct_feature_decoder is only enabled under specific conditions
-            if not (self.freeze_watermarked_model and self.use_image_pixels):
-                self.direct_feature_decoder = False
-                if self.rank == 0:
-                    logging.warning("direct_feature_decoder can only be enabled when both freeze_watermarked_model=True and use_image_pixels=True. Disabling it.")
-            elif self.rank == 0:
-                logging.info("Using direct feature decoder mode: decoder will be trained on pixel features directly")
         
         # Flag for direct pixel prediction mode
         self.direct_pixel_pred = getattr(self.config.model, 'direct_pixel_pred', False)
-        if self.direct_pixel_pred:
-            # Ensure that direct_pixel_pred is only enabled under specific conditions
-            if not (self.freeze_watermarked_model and self.use_image_pixels):
-                self.direct_pixel_pred = False
-                if self.rank == 0:
-                    logging.warning("direct_pixel_pred can only be enabled when both freeze_watermarked_model=True and use_image_pixels=True. Disabling it.")
-            elif self.rank == 0:
-                logging.info("Using direct pixel prediction mode: decoder will be trained to predict selected pixel values directly")
         
         if self.use_image_pixels:
             # For image-based approach, we'll generate pixel indices later
@@ -420,6 +404,16 @@ class WatermarkTrainer:
         # After setting up models, compute ZCA parameters if needed
         if self.use_zca_whitening:
             self.compute_zca_parameters()
+            
+        # Now that models are set up, validate the direct pixel prediction mode
+        if self.direct_pixel_pred:
+            # Ensure that direct_pixel_pred is only enabled under specific conditions
+            if not (self.freeze_watermarked_model and self.use_image_pixels):
+                self.direct_pixel_pred = False
+                if self.rank == 0:
+                    logging.warning("direct_pixel_pred can only be enabled when both freeze_watermarked_model=True and use_image_pixels=True. Disabling it.")
+            elif self.rank == 0:
+                logging.info("Using direct pixel prediction mode: decoder will be trained to predict selected pixel values directly")
     
     def _generate_pixel_indices(self) -> None:
         """

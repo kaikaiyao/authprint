@@ -230,6 +230,10 @@ class Config:
             self.model.zca_eps = args.zca_eps
         if hasattr(args, 'zca_batch_size'):
             self.model.zca_batch_size = args.zca_batch_size
+        if hasattr(args, 'direct_pixel_pred'):
+            self.model.direct_pixel_pred = args.direct_pixel_pred
+            if self.model.direct_pixel_pred:
+                logging.info("Direct pixel prediction mode enabled")
         
         # New: Mutual information estimation parameters
         if hasattr(args, 'estimate_mutual_info'):

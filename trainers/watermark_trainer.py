@@ -91,6 +91,17 @@ class WatermarkTrainer:
             elif self.rank == 0:
                 logging.info("Using direct feature decoder mode: decoder will be trained on pixel features directly")
         
+        # Flag for direct pixel prediction mode
+        self.direct_pixel_pred = getattr(self.config.model, 'direct_pixel_pred', False)
+        if self.direct_pixel_pred:
+            # Ensure that direct_pixel_pred is only enabled under specific conditions
+            if not (self.freeze_watermarked_model and self.use_image_pixels):
+                self.direct_pixel_pred = False
+                if self.rank == 0:
+                    logging.warning("direct_pixel_pred can only be enabled when both freeze_watermarked_model=True and use_image_pixels=True. Disabling it.")
+            elif self.rank == 0:
+                logging.info("Using direct pixel prediction mode: decoder will be trained to predict selected pixel values directly")
+        
         if self.use_image_pixels:
             # For image-based approach, we'll generate pixel indices later
             self.image_pixel_indices = None
@@ -325,14 +336,24 @@ class WatermarkTrainer:
         if self.use_image_pixels:
             self._generate_pixel_indices()
         
+        # Determine decoder output dimension based on mode
+        if self.direct_pixel_pred:
+            # For direct pixel prediction, output dimension is the number of pixels we're predicting
+            decoder_output_dim = self.image_pixel_count
+            if self.rank == 0:
+                logging.info(f"Setting decoder output dimension to {decoder_output_dim} for direct pixel prediction")
+        else:
+            # Normal mode - output dimension is the binary key length
+            decoder_output_dim = self.config.model.key_length
+        
         # Initialize decoder model based on the mode
-        if self.direct_feature_decoder:
+        if self.direct_feature_decoder or self.direct_pixel_pred:
             # Use FeatureDecoder that takes pixel features directly
             input_dim = self.image_pixel_count  # Number of selected pixels
-            logging.info(f"Initializing enhanced FeatureDecoder with input_dim={input_dim}, output_dim={self.config.model.key_length}")
+            logging.info(f"Initializing enhanced FeatureDecoder with input_dim={input_dim}, output_dim={decoder_output_dim}")
             self.decoder = FeatureDecoder(
                 input_dim=input_dim,
-                output_dim=self.config.model.key_length,
+                output_dim=decoder_output_dim,
                 hidden_dims=self.config.decoder.hidden_dims,
                 activation=self.config.decoder.activation,
                 dropout_rate=self.config.decoder.dropout_rate,
@@ -346,7 +367,7 @@ class WatermarkTrainer:
             self.decoder = Decoder(
                 image_size=self.config.model.img_size,
                 channels=3,
-                output_dim=self.config.model.key_length
+                output_dim=decoder_output_dim
             ).to(self.device)
         
         if self.world_size > 1:
@@ -354,20 +375,27 @@ class WatermarkTrainer:
             if self.rank == 0:
                 logging.info("Wrapped decoder with DDP")
         
-        # Initialize key mapper based on the approach
-        if self.use_image_pixels:
-            input_dim = self.image_pixel_count  # Number of selected pixels
-        else:
-            input_dim = len(self.latent_indices)  # Number of selected latent dimensions
+        # Initialize key mapper based on the approach, skip if using direct pixel prediction
+        if not self.direct_pixel_pred:
+            if self.use_image_pixels:
+                input_dim = self.image_pixel_count  # Number of selected pixels
+            else:
+                input_dim = len(self.latent_indices)  # Number of selected latent dimensions
+                
+            self.key_mapper = KeyMapper(
+                input_dim=input_dim,
+                output_dim=self.config.model.key_length,
+                seed=self.config.model.key_mapper_seed,
+                use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
+                sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
+            ).to(self.device)
             
-        self.key_mapper = KeyMapper(
-            input_dim=input_dim,
-            output_dim=self.config.model.key_length,
-            seed=self.config.model.key_mapper_seed,
-            use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
-            sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
-        ).to(self.device)
-        
+            if self.rank == 0:
+                logging.info(f"Initialized KeyMapper with input_dim={input_dim}, output_dim={self.config.model.key_length}")
+        else:
+            if self.rank == 0:
+                logging.info("Skipping KeyMapper initialization for direct pixel prediction mode")
+            
         # Set up LPIPS loss function
         self.lpips_loss_fn = lpips.LPIPS(net='alex').to(self.device)
         
@@ -517,74 +545,102 @@ class WatermarkTrainer:
                 w_single = w
             features = w_single[:, self.latent_indices]
         
-        # Get raw activations and binary keys for logging during the first iteration
-        if self.global_step == 0 and self.rank == 0:
-            with torch.no_grad():
-                # Get first 3 samples
-                sample_features = features[:3]
-                
-                # Get projections, activations, and binary keys
-                projections, activations, binary_keys = self.key_mapper.get_raw_and_binary(sample_features)
-                
-                logging.info("Example outputs during first training iteration:")
-                for i in range(min(3, len(activations))):
-                    logging.info(f"  Training sample {i+1}:")
-                    
-                    # Only log a subset of feature values if there are many
-                    feature_str = str(sample_features[i].tolist())
-                    if len(feature_str) > 100:  # Truncate if too long
-                        # Show just the first few and last few elements
-                        feature_values = sample_features[i].tolist()
-                        feature_str = str(feature_values[:3]) + " ... " + str(feature_values[-3:])
-                        feature_str += f" (total length: {len(feature_values)})"
-                    
-                    logging.info(f"    Input features:  {feature_str}")
-                    logging.info(f"    Pre-activation:  {projections[i].tolist()}")
-                    logging.info(f"    Raw activations: {activations[i].tolist()}")
-                    logging.info(f"    Binary key:      {binary_keys[i].tolist()}")
-        
-        # Generate true key using the key mapper (using original non-whitened features)
-        true_key = self.key_mapper(features)
-
-        # Apply ZCA whitening to decoder input if enabled
-        x_water_decoder = self.apply_zca_whitening(x_water) if self.use_zca_whitening else x_water
-        
-        # Predict key based on the decoder mode
-        if self.direct_feature_decoder:
-            # Use features directly as input to the decoder
-            pred_key_logits = self.decoder(features)
+        # Handle training differently based on whether we're using direct pixel prediction
+        if self.direct_pixel_pred:
+            # In direct pixel prediction mode, the features ARE the targets
+            true_values = features
+            
+            # Apply ZCA whitening to decoder input if enabled
+            x_water_decoder = self.apply_zca_whitening(x_water) if self.use_zca_whitening else x_water
+            
+            # Predict pixel values
+            pred_values = self.decoder(x_water_decoder)
+            
+            # Compute MSE loss between predicted values and actual pixel values
+            key_loss = torch.mean(torch.pow(pred_values - true_values, 2))
+            
+            # Calculate distance metrics between true values and predicted values
+            mse_distance = torch.mean(torch.pow(pred_values - true_values, 2), dim=1)
+            mse_distance_mean = mse_distance.mean().item()
+            mse_distance_std = mse_distance.std().item()
+            
+            # Mean absolute error (MAE) distance
+            mae_distance = torch.mean(torch.abs(pred_values - true_values), dim=1)
+            mae_distance_mean = mae_distance.mean().item()
+            mae_distance_std = mae_distance.std().item()
+            
+            # We can't calculate match rate with continuous values, so set to 0
+            match_rate = 0.0
+            
         else:
-            # Use the whitened watermarked image as input
-            pred_key_logits = self.decoder(x_water_decoder)
-        
-        # Get predicted probabilities (before thresholding)
-        pred_key_probs = torch.sigmoid(pred_key_logits)
+            # Normal watermarking mode - get raw activations for logging during first iteration
+            if self.global_step == 0 and self.rank == 0:
+                with torch.no_grad():
+                    # Get first 3 samples
+                    sample_features = features[:3]
+                    
+                    # Get projections, activations, and binary keys
+                    projections, activations, binary_keys = self.key_mapper.get_raw_and_binary(sample_features)
+                    
+                    logging.info("Example outputs during first training iteration:")
+                    for i in range(min(3, len(activations))):
+                        logging.info(f"  Training sample {i+1}:")
+                        
+                        # Only log a subset of feature values if there are many
+                        feature_str = str(sample_features[i].tolist())
+                        if len(feature_str) > 100:  # Truncate if too long
+                            # Show just the first few and last few elements
+                            feature_values = sample_features[i].tolist()
+                            feature_str = str(feature_values[:3]) + " ... " + str(feature_values[-3:])
+                            feature_str += f" (total length: {len(feature_values)})"
+                        
+                        logging.info(f"    Input features:  {feature_str}")
+                        logging.info(f"    Pre-activation:  {projections[i].tolist()}")
+                        logging.info(f"    Raw activations: {activations[i].tolist()}")
+                        logging.info(f"    Binary key:      {binary_keys[i].tolist()}")
+            
+            # Generate true key using the key mapper (using original non-whitened features)
+            true_key = self.key_mapper(features)
 
-        # Convert predicted logits to binary for match rate calculation
-        pred_key_binary = (pred_key_probs > 0.5).float()
-        # Calculate exact match rate (percentage of samples where all bits match)
-        key_matches = (pred_key_binary == true_key).all(dim=1).float().mean().item()
-        match_rate = key_matches * 100  # Convert to percentage
-        
-        # Calculate distance metrics between true key and predicted probabilities
-        # Mean squared error (MSE) distance - range [0, 1]
-        mse_distance = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1)
-        mse_distance_mean = mse_distance.mean().item()
-        mse_distance_std = mse_distance.std().item()
-        
-        # Mean absolute error (MAE) distance - range [0, 1]
-        mae_distance = torch.mean(torch.abs(pred_key_probs - true_key), dim=1)
-        mae_distance_mean = mae_distance.mean().item()
-        mae_distance_std = mae_distance.std().item()
+            # Apply ZCA whitening to decoder input if enabled
+            x_water_decoder = self.apply_zca_whitening(x_water) if self.use_zca_whitening else x_water
+            
+            # Predict key based on the decoder mode
+            if self.direct_feature_decoder:
+                # Use features directly as input to the decoder
+                pred_key_logits = self.decoder(features)
+            else:
+                # Use the whitened watermarked image as input
+                pred_key_logits = self.decoder(x_water_decoder)
+            
+            # Get predicted probabilities (before thresholding)
+            pred_key_probs = torch.sigmoid(pred_key_logits)
 
-        # Compute key loss (BCE with logits)
-        key_loss = self.bce_loss_fn(pred_key_logits, true_key)
+            # Convert predicted logits to binary for match rate calculation
+            pred_key_binary = (pred_key_probs > 0.5).float()
+            # Calculate exact match rate (percentage of samples where all bits match)
+            key_matches = (pred_key_binary == true_key).all(dim=1).float().mean().item()
+            match_rate = key_matches * 100  # Convert to percentage
+            
+            # Calculate distance metrics between true key and predicted probabilities
+            # Mean squared error (MSE) distance - range [0, 1]
+            mse_distance = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1)
+            mse_distance_mean = mse_distance.mean().item()
+            mse_distance_std = mse_distance.std().item()
+            
+            # Mean absolute error (MAE) distance - range [0, 1]
+            mae_distance = torch.mean(torch.abs(pred_key_probs - true_key), dim=1)
+            mae_distance_mean = mae_distance.mean().item()
+            mae_distance_std = mae_distance.std().item()
+
+            # Compute key loss (BCE with logits)
+            key_loss = self.bce_loss_fn(pred_key_logits, true_key)
         
         # Compute LPIPS loss between original and watermarked images
         # Skip LPIPS calculation in direct feature decoder mode as we're not trying to optimize the image
-        if self.direct_feature_decoder:
+        if self.direct_feature_decoder or self.direct_pixel_pred:
             lpips_loss = torch.tensor(0.0, device=self.device)
-            total_loss = key_loss  # Only key loss matters in direct feature mode
+            total_loss = key_loss  # Only key loss matters in direct modes
         else:
             lpips_loss = self.lpips_loss_fn(x_orig, x_water).mean()
             total_loss = key_loss + self.config.training.lambda_lpips * lpips_loss
@@ -749,8 +805,12 @@ class WatermarkTrainer:
                     logging.info("Confirmed watermarked model is in train mode")
             
             # Print example KeyMapper outputs at the beginning of training (only on rank 0)
-            if self.start_iteration == 1 and self.rank == 0:
+            if self.start_iteration == 1 and self.rank == 0 and not self.direct_pixel_pred:
                 self._log_key_mapper_examples()
+            
+            # If using direct pixel prediction, log example pixel values
+            if self.start_iteration == 1 and self.rank == 0 and self.direct_pixel_pred:
+                self._log_direct_pixel_examples()
             
             # Main training loop - start from self.start_iteration for resuming
             for iteration in range(self.start_iteration, self.config.training.total_iterations + 1):
@@ -760,18 +820,38 @@ class WatermarkTrainer:
                 
                 # Log progress
                 if self.global_step % self.config.training.log_interval == 0 and self.rank == 0:
-                    approach = "image-based" if self.use_image_pixels else "latent-based"
+                    # Determine the approach string based on configuration
+                    if self.use_image_pixels:
+                        if self.direct_pixel_pred:
+                            approach = "direct-pixel-prediction"
+                        elif self.direct_feature_decoder:
+                            approach = "direct-feature-decoder"
+                        else:
+                            approach = "image-based"
+                    else:
+                        approach = "latent-based"
+                    
                     frozen_str = " (frozen watermarked model)" if self.freeze_watermarked_model else ""
-                    direct_feature_str = " (direct feature decoder)" if self.direct_feature_decoder else ""
                     elapsed = time.time() - start_time
-                    logging.info(
-                        f"Iteration [{iteration}/{self.config.training.total_iterations}] ({approach}){frozen_str}{direct_feature_str} "
-                        f"Key Loss: {metrics['key_loss']:.4f}, LPIPS Loss: {metrics['lpips_loss']:.4f}, "
-                        f"Total Loss: {metrics['total_loss']:.4f}, Match Rate: {metrics['match_rate']:.2f}%, "
-                        f"MSE Dist: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}, "
-                        f"MAE Dist: {metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f}, "
-                        f"Time: {elapsed:.2f}s"
-                    )
+                    
+                    # For direct pixel prediction, don't show match rate as it's not applicable
+                    if self.direct_pixel_pred:
+                        logging.info(
+                            f"Iteration [{iteration}/{self.config.training.total_iterations}] ({approach}){frozen_str} "
+                            f"Pixel MSE Loss: {metrics['key_loss']:.4f}, "
+                            f"MSE Dist: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}, "
+                            f"MAE Dist: {metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f}, "
+                            f"Time: {elapsed:.2f}s"
+                        )
+                    else:
+                        logging.info(
+                            f"Iteration [{iteration}/{self.config.training.total_iterations}] ({approach}){frozen_str} "
+                            f"Key Loss: {metrics['key_loss']:.4f}, LPIPS Loss: {metrics['lpips_loss']:.4f}, "
+                            f"Total Loss: {metrics['total_loss']:.4f}, Match Rate: {metrics['match_rate']:.2f}%, "
+                            f"MSE Dist: {metrics['mse_distance_mean']:.4f}±{metrics['mse_distance_std']:.4f}, "
+                            f"MAE Dist: {metrics['mae_distance_mean']:.4f}±{metrics['mae_distance_std']:.4f}, "
+                            f"Time: {elapsed:.2f}s"
+                        )
                 
                 # Save checkpoint at regular intervals
                 if iteration % self.config.training.checkpoint_interval == 0:
@@ -807,7 +887,7 @@ class WatermarkTrainer:
                 
         except Exception as e:
             logging.error(f"Error in training: {str(e)}", exc_info=True)
-            raise 
+            raise
             
     def _log_key_mapper_examples(self) -> None:
         """
@@ -869,4 +949,69 @@ class WatermarkTrainer:
             logging.info(f"  Input features:  {feature_str}")
             logging.info(f"  Pre-activation:  {projections[i].tolist()}")
             logging.info(f"  Raw activations: {activations[i].tolist()}")
-            logging.info(f"  Binary key:      {binary_keys[i].tolist()}") 
+            logging.info(f"  Binary key:      {binary_keys[i].tolist()}")
+
+    def _log_direct_pixel_examples(self) -> None:
+        """
+        Generate and log examples of direct pixel prediction for debugging.
+        Prints input features, predicted pixel values, and actual pixel values for 10 random inputs.
+        """
+        logging.info("Generating direct pixel prediction example outputs...")
+        
+        # Get latent dimension from the model
+        latent_dim = self.gan_model.z_dim
+        
+        # Generate 10 random latent vectors
+        num_examples = 10
+        torch.manual_seed(42)  # For reproducible examples
+        z_examples = torch.randn(num_examples, latent_dim, device=self.device)
+        
+        # Process through the model to get features
+        with torch.no_grad():
+            if self.use_image_pixels:
+                # Generate images first
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z_examples, None)
+                    x_water = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z_examples, None)
+                    x_water = self.watermarked_model.synthesis(w, noise_mode="const")
+                
+                # Extract pixel values
+                features = self.extract_image_partial(x_water)
+            else:
+                # Extract latent features
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z_examples, None)
+                else:
+                    w = self.watermarked_model.mapping(z_examples, None)
+                
+                if w.ndim == 3:
+                    w_single = w[:, 0, :]
+                else:
+                    w_single = w
+                features = w_single[:, self.latent_indices]
+        
+        # Predict pixel values
+        with torch.no_grad():
+            if self.direct_pixel_pred:
+                pred_values = self.decoder(features)
+            else:
+                x_water_decoder = self.apply_zca_whitening(x_water) if self.use_zca_whitening else x_water
+                pred_values = self.decoder(x_water_decoder)
+        
+        # Log examples
+        for i in range(num_examples):
+            logging.info(f"Example {i+1}:")
+            
+            # Only log a subset of feature values if there are many
+            feature_str = str(features[i].tolist())
+            if len(feature_str) > 100:  # Truncate if too long
+                # Show just the first few and last few elements
+                feature_values = features[i].tolist()
+                feature_str = str(feature_values[:3]) + " ... " + str(feature_values[-3:])
+                feature_str += f" (total length: {len(feature_values)})"
+            
+            logging.info(f"  Input features:  {feature_str}")
+            logging.info(f"  Predicted values: {pred_values[i].tolist()}")
+            logging.info(f"  Actual values:   {features[i].tolist()}") 

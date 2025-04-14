@@ -53,6 +53,8 @@ def parse_args():
                         help="Freeze the watermarked model parameters, only train the decoder")
     parser.add_argument("--direct_feature_decoder", action="store_true", default=False,
                         help="When true and using image pixels with a frozen watermarked model, train decoder directly on pixel features instead of full images")
+    parser.add_argument("--direct_pixel_pred", action="store_true", default=False,
+                        help="Use selected pixel values directly as keys instead of using KeyMapper (requires use_image_pixels=True and freeze_watermarked_model=True)")
     
     # New: Mutual information estimation parameters
     parser.add_argument("--estimate_mutual_info", action="store_true", default=False,

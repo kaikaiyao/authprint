@@ -720,7 +720,7 @@ class WatermarkEvaluator:
         
         # Apply transformation if specified
         if transformation is not None:
-            x = transformation(x)
+            x = self.apply_transformation(x, transformation)
         
         # Extract features based on the approach
         if self.use_image_pixels:
@@ -806,6 +806,64 @@ class WatermarkEvaluator:
         # Compute key loss (BCE with logits)
         key_loss = self.bce_loss_fn(pred_key_logits, true_key)
         
+        # If this is for watermark evaluation (no model_name or transformation), we need to also process the original model
+        if model_name is None and transformation is None:
+            # For the comparison batch, we need to compute original vs watermarked
+            # Also generate the original image for comparison
+            with torch.no_grad():
+                w_orig = self.gan_model.mapping(z, None)
+                x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
+                
+                # Extract features for original model
+                if self.use_image_pixels:
+                    features_orig = self.extract_image_partial(x_orig)
+                else:
+                    if w_orig.ndim == 3:
+                        w_orig_single = w_orig[:, 0, :]
+                    else:
+                        w_orig_single = w_orig
+                    features_orig = w_orig_single[:, self.latent_indices]
+                
+                # Generate original model true key
+                true_key_orig = self.key_mapper(features_orig)
+                
+                # Apply ZCA whitening to original image if enabled
+                x_orig_decoder = self.apply_zca_whitening(x_orig) if self.use_zca_whitening else x_orig
+                
+                # Predict key for original image
+                if self.direct_feature_decoder:
+                    # Use features directly as input to the decoder
+                    pred_key_logits_orig = self.decoder(features_orig)
+                else:
+                    # Use the original image as input
+                    pred_key_logits_orig = self.decoder(x_orig_decoder)
+                
+                # Get predicted probabilities for original
+                pred_key_probs_orig = torch.sigmoid(pred_key_logits_orig)
+                
+                # Calculate distance metrics for original
+                original_mse_distances = torch.mean(torch.pow(pred_key_probs_orig - true_key_orig, 2), dim=1).cpu().numpy()
+                
+                # Calculate LPIPS loss between original and watermarked
+                lpips_losses = self.lpips_loss_fn(x_orig, x).squeeze().cpu().numpy()
+                
+                # Convert watermarked distances to numpy for consistency with the evaluate_batch method
+                watermarked_mse_distances = mse_distance.cpu().numpy()
+            
+            # Return full comparison metrics
+            return {
+                'key_loss': key_loss.item(),
+                'match_rate': match_rate,
+                'mse_distance_mean': mse_distance_mean,
+                'mse_distance_std': mse_distance_std,
+                'mae_distance_mean': mae_distance_mean,
+                'mae_distance_std': mae_distance_std,
+                'watermarked_mse_distances': watermarked_mse_distances,
+                'original_mse_distances': original_mse_distances,
+                'lpips_losses': lpips_losses
+            }
+        
+        # For other cases (model_name or transformation specified), just return the basic metrics
         return {
             'key_loss': key_loss.item(),
             'match_rate': match_rate,
@@ -841,99 +899,196 @@ class WatermarkEvaluator:
             # Generate all latent vectors upfront for consistency across evaluations
             all_z = torch.randn(num_samples, self.latent_dim, device=self.device)
             
-            # Process comparison batches (original vs watermarked)
-            watermarked_distances_all = []
-            original_distances_all = []
-            lpips_losses_all = []
-            
-            # Process in batches
-            with torch.no_grad():
-                for i in range(num_batches):
-                    start_idx = i * batch_size
-                    end_idx = min((i + 1) * batch_size, num_samples)
-                    current_batch_size = end_idx - start_idx
-                    
-                    # Extract batch of latent vectors
-                    z = all_z[start_idx:end_idx]
-                    
-                    # Process the comparison batch
-                    batch_results = self.process_batch(z)
-                    
-                    if not all(k in batch_results for k in ['watermarked_mse_distances', 'original_mse_distances', 'lpips_losses']):
-                        if self.rank == 0:
-                            logging.error(f"Missing metrics in batch results: {batch_results.keys()}")
-                        continue
-                    
-                    # Accumulate results
-                    watermarked_distances_all.append(batch_results['watermarked_mse_distances'])
-                    original_distances_all.append(batch_results['original_mse_distances'])
-                    lpips_losses_all.append(batch_results['lpips_losses'])
-                    
-                    # Progress reporting for long running evaluation
-                    if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
-                        logging.info(f"Processed {i+1}/{num_batches} batches for original vs watermarked comparison")
-            
-            # Verify we have results before proceeding
-            if not watermarked_distances_all or not original_distances_all or not lpips_losses_all:
+            # Process differently based on whether we're in direct pixel prediction mode
+            if self.direct_pixel_pred:
+                # For direct pixel prediction, we need to measure pixel prediction accuracy
+                metrics = self._evaluate_direct_pixel_pred_batch(all_z, num_batches, batch_size, num_samples)
+                
+                if not metrics:
+                    if self.rank == 0:
+                        logging.error("No valid results accumulated during batch processing")
+                    return {}
+                
+                # Skip negative sample evaluation for direct pixel prediction mode
                 if self.rank == 0:
-                    logging.error("No valid results accumulated during batch processing")
-                return {}
-            
-            # Negative sample evaluation - only if enabled and we have samples to process
-            negative_distances_all = {}
-            if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
-                negative_distances_all = self._evaluate_negative_samples(all_z)
-            
-            # Concatenate results across batches
-            watermarked_distances = np.concatenate(watermarked_distances_all)
-            original_distances = np.concatenate(original_distances_all)
-            lpips_losses = np.concatenate(lpips_losses_all)
-            
-            # Calculate metrics
-            threshold = 0.25  # Typical threshold for correct key detection
-            watermarked_correct = np.sum(watermarked_distances < threshold)
-            original_correct = np.sum(original_distances < threshold)
-            total_samples = len(watermarked_distances)
-            
-            # Use MSE distances as MAE distances for backward compatibility
-            watermarked_mae_distances = watermarked_distances
-            original_mae_distances = original_distances
-            
-            # Calculate metrics
-            metrics, roc_data = calculate_metrics(
-                watermarked_distances, 
-                original_distances,
-                watermarked_mae_distances, 
-                original_mae_distances,
-                watermarked_correct,
-                original_correct,
-                total_samples,
-                lpips_losses
-            )
-            
-            # Add raw distances to metrics
-            metrics['watermarked_mse_distances'] = watermarked_distances
-            metrics['original_mse_distances'] = original_distances
-            metrics['lpips_losses'] = lpips_losses
-            
-            if negative_distances_all:
-                metrics['negative_distances_all'] = negative_distances_all
-            
-            metrics['roc_data'] = roc_data
-            
-            if self.rank == 0:
-                # Save metrics
-                save_metrics_text(metrics, self.config.output_dir)
-                save_metrics_plots(metrics, roc_data, watermarked_distances, original_distances, 
-                                  watermarked_mae_distances, original_mae_distances, self.config.output_dir)
-            
-            return metrics
-            
+                    # Save metrics
+                    save_metrics_text(metrics, self.config.output_dir)
+                
+                return metrics
+            else:
+                # Normal watermarking mode - process comparison batches (original vs watermarked)
+                watermarked_distances_all = []
+                original_distances_all = []
+                lpips_losses_all = []
+                
+                # Process in batches
+                with torch.no_grad():
+                    for i in range(num_batches):
+                        start_idx = i * batch_size
+                        end_idx = min((i + 1) * batch_size, num_samples)
+                        current_batch_size = end_idx - start_idx
+                        
+                        # Extract batch of latent vectors
+                        z = all_z[start_idx:end_idx]
+                        
+                        # Process the comparison batch
+                        batch_results = self.process_batch(z)
+                        
+                        if not all(k in batch_results for k in ['watermarked_mse_distances', 'original_mse_distances', 'lpips_losses']):
+                            if self.rank == 0:
+                                logging.error(f"Missing metrics in batch results: {batch_results.keys()}")
+                            continue
+                        
+                        # Accumulate results
+                        watermarked_distances_all.append(batch_results['watermarked_mse_distances'])
+                        original_distances_all.append(batch_results['original_mse_distances'])
+                        lpips_losses_all.append(batch_results['lpips_losses'])
+                        
+                        # Progress reporting for long running evaluation
+                        if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
+                            logging.info(f"Processed {i+1}/{num_batches} batches for original vs watermarked comparison")
+                
+                # Verify we have results before proceeding
+                if not watermarked_distances_all or not original_distances_all or not lpips_losses_all:
+                    if self.rank == 0:
+                        logging.error("No valid results accumulated during batch processing")
+                    return {}
+                
+                # Negative sample evaluation - only if enabled and we have samples to process
+                negative_distances_all = {}
+                if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
+                    negative_distances_all = self._evaluate_negative_samples(all_z)
+                
+                # Concatenate results across batches
+                watermarked_distances = np.concatenate(watermarked_distances_all)
+                original_distances = np.concatenate(original_distances_all)
+                lpips_losses = np.concatenate(lpips_losses_all)
+                
+                # Calculate metrics
+                threshold = 0.25  # Typical threshold for correct key detection
+                watermarked_correct = np.sum(watermarked_distances < threshold)
+                original_correct = np.sum(original_distances < threshold)
+                total_samples = len(watermarked_distances)
+                
+                # Use MSE distances as MAE distances for backward compatibility
+                watermarked_mae_distances = watermarked_distances
+                original_mae_distances = original_distances
+                
+                # Calculate metrics
+                metrics, roc_data = calculate_metrics(
+                    watermarked_distances, 
+                    original_distances,
+                    watermarked_mae_distances, 
+                    original_mae_distances,
+                    watermarked_correct,
+                    original_correct,
+                    total_samples,
+                    lpips_losses
+                )
+                
+                # Add raw distances to metrics
+                metrics['watermarked_mse_distances'] = watermarked_distances
+                metrics['original_mse_distances'] = original_distances
+                metrics['lpips_losses'] = lpips_losses
+                
+                if negative_distances_all:
+                    metrics['negative_distances_all'] = negative_distances_all
+                
+                metrics['roc_data'] = roc_data
+                
+                if self.rank == 0:
+                    # Save metrics
+                    save_metrics_text(metrics, self.config.output_dir)
+                    save_metrics_plots(metrics, roc_data, watermarked_distances, original_distances, 
+                                       watermarked_mae_distances, original_mae_distances, self.config.output_dir)
+                
+                return metrics
+                
         except Exception as e:
             if self.rank == 0:
                 logging.error(f"Error in batch evaluation: {str(e)}")
                 logging.error(str(e), exc_info=True)
             return {}
+    
+    def _evaluate_direct_pixel_pred_batch(self, all_z, num_batches, batch_size, num_samples):
+        """
+        Evaluate direct pixel prediction mode by measuring pixel prediction accuracy.
+        
+        Args:
+            all_z (torch.Tensor): All latent vectors
+            num_batches (int): Number of batches
+            batch_size (int): Batch size
+            num_samples (int): Total number of samples
+            
+        Returns:
+            dict: Metrics dictionary for direct pixel prediction
+        """
+        # Accumulators for pixel prediction metrics
+        mse_values = []
+        mae_values = []
+        
+        # Process in batches
+        with torch.no_grad():
+            for i in range(num_batches):
+                start_idx = i * batch_size
+                end_idx = min((i + 1) * batch_size, num_samples)
+                current_batch_size = end_idx - start_idx
+                
+                # Extract batch of latent vectors
+                z = all_z[start_idx:end_idx]
+                
+                # Generate watermarked images
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z, None)
+                    x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z, None)
+                    x = self.watermarked_model.synthesis(w, noise_mode="const")
+                
+                # Extract features (real pixel values)
+                features = self.extract_image_partial(x)
+                true_values = features
+                
+                # Apply ZCA whitening to decoder input if enabled
+                x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
+                
+                # Predict pixel values
+                pred_values = self.decoder(x_decoder)
+                
+                # Calculate metrics
+                mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
+                mae = torch.mean(torch.abs(pred_values - true_values), dim=1).cpu().numpy()
+                
+                mse_values.append(mse)
+                mae_values.append(mae)
+                
+                # Progress reporting
+                if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
+                    logging.info(f"Processed {i+1}/{num_batches} batches for direct pixel prediction")
+            
+            # Combine results
+            mse_all = np.concatenate(mse_values)
+            mae_all = np.concatenate(mae_values)
+            
+            # Create metrics dictionary
+            metrics = {
+                'pixel_mse_mean': np.mean(mse_all),
+                'pixel_mse_std': np.std(mse_all),
+                'pixel_mae_mean': np.mean(mae_all),
+                'pixel_mae_std': np.std(mae_all),
+                'pixel_mse_values': mse_all,
+                'pixel_mae_values': mae_all
+            }
+            
+            # Log summary metrics
+            if self.rank == 0:
+                logging.info("\nDirect Pixel Prediction Results:")
+                logging.info("-" * 100)
+                logging.info(f"Pixel prediction MSE: {metrics['pixel_mse_mean']:.6f} ± {metrics['pixel_mse_std']:.6f}")
+                logging.info(f"Pixel prediction MAE: {metrics['pixel_mae_mean']:.6f} ± {metrics['pixel_mae_std']:.6f}")
+                logging.info("-" * 100)
+            
+            return metrics
 
     def _evaluate_negative_samples(self, all_z):
         """
@@ -1489,68 +1644,73 @@ class WatermarkEvaluator:
             
             # Print metrics table if we have results and are on rank 0
             if metrics and self.rank == 0:
-                # Validate required metrics are present
-                required_keys = ['watermarked_mse_distances', 'original_mse_distances', 'lpips_losses']
-                missing_keys = [key for key in required_keys if key not in metrics]
-                
-                if missing_keys:
-                    logging.error(f"Missing required metrics: {missing_keys}")
-                    logging.error("Metrics computation may have failed. Please check the evaluation logs.")
-                    return metrics
-                
-                try:
-                    # Calculate threshold at 95% TPR using watermarked distances
-                    watermarked_distances = metrics['watermarked_mse_distances']
-                    if not isinstance(watermarked_distances, np.ndarray):
-                        watermarked_distances = np.concatenate([watermarked_distances])
-                        
-                    threshold_95tpr = self.calculate_threshold_at_tpr(watermarked_distances, target_tpr=0.95)
+                # For direct pixel prediction mode, we have different metrics
+                if self.direct_pixel_pred:
+                    # We've already logged the main metrics in _evaluate_direct_pixel_pred_batch
+                    pass
+                else:
+                    # Validate required metrics are present
+                    required_keys = ['watermarked_mse_distances', 'original_mse_distances', 'lpips_losses']
+                    missing_keys = [key for key in required_keys if key not in metrics]
                     
-                    # Print header
-                    logging.info("\nEvaluation Results:")
-                    logging.info("-" * 100)
-                    logging.info(f"{'Model/Transform':<40}{'FPR@95%TPR':>15}{'Avg MSE':>15}{'ROC-AUC':>15}{'LPIPS':>15}")
-                    logging.info("-" * 100)
+                    if missing_keys:
+                        logging.error(f"Missing required metrics: {missing_keys}")
+                        logging.error("Metrics computation may have failed. Please check the evaluation logs.")
+                        return metrics
                     
-                    # Print original model results
-                    original_distances = metrics['original_mse_distances']
-                    if not isinstance(original_distances, np.ndarray):
-                        original_distances = np.concatenate([original_distances])
-                        
-                    original_fpr = self.calculate_fpr_at_threshold(original_distances, threshold_95tpr)
-                    original_avg_mse = np.mean(original_distances)
-                    roc_auc = metrics.get('roc_auc', 0)
-                    
-                    lpips_losses = metrics['lpips_losses']
-                    if not isinstance(lpips_losses, np.ndarray):
-                        lpips_losses = np.concatenate([lpips_losses])
-                    avg_lpips = np.mean(lpips_losses)
-                    
-                    logging.info(f"{'Original Model':<40}{original_fpr:>15.2f}{original_avg_mse:>15.4f}{roc_auc:>15.4f}{avg_lpips:>15.4f}")
-                    
-                    # Print negative sample results if available
-                    if 'negative_distances_all' in metrics:
-                        logging.info("\nProcessing negative samples:")
-                        for sample_type, distances in metrics['negative_distances_all'].items():
-                            if not isinstance(distances, np.ndarray):
-                                distances = np.concatenate([distances])
-                            fpr = self.calculate_fpr_at_threshold(distances, threshold_95tpr)
-                            avg_mse = np.mean(distances)
+                    try:
+                        # Calculate threshold at 95% TPR using watermarked distances
+                        watermarked_distances = metrics['watermarked_mse_distances']
+                        if not isinstance(watermarked_distances, np.ndarray):
+                            watermarked_distances = np.concatenate([watermarked_distances])
                             
-                            # Only log the main table row, skip the detailed stats
-                            logging.info(f"{sample_type:<40}{fpr:>15.2f}{avg_mse:>15.4f}{'-':>15}{'-':>15}")
-                    else:
-                        logging.warning("No negative samples were evaluated. Check if negative sample evaluation is enabled.")
-                    
-                    logging.info("-" * 100)
-                    logging.info(f"Threshold at 95% TPR: {threshold_95tpr:.4f}")
-                    logging.info("-" * 100)
-                    
-                except Exception as e:
-                    logging.error(f"Error processing metrics: {str(e)}")
-                    logging.error("Raw metrics content:", metrics)
-                    logging.error(str(e), exc_info=True)
-                    return metrics
+                        threshold_95tpr = self.calculate_threshold_at_tpr(watermarked_distances, target_tpr=0.95)
+                        
+                        # Print header
+                        logging.info("\nEvaluation Results:")
+                        logging.info("-" * 100)
+                        logging.info(f"{'Model/Transform':<40}{'FPR@95%TPR':>15}{'Avg MSE':>15}{'ROC-AUC':>15}{'LPIPS':>15}")
+                        logging.info("-" * 100)
+                        
+                        # Print original model results
+                        original_distances = metrics['original_mse_distances']
+                        if not isinstance(original_distances, np.ndarray):
+                            original_distances = np.concatenate([original_distances])
+                            
+                        original_fpr = self.calculate_fpr_at_threshold(original_distances, threshold_95tpr)
+                        original_avg_mse = np.mean(original_distances)
+                        roc_auc = metrics.get('roc_auc', 0)
+                        
+                        lpips_losses = metrics['lpips_losses']
+                        if not isinstance(lpips_losses, np.ndarray):
+                            lpips_losses = np.concatenate([lpips_losses])
+                        avg_lpips = np.mean(lpips_losses)
+                        
+                        logging.info(f"{'Original Model':<40}{original_fpr:>15.2f}{original_avg_mse:>15.4f}{roc_auc:>15.4f}{avg_lpips:>15.4f}")
+                        
+                        # Print negative sample results if available
+                        if 'negative_distances_all' in metrics:
+                            logging.info("\nProcessing negative samples:")
+                            for sample_type, distances in metrics['negative_distances_all'].items():
+                                if not isinstance(distances, np.ndarray):
+                                    distances = np.concatenate([distances])
+                                fpr = self.calculate_fpr_at_threshold(distances, threshold_95tpr)
+                                avg_mse = np.mean(distances)
+                                
+                                # Only log the main table row, skip the detailed stats
+                                logging.info(f"{sample_type:<40}{fpr:>15.2f}{avg_mse:>15.4f}{'-':>15}{'-':>15}")
+                        else:
+                            logging.warning("No negative samples were evaluated. Check if negative sample evaluation is enabled.")
+                        
+                        logging.info("-" * 100)
+                        logging.info(f"Threshold at 95% TPR: {threshold_95tpr:.4f}")
+                        logging.info("-" * 100)
+                        
+                    except Exception as e:
+                        logging.error(f"Error processing metrics: {str(e)}")
+                        logging.error("Raw metrics content:", metrics)
+                        logging.error(str(e), exc_info=True)
+                        return metrics
         
         # Visual evaluation after batch if enabled
         if evaluation_mode in ['visual', 'both'] and self.rank == 0:
@@ -1562,3 +1722,179 @@ class WatermarkEvaluator:
             self.visualize_samples()
         
         return metrics 
+
+    def _process_negative_sample_batch(self, z, model_name=None, transformation=None):
+        """
+        Process a batch of latent vectors for negative sample evaluation.
+        
+        Args:
+            z (torch.Tensor): Batch of latent vectors
+            model_name (str, optional): Name of the model to use, if using a pretrained model
+            transformation (str, optional): Transformation to apply, if any
+        
+        Returns:
+            dict: Dictionary of metrics
+        """
+        # Special handling for direct pixel prediction mode
+        if self.direct_pixel_pred:
+            return self._process_negative_sample_batch_direct_pixel(z, model_name, transformation)
+            
+        batch_size = z.shape[0]
+        
+        # Generate negative sample images
+        if model_name is not None:
+            # Use pretrained model
+            model = self.pretrained_models[model_name]
+            
+            if hasattr(model, 'module'):
+                w = model.module.mapping(z, None)
+                x = model.module.synthesis(w, noise_mode="const")
+            else:
+                w = model.mapping(z, None)
+                x = model.synthesis(w, noise_mode="const")
+        else:
+            # Use transformation on watermarked or original model
+            use_watermarked = "watermarked" in transformation
+            
+            if use_watermarked:
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z, None)
+                    x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z, None)
+                    x = self.watermarked_model.synthesis(w, noise_mode="const")
+            else:
+                w = self.gan_model.mapping(z, None)
+                x = self.gan_model.synthesis(w, noise_mode="const")
+            
+            # Apply transformation
+            x = self.apply_transformation(x, transformation)
+        
+        # Extract features
+        if self.use_image_pixels:
+            features = self.extract_image_partial(x)
+        else:
+            if w.ndim == 3:
+                w_single = w[:, 0, :]
+            else:
+                w_single = w
+            features = w_single[:, self.latent_indices]
+        
+        # Generate true key using the key mapper
+        true_key = self.key_mapper(features)
+        
+        # Apply ZCA whitening to decoder input if enabled
+        x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
+        
+        # Predict key based on the decoder mode
+        if self.direct_feature_decoder:
+            # Use features directly as input to the decoder
+            pred_key_logits = self.decoder(features)
+        else:
+            # Use the image as input
+            pred_key_logits = self.decoder(x_decoder)
+        
+        # Get predicted probabilities
+        pred_key_probs = torch.sigmoid(pred_key_logits)
+        
+        # Calculate distance metrics
+        negative_mse_distances = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1).cpu().numpy()
+        
+        return {
+            'negative_mse_distances': negative_mse_distances
+        }
+    
+    def _process_negative_sample_batch_direct_pixel(self, z, model_name=None, transformation=None):
+        """
+        Process a batch of latent vectors for negative sample evaluation in direct pixel prediction mode.
+        This version focuses on pixel prediction accuracy rather than key detection.
+        
+        Args:
+            z (torch.Tensor): Batch of latent vectors
+            model_name (str, optional): Name of the model to use, if using a pretrained model
+            transformation (str, optional): Transformation to apply, if any
+        
+        Returns:
+            dict: Dictionary of metrics specific to direct pixel prediction
+        """
+        batch_size = z.shape[0]
+        
+        # Generate negative sample images
+        if model_name is not None:
+            # Use pretrained model
+            model = self.pretrained_models[model_name]
+            
+            if hasattr(model, 'module'):
+                w = model.module.mapping(z, None)
+                x = model.module.synthesis(w, noise_mode="const")
+            else:
+                w = model.mapping(z, None)
+                x = model.synthesis(w, noise_mode="const")
+        else:
+            # Use transformation on watermarked or original model
+            use_watermarked = "watermarked" in transformation
+            
+            if use_watermarked:
+                if hasattr(self.watermarked_model, 'module'):
+                    w = self.watermarked_model.module.mapping(z, None)
+                    x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.watermarked_model.mapping(z, None)
+                    x = self.watermarked_model.synthesis(w, noise_mode="const")
+            else:
+                w = self.gan_model.mapping(z, None)
+                x = self.gan_model.synthesis(w, noise_mode="const")
+            
+            # Apply transformation
+            x = self.apply_transformation(x, transformation)
+        
+        # Extract features (real pixel values)
+        features = self.extract_image_partial(x)
+        true_values = features
+        
+        # Apply ZCA whitening to decoder input if enabled
+        x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
+        
+        # Predict pixel values
+        pred_values = self.decoder(x_decoder)
+        
+        # Calculate MSE distances for each sample
+        negative_mse_distances = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
+        
+        return {
+            'negative_mse_distances': negative_mse_distances
+        } 
+
+    def apply_transformation(self, x, transformation):
+        """
+        Apply a transformation to the input images.
+        
+        Args:
+            x (torch.Tensor): Input images
+            transformation (str): Transformation name
+        
+        Returns:
+            torch.Tensor: Transformed images
+        """
+        if 'truncation' in transformation:
+            return apply_truncation(x, psi=self.config.evaluate.truncation_psi)
+        
+        elif 'quantization_int2' in transformation:
+            return quantize_model_weights(x, bit_width='int2')
+            
+        elif 'quantization_int4' in transformation:
+            return quantize_model_weights(x, bit_width='int4')
+            
+        elif 'quantization' in transformation:
+            return quantize_model_weights(x, bit_width='int8')
+            
+        elif 'downsample' in transformation:
+            return downsample_and_upsample(x, size=self.config.evaluate.downsample_size)
+            
+        elif 'jpeg' in transformation:
+            return apply_jpeg_compression(x, quality=self.config.evaluate.jpeg_quality)
+            
+        else:
+            if self.rank == 0:
+                logging.warning(f"Unknown transformation: {transformation}")
+            return x

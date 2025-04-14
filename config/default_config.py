@@ -27,6 +27,7 @@ class ModelConfig:
     use_zca_whitening: bool = False
     zca_eps: float = 1e-5
     zca_batch_size: int = 1000
+    direct_pixel_pred: bool = False
     # New: Mutual information estimation parameters
     estimate_mutual_info: bool = False
     mi_n_samples: int = 1000

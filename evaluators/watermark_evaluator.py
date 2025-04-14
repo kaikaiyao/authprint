@@ -662,339 +662,124 @@ class WatermarkEvaluator:
         return torch.cat(x_whitened_chunks, dim=0)
     
     def process_batch(self, z, model_name=None, transformation=None):
-        """
-        Process a batch of latent vectors for evaluation.
+        """Process a batch of latent vectors through the model."""
+        batch_size = z.shape[0]
         
-        Args:
-            z (torch.Tensor): Batch of latent vectors.
-            model_name (str, optional): Name of the pretrained model to use.
-            transformation (str, optional): Name of the transformation to apply to the original model/images.
-        
-        Returns:
-            dict: Dictionary containing evaluation results.
-        """
-        start_time = time.time()
-        
-        if self.rank == 0 and self.enable_timing:
-            logging.info(f"Starting batch processing: model={model_name}, transform={transformation}")
-            
-        with torch.no_grad():
-            try:
-                # Determine if this is a comparison case (original evaluation) or a negative sample case
-                is_comparison_case = model_name is None and transformation is None
-                
-                if self.rank == 0 and self.enable_timing:
-                    gen_start = time.time()
-                    logging.info("Generating images and computing features...")
-                
-                # For negative cases, we only need to evaluate the specific model/transformation
-                if not is_comparison_case:
-                    result = self._process_negative_sample_batch(z, model_name, transformation)
-                    if self.rank == 0 and self.enable_timing:
-                        logging.info(f"Negative sample processing completed in {time.time() - gen_start:.2f}s")
-                    return result
-                
-                # Original Model
-                w_orig = self.gan_model.mapping(z, None)
-                x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
-                
-                if self.rank == 0 and self.enable_timing:
-                    logging.info(f"Original model generation completed in {time.time() - gen_start:.2f}s")
-                    water_start = time.time()
-                
-                # Watermarked Model
-                w_water = self.watermarked_model.mapping(z, None)
-                x_water = self.watermarked_model.synthesis(w_water, noise_mode="const")
-                
-                if self.rank == 0 and self.enable_timing:
-                    logging.info(f"Watermarked model generation completed in {time.time() - water_start:.2f}s")
-                    feat_start = time.time()
-                
-                # Apply ZCA whitening if enabled and requested
-                if transformation == "zca_whitening":
-                    x_water = self.apply_zca_whitening(x_water)
-                
-                # Calculate difference images only if needed
-                save_comparisons = getattr(self.config.evaluate, 'save_comparisons', False)
-                diff_images = (x_water - x_orig) if save_comparisons else None
-                
-                if self.enable_multi_decoder:
-                    # Process with multiple decoders
-                    watermarked_mse_distances_all = []
-                    original_mse_distances_all = []
-                    
-                    for i, (decoder, key_mapper) in enumerate(zip(self.decoders, self.key_mappers)):
-                        # Extract features based on approach
-                        if self.use_image_pixels:
-                            pixel_indices = self.image_pixel_indices_list[i]
-                            features_water = self.extract_image_partial(x_water, pixel_indices)
-                            features_orig = self.extract_image_partial(x_orig, pixel_indices)
-                        else:
-                            if w_water.ndim == 3:
-                                w_water_single = w_water[:, 0, :]
-                                w_orig_single = w_orig[:, 0, :]
-                            else:
-                                w_water_single = w_water
-                                w_orig_single = w_orig
-                            
-                            features_water = w_water_single.index_select(1, self.latent_indices)
-                            features_orig = w_orig_single.index_select(1, self.latent_indices)
-                        
-                        # Generate true key and predictions
-                        true_key = key_mapper(features_water)
-                        
-                        if self.direct_feature_decoder:
-                            pred_key_water_logits = decoder(features_water)
-                            pred_key_orig_logits = decoder(features_orig)
-                        else:
-                            pred_key_water_logits = decoder(x_water)
-                            pred_key_orig_logits = decoder(x_orig)
-                        
-                        # Convert to probabilities
-                        pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
-                        pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
-                        
-                        # Calculate metrics
-                        watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
-                        original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
-                        
-                        watermarked_mse_distances_all.append(watermarked_mse_distance)
-                        original_mse_distances_all.append(original_mse_distance)
-                    
-                    # Stack all distances and take max along decoder dimension
-                    watermarked_mse_distances = torch.stack(watermarked_mse_distances_all, dim=1)
-                    original_mse_distances = torch.stack(original_mse_distances_all, dim=1)
-                    
-                    watermarked_mse_distance = torch.max(watermarked_mse_distances, dim=1)[0]
-                    original_mse_distance = torch.max(original_mse_distances, dim=1)[0]
-                    
-                else:
-                    # Standard single decoder processing
-                    if self.use_image_pixels:
-                        features_water = self.extract_image_partial(x_water)
-                        features_orig = self.extract_image_partial(x_orig)
-                    else:
-                        if w_water.ndim == 3:
-                            w_water_single = w_water[:, 0, :]
-                            w_orig_single = w_orig[:, 0, :]
-                        else:
-                            w_water_single = w_water
-                            w_orig_single = w_orig
-                        
-                        features_water = w_water_single.index_select(1, self.latent_indices)
-                        features_orig = w_orig_single.index_select(1, self.latent_indices)
-                    
-                    # Generate true key and predictions
-                    true_key = self.key_mapper(features_water)
-                    
-                    if self.direct_feature_decoder:
-                        pred_key_water_logits = self.decoder(features_water)
-                        pred_key_orig_logits = self.decoder(features_orig)
-                    else:
-                        pred_key_water_logits = self.decoder(x_water)
-                        pred_key_orig_logits = self.decoder(x_orig)
-                    
-                    # Convert to probabilities
-                    pred_key_water_probs = torch.sigmoid(pred_key_water_logits)
-                    pred_key_orig_probs = torch.sigmoid(pred_key_orig_logits)
-                    
-                    # Calculate metrics
-                    watermarked_mse_distance = torch.mean(torch.pow(pred_key_water_probs - true_key, 2), dim=1)
-                    original_mse_distance = torch.mean(torch.pow(pred_key_orig_probs - true_key, 2), dim=1)
-                
-                if self.rank == 0 and self.enable_timing:
-                    logging.info(f"Feature extraction and key prediction completed in {time.time() - feat_start:.2f}s")
-                    metric_start = time.time()
-                
-                # Calculate LPIPS loss
-                lpips_losses = self.lpips_loss_fn(x_orig, x_water).squeeze()
-                
-                if self.rank == 0 and self.enable_timing:
-                    logging.info(f"Metric calculation completed in {time.time() - metric_start:.2f}s")
-                    logging.info(f"Total batch processing time: {time.time() - start_time:.2f}s")
-                
-                return {
-                    'watermarked_mse_distances': watermarked_mse_distance.cpu().numpy(),
-                    'original_mse_distances': original_mse_distance.cpu().numpy(),
-                    'batch_size': z.size(0),
-                    'lpips_losses': lpips_losses.cpu().numpy(),
-                    'x_orig': x_orig,
-                    'x_water': x_water,
-                    'features_water': features_water,
-                    'features_orig': features_orig,
-                    'diff_images': diff_images
-                }
-                
-            except Exception as e:
-                if self.rank == 0:
-                    logging.error(f"Error in batch processing: {str(e)}")
-                    logging.error(str(e), exc_info=True)
-                return self._get_empty_batch_result(z.size(0))
-    
-    def _process_negative_sample_batch(self, z, model_name=None, transformation=None):
-        """
-        Process a batch specifically for negative sample evaluation.
-        """
-        start_time = time.time()
-        
-        if self.rank == 0 and self.enable_timing:
-            logging.info(f"Starting negative sample processing: model={model_name}, transform={transformation}")
-        
-        try:
-            # Cache watermarked reference
-            if self.rank == 0 and self.enable_timing:
-                ref_start = time.time()
-            
-            w_water_ref = self.watermarked_model.mapping(z, None)
-            x_water_ref = self.watermarked_model.synthesis(w_water_ref, noise_mode="const")
-            
-            if self.rank == 0 and self.enable_timing:
-                logging.info(f"Reference generation completed in {time.time() - ref_start:.2f}s")
-                neg_start = time.time()
-            
-            # Process negative samples
-            if model_name is not None:
-                negative_model = self.pretrained_models.get(model_name, self.gan_model)
-                w_neg = negative_model.mapping(z, None)
-                x_neg = negative_model.synthesis(w_neg, noise_mode="const")
+        # Generate images using the specified model
+        if model_name is None:
+            # Use watermarked model
+            if hasattr(self.watermarked_model, 'module'):
+                w = self.watermarked_model.module.mapping(z, None)
+                x = self.watermarked_model.module.synthesis(w, noise_mode="const")
             else:
-                is_watermarked = '_watermarked' in transformation
-                base_model = self.watermarked_model if is_watermarked else self.gan_model
-                transformation_base = transformation.replace('_watermarked', '').replace('_original', '')
-                
-                if self.rank == 0 and self.enable_timing:
-                    logging.info(f"Applying transformation: {transformation_base}")
-                
-                # Apply appropriate transformation
-                if transformation_base == 'truncation':
-                    truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
-                    x_neg, w_neg = apply_truncation(base_model, z, truncation_psi, return_w=True)
-                elif transformation_base.startswith('quantization'):
-                    precision = 'int8' if transformation_base == 'quantization' else transformation_base.split('_')[1]
-                    model_dict = self.quantized_watermarked_models if is_watermarked else self.quantized_models
-                    quantized_model = model_dict.get(precision, base_model)
-                    w_neg = quantized_model.mapping(z, None)
-                    x_neg = quantized_model.synthesis(w_neg, noise_mode="const")
-                elif transformation_base == 'downsample':
-                    w_neg = base_model.mapping(z, None)
-                    x_orig = base_model.synthesis(w_neg, noise_mode="const")
-                    downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
-                    x_neg = downsample_and_upsample(x_orig, downsample_size)
-                elif transformation_base == 'jpeg':
-                    w_neg = base_model.mapping(z, None)
-                    x_orig = base_model.synthesis(w_neg, noise_mode="const")
-                    jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 75)
-                    x_neg = apply_jpeg_compression(x_orig, jpeg_quality)
-                else:
-                    w_neg = base_model.mapping(z, None)
-                    x_neg = base_model.synthesis(w_neg, noise_mode="const")
-            
-            if self.rank == 0 and self.enable_timing:
-                logging.info(f"Negative sample generation completed in {time.time() - neg_start:.2f}s")
-                feat_start = time.time()
-            
-            if self.enable_multi_decoder:
-                # Process with multiple decoders
-                negative_mse_distances_all = []
-                
-                for i, (decoder, key_mapper) in enumerate(zip(self.decoders, self.key_mappers)):
-                    # Extract features based on approach
-                    if self.use_image_pixels:
-                        pixel_indices = self.image_pixel_indices_list[i]
-                        features_water = self.extract_image_partial(x_water_ref, pixel_indices)
-                        features_neg = self.extract_image_partial(x_neg, pixel_indices)
-                    else:
-                        if w_water_ref.ndim == 3:
-                            w_water_single = w_water_ref[:, 0, :]
-                            w_neg_single = w_neg[:, 0, :]
-                        else:
-                            w_water_single = w_water_ref
-                            w_neg_single = w_neg
-                        
-                        features_water = w_water_single.index_select(1, self.latent_indices)
-                        features_neg = w_neg_single.index_select(1, self.latent_indices)
-                    
-                    # Generate true key and predictions
-                    true_key = key_mapper(features_water)
-                    
-                    if self.direct_feature_decoder:
-                        pred_key_neg_logits = decoder(features_neg)
-                    else:
-                        pred_key_neg_logits = decoder(x_neg)
-                    
-                    pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
-                    negative_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
-                    negative_mse_distances_all.append(negative_mse_distance)
-                
-                # Stack all distances and take max along decoder dimension
-                negative_mse_distances = torch.stack(negative_mse_distances_all, dim=1)
-                negative_mse_distance = torch.max(negative_mse_distances, dim=1)[0]
+                w = self.watermarked_model.mapping(z, None)
+                x = self.watermarked_model.synthesis(w, noise_mode="const")
+        else:
+            # Use pretrained model
+            if hasattr(self.pretrained_models[model_name], 'module'):
+                w = self.pretrained_models[model_name].module.mapping(z, None)
+                x = self.pretrained_models[model_name].module.synthesis(w, noise_mode="const")
             else:
-                # Standard single decoder processing
-                if self.use_image_pixels:
-                    features_water = self.extract_image_partial(x_water_ref)
-                    features_neg = self.extract_image_partial(x_neg)
-                else:
-                    if w_water_ref.ndim == 3:
-                        w_water_single = w_water_ref[:, 0, :]
-                        w_neg_single = w_neg[:, 0, :]
-                    else:
-                        w_water_single = w_water_ref
-                        w_neg_single = w_neg
-                    features_water = w_water_single.index_select(1, self.latent_indices)
-                    features_neg = w_neg_single.index_select(1, self.latent_indices)
-                
-                # Generate true key and predictions
-                true_key = self.key_mapper(features_water)
-                
-                if self.direct_feature_decoder:
-                    pred_key_neg_logits = self.decoder(features_neg)
-                else:
-                    pred_key_neg_logits = self.decoder(x_neg)
-                
-                pred_key_neg_probs = torch.sigmoid(pred_key_neg_logits)
-                negative_mse_distance = torch.mean(torch.pow(pred_key_neg_probs - true_key, 2), dim=1)
+                w = self.pretrained_models[model_name].mapping(z, None)
+                x = self.pretrained_models[model_name].synthesis(w, noise_mode="const")
+        
+        # Apply transformation if specified
+        if transformation is not None:
+            x = transformation(x)
+        
+        # Extract features based on the approach
+        if self.use_image_pixels:
+            features = self.extract_image_partial(x)
+        else:
+            if w.ndim == 3:
+                w_single = w[:, 0, :]
+            else:
+                w_single = w
+            features = w_single[:, self.latent_indices]
+        
+        # Handle direct pixel prediction mode
+        if self.direct_pixel_pred:
+            # In direct pixel prediction mode, features are the targets
+            true_values = features
             
-            if self.rank == 0 and self.enable_timing:
-                logging.info(f"Feature extraction and prediction completed in {time.time() - feat_start:.2f}s")
-                logging.info(f"Total negative sample processing time: {time.time() - start_time:.2f}s")
+            # Apply ZCA whitening to decoder input if enabled
+            x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
+            
+            # Predict pixel values
+            pred_values = self.decoder(x_decoder)
+            
+            # Compute MSE loss between predicted values and actual pixel values
+            key_loss = torch.mean(torch.pow(pred_values - true_values, 2))
+            
+            # Calculate distance metrics between true values and predicted values
+            mse_distance = torch.mean(torch.pow(pred_values - true_values, 2), dim=1)
+            mse_distance_mean = mse_distance.mean().item()
+            mse_distance_std = mse_distance.std().item()
+            
+            # Mean absolute error (MAE) distance
+            mae_distance = torch.mean(torch.abs(pred_values - true_values), dim=1)
+            mae_distance_mean = mae_distance.mean().item()
+            mae_distance_std = mae_distance.std().item()
+            
+            # We can't calculate match rate with continuous values, so set to 0
+            match_rate = 0.0
             
             return {
-                'negative_mse_distances': negative_mse_distance.cpu().numpy(),
-                'batch_size': z.size(0),
-                'x_neg': x_neg,
-                'features_neg': features_neg
+                'key_loss': key_loss.item(),
+                'match_rate': match_rate,
+                'mse_distance_mean': mse_distance_mean,
+                'mse_distance_std': mse_distance_std,
+                'mae_distance_mean': mae_distance_mean,
+                'mae_distance_std': mae_distance_std
             }
-            
-        except Exception as e:
-            if self.rank == 0:
-                logging.error(f"Error in negative sample processing: {str(e)}")
-                logging.error(str(e), exc_info=True)
-            return self._get_empty_negative_batch_result(z.size(0))
-
-    def _get_empty_batch_result(self, batch_size):
-        """Helper method to return empty batch results on error."""
+        
+        # Normal watermarking mode
+        # Generate true key using the key mapper
+        true_key = self.key_mapper(features)
+        
+        # Apply ZCA whitening to decoder input if enabled
+        x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
+        
+        # Predict key based on the decoder mode
+        if self.direct_feature_decoder:
+            # Use features directly as input to the decoder
+            pred_key_logits = self.decoder(features)
+        else:
+            # Use the whitened watermarked image as input
+            pred_key_logits = self.decoder(x_decoder)
+        
+        # Get predicted probabilities (before thresholding)
+        pred_key_probs = torch.sigmoid(pred_key_logits)
+        
+        # Convert predicted logits to binary for match rate calculation
+        pred_key_binary = (pred_key_probs > 0.5).float()
+        # Calculate exact match rate (percentage of samples where all bits match)
+        key_matches = (pred_key_binary == true_key).all(dim=1).float().mean().item()
+        match_rate = key_matches * 100  # Convert to percentage
+        
+        # Calculate distance metrics between true key and predicted probabilities
+        # Mean squared error (MSE) distance - range [0, 1]
+        mse_distance = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1)
+        mse_distance_mean = mse_distance.mean().item()
+        mse_distance_std = mse_distance.std().item()
+        
+        # Mean absolute error (MAE) distance - range [0, 1]
+        mae_distance = torch.mean(torch.abs(pred_key_probs - true_key), dim=1)
+        mae_distance_mean = mae_distance.mean().item()
+        mae_distance_std = mae_distance.std().item()
+        
+        # Compute key loss (BCE with logits)
+        key_loss = self.bce_loss_fn(pred_key_logits, true_key)
+        
         return {
-            'watermarked_mse_distances': np.ones(batch_size) * 0.5,
-            'original_mse_distances': np.ones(batch_size) * 0.5,
-            'batch_size': batch_size,
-            'lpips_losses': np.ones(batch_size) * 0.5,
-            'x_orig': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
-            'x_water': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
-            'features_water': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device),
-            'features_orig': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device),
-            'diff_images': None
+            'key_loss': key_loss.item(),
+            'match_rate': match_rate,
+            'mse_distance_mean': mse_distance_mean,
+            'mse_distance_std': mse_distance_std,
+            'mae_distance_mean': mae_distance_mean,
+            'mae_distance_std': mae_distance_std
         }
-
-    def _get_empty_negative_batch_result(self, batch_size):
-        """Helper method to return empty negative batch results on error."""
-        return {
-            'negative_mse_distances': np.ones(batch_size) * 0.5,
-            'batch_size': batch_size,
-            'x_neg': torch.zeros((batch_size, 3, self.config.model.img_size, self.config.model.img_size), device=self.device),
-            'features_neg': torch.zeros((batch_size, self.image_pixel_count if self.use_image_pixels else len(self.latent_indices)), device=self.device)
-        }
-
+    
     def evaluate_batch(self) -> Dict[str, float]:
         """
         Run batch evaluation to compute metrics.

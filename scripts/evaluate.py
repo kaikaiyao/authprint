@@ -51,6 +51,8 @@ def parse_args():
                         help="Sensitivity parameter for sine-based mapping (higher values: more sensitive to changes)")
     parser.add_argument("--direct_feature_decoder", action="store_true", default=False,
                         help="Whether the decoder was trained directly on pixel features instead of full images")
+    parser.add_argument("--direct_pixel_pred", action="store_true", default=False,
+                        help="Whether the decoder was trained in direct pixel prediction mode (requires use_image_pixels=True and freeze_watermarked_model=True)")
     
     # New: Mutual information estimation parameters
     parser.add_argument("--estimate_mutual_info", action="store_true", default=False,

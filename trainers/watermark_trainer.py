@@ -331,7 +331,7 @@ class WatermarkTrainer:
             decoder_output_dim = self.config.model.key_length
         
         # Initialize decoder model based on the mode
-        if self.direct_feature_decoder or self.direct_pixel_pred:
+        if self.direct_feature_decoder:
             # Use FeatureDecoder that takes pixel features directly
             input_dim = self.image_pixel_count  # Number of selected pixels
             logging.info(f"Initializing enhanced FeatureDecoder with input_dim={input_dim}, output_dim={decoder_output_dim}")
@@ -347,7 +347,7 @@ class WatermarkTrainer:
                 use_attention=self.config.decoder.use_attention
             ).to(self.device)
         else:
-            # Use standard Decoder that takes images
+            # Use standard Decoder that takes images for both normal mode and direct_pixel_pred mode
             self.decoder = Decoder(
                 image_size=self.config.model.img_size,
                 channels=3,
@@ -541,13 +541,14 @@ class WatermarkTrainer:
         
         # Handle training differently based on whether we're using direct pixel prediction
         if self.direct_pixel_pred:
-            # In direct pixel prediction mode, the features ARE the targets
+            # In direct pixel prediction mode, we still use the image as input to the decoder
+            # but the target is the actual pixel values (features)
             true_values = features
             
             # Apply ZCA whitening to decoder input if enabled
             x_water_decoder = self.apply_zca_whitening(x_water) if self.use_zca_whitening else x_water
             
-            # Predict pixel values
+            # Use the image as input to the decoder
             pred_values = self.decoder(x_water_decoder)
             
             # Compute MSE loss between predicted values and actual pixel values
@@ -989,7 +990,9 @@ class WatermarkTrainer:
         # Predict pixel values
         with torch.no_grad():
             if self.direct_pixel_pred:
-                pred_values = self.decoder(features)
+                # Apply ZCA whitening to decoder input if enabled
+                x_water_decoder = self.apply_zca_whitening(x_water) if self.use_zca_whitening else x_water
+                pred_values = self.decoder(x_water_decoder)
             else:
                 x_water_decoder = self.apply_zca_whitening(x_water) if self.use_zca_whitening else x_water
                 pred_values = self.decoder(x_water_decoder)

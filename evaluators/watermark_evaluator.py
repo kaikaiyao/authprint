@@ -2074,23 +2074,35 @@ class WatermarkEvaluator:
             torch.Tensor: Transformed images
         """
         if 'truncation' in transformation:
-            return apply_truncation(x, psi=self.config.evaluate.truncation_psi)
-        
+            # For truncation, we need to handle it differently since it requires model access
+            if hasattr(self.watermarked_model, 'module'):
+                w = self.watermarked_model.module.mapping(x, None)
+                x = self.watermarked_model.module.synthesis(w, noise_mode="const")
+            else:
+                w = self.watermarked_model.mapping(x, None)
+                x = self.watermarked_model.synthesis(w, noise_mode="const")
+            
+            # Apply truncation to the generated images
+            truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
+            return apply_truncation(x, truncation_psi)
+            
         elif 'quantization_int2' in transformation:
             return quantize_model_weights(x, bit_width='int2')
-            
+                
         elif 'quantization_int4' in transformation:
             return quantize_model_weights(x, bit_width='int4')
-            
+                
         elif 'quantization' in transformation:
             return quantize_model_weights(x, bit_width='int8')
-            
+                
         elif 'downsample' in transformation:
-            return downsample_and_upsample(x, size=self.config.evaluate.downsample_size)
-            
+            downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
+            return downsample_and_upsample(x, size=downsample_size)
+                
         elif 'jpeg' in transformation:
-            return apply_jpeg_compression(x, quality=self.config.evaluate.jpeg_quality)
-            
+            jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 55)
+            return apply_jpeg_compression(x, quality=jpeg_quality)
+                
         else:
             if self.rank == 0:
                 logging.warning(f"Unknown transformation: {transformation}")

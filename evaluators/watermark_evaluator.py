@@ -2003,13 +2003,13 @@ class WatermarkEvaluator:
             return x
             
         elif 'quantization_int2' in transformation:
-            return quantize_model_weights(x, bit_width='int2')
+            return quantize_model_weights(x, precision='int2')
                 
         elif 'quantization_int4' in transformation:
-            return quantize_model_weights(x, bit_width='int4')
+            return quantize_model_weights(x, precision='int4')
                 
         elif 'quantization' in transformation:
-            return quantize_model_weights(x, bit_width='int8')
+            return quantize_model_weights(x, precision='int8')
                 
         elif 'downsample' in transformation:
             downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)

@@ -87,6 +87,11 @@ class WatermarkEvaluator:
         self.direct_feature_decoder = getattr(self.config.model, 'direct_feature_decoder', False)
         if self.direct_feature_decoder and self.rank == 0:
             logging.info(f"Using direct feature decoder mode: decoder takes pixel features directly as input")
+            
+        # Flag for direct pixel prediction mode
+        self.direct_pixel_pred = getattr(self.config.model, 'direct_pixel_pred', False)
+        if self.direct_pixel_pred and self.rank == 0:
+            logging.info(f"Using direct pixel prediction mode: decoder will be trained to predict pixel values directly")
         
         # Multi-decoder mode setup
         self.enable_multi_decoder = getattr(self.config.evaluate, 'enable_multi_decoder', False)
@@ -291,10 +296,20 @@ class WatermarkEvaluator:
                     use_attention=self.config.decoder.use_attention
                 ).to(self.device)
             else:
+                # Determine decoder output dimension based on mode
+                if self.direct_pixel_pred:
+                    # For direct pixel prediction, output dimension is the number of pixels we're predicting
+                    decoder_output_dim = self.image_pixel_count
+                    if self.rank == 0:
+                        logging.info(f"Setting decoder output dimension to {decoder_output_dim} for direct pixel prediction")
+                else:
+                    # Normal mode - output dimension is the binary key length
+                    decoder_output_dim = self.config.model.key_length
+                
                 self.decoder = Decoder(
                     image_size=self.config.model.img_size,
                     channels=3,
-                    output_dim=self.config.model.key_length
+                    output_dim=decoder_output_dim
                 ).to(self.device)
             self.decoder.eval()
             
@@ -401,10 +416,20 @@ class WatermarkEvaluator:
                         use_attention=self.config.decoder.use_attention
                     ).to(self.device)
                 else:
+                    # Determine decoder output dimension based on mode
+                    if self.direct_pixel_pred:
+                        # For direct pixel prediction, output dimension is the number of pixels we're predicting
+                        decoder_output_dim = pixel_count
+                        if self.rank == 0:
+                            logging.info(f"  Setting decoder output dimension to {decoder_output_dim} for direct pixel prediction")
+                    else:
+                        # Normal mode - output dimension is the binary key length
+                        decoder_output_dim = key_length
+                    
                     decoder = Decoder(
                         image_size=self.config.model.img_size,
                         channels=3,
-                        output_dim=key_length
+                        output_dim=decoder_output_dim
                     ).to(self.device)
                 decoder.eval()
                 
@@ -436,6 +461,16 @@ class WatermarkEvaluator:
         # Initialize LPIPS loss with the same network as in training
         self.lpips_loss_fn = lpips.LPIPS(net='alex').to(self.device)
         self.lpips_loss_fn.eval()  # Ensure it's in eval mode
+        
+        # Validate direct pixel prediction mode
+        if self.direct_pixel_pred:
+            # Ensure that direct_pixel_pred is only used with image-based approach
+            if not self.use_image_pixels:
+                self.direct_pixel_pred = False
+                if self.rank == 0:
+                    logging.warning("direct_pixel_pred can only be used with image-based approach (use_image_pixels=True). Disabling it.")
+            elif self.rank == 0:
+                logging.info("Validated direct pixel prediction mode: decoder will predict selected pixel values directly")
         
         # Setup quantized models - only if explicitly enabled
         self.quantized_models = {}
@@ -1419,6 +1454,7 @@ class WatermarkEvaluator:
             logging.info(f"  Evaluation mode: {evaluation_mode}")
             logging.info(f"  Approach: {'Image-based' if self.use_image_pixels else 'Latent-based'}")
             logging.info(f"  Direct feature decoder: {self.direct_feature_decoder}")
+            logging.info(f"  Direct pixel prediction: {self.direct_pixel_pred}")
             if self.use_image_pixels:
                 if self.enable_multi_decoder:
                     for i, pixel_indices in enumerate(self.image_pixel_indices_list):

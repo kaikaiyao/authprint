@@ -1042,11 +1042,11 @@ class WatermarkEvaluator:
         Returns:
             dict: Metrics dictionary for direct pixel prediction
         """
-        # Accumulators for pixel prediction metrics
-        mse_values = []
-        mae_values = []
+        # First compute watermarked model metrics to establish threshold
+        watermarked_mse_values = []
+        watermarked_mae_values = []
         
-        # Process in batches
+        # Process watermarked model batches
         with torch.no_grad():
             for i in range(num_batches):
                 start_idx = i * batch_size
@@ -1078,56 +1078,81 @@ class WatermarkEvaluator:
                 mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
                 mae = torch.mean(torch.abs(pred_values - true_values), dim=1).cpu().numpy()
                 
-                mse_values.append(mse)
-                mae_values.append(mae)
+                watermarked_mse_values.append(mse)
+                watermarked_mae_values.append(mae)
                 
                 # Progress reporting
                 if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
                     logging.info(f"Processed {i+1}/{num_batches} batches for direct pixel prediction")
+        
+        # Combine watermarked results
+        watermarked_mse_all = np.concatenate(watermarked_mse_values)
+        watermarked_mae_all = np.concatenate(watermarked_mae_values)
+        
+        # Calculate threshold at 95% TPR for watermarked model
+        sorted_mse = np.sort(watermarked_mse_all)
+        sorted_mae = np.sort(watermarked_mae_all)
+        threshold_idx = int(0.95 * len(sorted_mse))
+        mse_threshold = sorted_mse[threshold_idx]
+        mae_threshold = sorted_mae[threshold_idx]
+        
+        if self.rank == 0:
+            logging.info(f"Computed thresholds at 95% TPR - MSE: {mse_threshold:.6f}, MAE: {mae_threshold:.6f}")
+        
+        # Create metrics dictionary
+        metrics = {
+            'pixel_mse_mean': np.mean(watermarked_mse_all),
+            'pixel_mse_std': np.std(watermarked_mse_all),
+            'pixel_mae_mean': np.mean(watermarked_mae_all),
+            'pixel_mae_std': np.std(watermarked_mae_all),
+            'pixel_mse_values': watermarked_mse_all,
+            'pixel_mae_values': watermarked_mae_all,
+            'mse_threshold_95tpr': mse_threshold,
+            'mae_threshold_95tpr': mae_threshold
+        }
+        
+        # Evaluate negative samples if enabled
+        negative_results = {}
+        if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
+            negative_results = self._evaluate_negative_samples_direct_pixel(all_z)
             
-            # Combine results
-            mse_all = np.concatenate(mse_values)
-            mae_all = np.concatenate(mae_values)
-            
-            # Create metrics dictionary
-            metrics = {
-                'pixel_mse_mean': np.mean(mse_all),
-                'pixel_mse_std': np.std(mse_all),
-                'pixel_mae_mean': np.mean(mae_all),
-                'pixel_mae_std': np.std(mae_all),
-                'pixel_mse_values': mse_all,
-                'pixel_mae_values': mae_all
-            }
-            
-            # Evaluate negative samples if enabled
-            negative_results = {}
-            if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
-                negative_results = self._evaluate_negative_samples_direct_pixel(all_z)
-            
-            # Add negative results to metrics
+            # Calculate FPR at 95% TPR threshold for each negative case
             if negative_results:
-                metrics['negative_results'] = negative_results
-            
-            # Log summary metrics
-            if self.rank == 0:
-                logging.info("\nDirect Pixel Prediction Results:")
-                logging.info("-" * 100)
-                logging.info(f"Watermarked Model - Pixel MSE: {metrics['pixel_mse_mean']:.6f} ± {metrics['pixel_mse_std']:.6f}")
-                logging.info(f"Watermarked Model - Pixel MAE: {metrics['pixel_mae_mean']:.6f} ± {metrics['pixel_mae_std']:.6f}")
-                
-                # Print negative sample results if available
-                if negative_results:
-                    logging.info("\nNegative Sample Results:")
-                    logging.info("-" * 100)
-                    logging.info(f"{'Model/Transform':<40}{'Pixel MSE':>20}{'Pixel MAE':>20}")
-                    logging.info("-" * 100)
+                for key, result in negative_results.items():
+                    mse_all = result['mse_values']
+                    mae_all = result['mae_values']
                     
-                    for name, result in negative_results.items():
-                        logging.info(f"{name:<40}{result['mse_mean']:>20.6f}{result['mae_mean']:>20.6f}")
-                
-                logging.info("-" * 100)
+                    # Calculate FPR (percentage of negative samples below threshold)
+                    fpr_mse = np.mean(mse_all <= mse_threshold) * 100
+                    fpr_mae = np.mean(mae_all <= mae_threshold) * 100
+                    
+                    result['fpr_95tpr_mse'] = fpr_mse
+                    result['fpr_95tpr_mae'] = fpr_mae
+        
+        # Add negative results to metrics
+        if negative_results:
+            metrics['negative_results'] = negative_results
+        
+        # Log summary metrics
+        if self.rank == 0:
+            logging.info("\nDirect Pixel Prediction Results:")
+            logging.info("-" * 100)
+            logging.info(f"Watermarked Model - Pixel MSE: {metrics['pixel_mse_mean']:.6f} ± {metrics['pixel_mse_std']:.6f}")
+            logging.info(f"Watermarked Model - Pixel MAE: {metrics['pixel_mae_mean']:.6f} ± {metrics['pixel_mae_std']:.6f}")
             
-            return metrics
+            # Print negative sample results if available
+            if negative_results:
+                logging.info("\nNegative Sample Results:")
+                logging.info("-" * 100)
+                logging.info(f"{'Model/Transform':<40}{'Pixel MSE':>15}{'FPR@95%TPR':>15}{'Pixel MAE':>15}{'FPR@95%TPR':>15}")
+                logging.info("-" * 100)
+                
+                for name, result in negative_results.items():
+                    logging.info(f"{name:<40}{result['mse_mean']:>15.6f}{result['fpr_95tpr_mse']:>15.2f}%{result['mae_mean']:>15.6f}{result['fpr_95tpr_mae']:>15.2f}%")
+            
+            logging.info("-" * 100)
+        
+        return metrics
     
     def _evaluate_negative_samples_direct_pixel(self, all_z):
         """
@@ -1237,20 +1262,24 @@ class WatermarkEvaluator:
                     else:
                         # Use transformation on watermarked or original model
                         use_watermarked = "watermarked" in transformation
+                        source_model = self.watermarked_model if use_watermarked else self.gan_model
                         
-                        if use_watermarked:
-                            if hasattr(self.watermarked_model, 'module'):
-                                w = self.watermarked_model.module.mapping(z, None)
-                                x = self.watermarked_model.module.synthesis(w, noise_mode="const")
-                            else:
-                                w = self.watermarked_model.mapping(z, None)
-                                x = self.watermarked_model.synthesis(w, noise_mode="const")
+                        if 'truncation' in transformation:
+                            # For truncation, use apply_truncation with the model and latent vectors
+                            truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
+                            x = apply_truncation(source_model, z, truncation_psi)
                         else:
-                            w = self.gan_model.mapping(z, None)
-                            x = self.gan_model.synthesis(w, noise_mode="const")
-                        
-                        # Apply transformation
-                        x = self.apply_transformation(x, transformation)
+                            # Normal generation followed by transformation
+                            if hasattr(source_model, 'module'):
+                                w = source_model.module.mapping(z, None)
+                                x = source_model.module.synthesis(w, noise_mode="const")
+                            else:
+                                w = source_model.mapping(z, None)
+                                x = source_model.synthesis(w, noise_mode="const")
+                            
+                            # Apply other transformations after generation
+                            if transformation:
+                                x = self.apply_transformation(x, transformation)
                     
                     # Extract features (real pixel values)
                     features = self.extract_image_partial(x)
@@ -1278,7 +1307,9 @@ class WatermarkEvaluator:
                     'mse_mean': np.mean(mse_all),
                     'mse_std': np.std(mse_all),
                     'mae_mean': np.mean(mae_all),
-                    'mae_std': np.std(mae_all)
+                    'mae_std': np.std(mae_all),
+                    'mse_values': mse_all,  # Store all values for FPR calculation
+                    'mae_values': mae_all   # Store all values for FPR calculation
                 }
                 
                 # Progress reporting
@@ -1286,116 +1317,6 @@ class WatermarkEvaluator:
                     logging.info(f"Completed {idx+1}/{total_evals} negative sample evaluations")
         
         return negative_results
-    
-    def _evaluate_negative_samples(self, all_z):
-        """
-        Evaluate all negative sample types (pretrained models and transformations).
-        This is extracted to a separate method for better organization.
-        
-        Args:
-            all_z (torch.Tensor): All latent vectors to use for evaluation.
-            
-        Returns:
-            dict: Dictionary mapping negative sample types to their distances.
-        """
-        negative_distances_all = {}
-        batch_size = self.config.evaluate.batch_size
-        num_samples = self.config.evaluate.num_samples
-        num_batches = (num_samples + batch_size - 1) // batch_size
-        
-        # Get the list of evaluations to run
-        evaluations_to_run = []
-        
-        # Add pretrained model evaluations
-        if getattr(self.config.evaluate, 'evaluate_pretrained', True):
-            if getattr(self.config.evaluate, 'evaluate_ffhq1k', True) and 'ffhq1k' in self.pretrained_models:
-                evaluations_to_run.append(('ffhq1k', None))
-            
-            if getattr(self.config.evaluate, 'evaluate_ffhq30k', True) and 'ffhq30k' in self.pretrained_models:
-                evaluations_to_run.append(('ffhq30k', None))
-            
-            if getattr(self.config.evaluate, 'evaluate_ffhq70k_bcr', True) and 'ffhq70k-bcr' in self.pretrained_models:
-                evaluations_to_run.append(('ffhq70k-bcr', None))
-            
-            if getattr(self.config.evaluate, 'evaluate_ffhq70k_noaug', True) and 'ffhq70k-noaug' in self.pretrained_models:
-                evaluations_to_run.append(('ffhq70k-noaug', None))
-        
-        # Add transformations
-        if getattr(self.config.evaluate, 'evaluate_transforms', True):
-            # Truncation
-            if getattr(self.config.evaluate, 'evaluate_truncation', True):
-                evaluations_to_run.append((None, 'truncation_original'))
-            if getattr(self.config.evaluate, 'evaluate_truncation_watermarked', True):
-                evaluations_to_run.append((None, 'truncation_watermarked'))
-            
-            # Int8 Quantization
-            if getattr(self.config.evaluate, 'evaluate_quantization', True):
-                evaluations_to_run.append((None, 'quantization_original'))
-            if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', True):
-                evaluations_to_run.append((None, 'quantization_watermarked'))
-            
-            # Int4 Quantization
-            if getattr(self.config.evaluate, 'evaluate_quantization_int4', True):
-                evaluations_to_run.append((None, 'quantization_int4_original'))
-            if getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', True):
-                evaluations_to_run.append((None, 'quantization_int4_watermarked'))
-            
-            # Int2 Quantization
-            if getattr(self.config.evaluate, 'evaluate_quantization_int2', True):
-                evaluations_to_run.append((None, 'quantization_int2_original'))
-            if getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', True):
-                evaluations_to_run.append((None, 'quantization_int2_watermarked'))
-            
-            # Downsampling
-            if getattr(self.config.evaluate, 'evaluate_downsample', True):
-                evaluations_to_run.append((None, 'downsample_original'))
-            if getattr(self.config.evaluate, 'evaluate_downsample_watermarked', True):
-                evaluations_to_run.append((None, 'downsample_watermarked'))
-            
-            # JPEG compression
-            if getattr(self.config.evaluate, 'evaluate_jpeg', True):
-                evaluations_to_run.append((None, 'jpeg_original'))
-            if getattr(self.config.evaluate, 'evaluate_jpeg_watermarked', True):
-                evaluations_to_run.append((None, 'jpeg_watermarked'))
-        
-        # Run evaluations
-        total_evals = len(evaluations_to_run)
-        if self.rank == 0 and total_evals > 0:
-            logging.info(f"Running {total_evals} negative sample evaluations...")
-        
-        with torch.no_grad():
-            for idx, (model_name, transformation) in enumerate(evaluations_to_run):
-                key = model_name if model_name else transformation
-                
-                # Skip if we've already evaluated this configuration
-                if key in negative_distances_all:
-                    continue
-                
-                distances_per_batch = []
-                
-                # Process in batches
-                for i in range(num_batches):
-                    start_idx = i * batch_size
-                    end_idx = min((i + 1) * batch_size, num_samples)
-                    current_batch_size = end_idx - start_idx
-                    
-                    # Extract batch of latent vectors
-                    z = all_z[start_idx:end_idx]
-                    
-                    # Process batch with the specific model/transformation
-                    batch_results = self._process_negative_sample_batch(z, model_name, transformation)
-                    
-                    # Accumulate distances
-                    distances_per_batch.append(batch_results['negative_mse_distances'])
-                
-                # Combine results
-                negative_distances_all[key] = np.concatenate(distances_per_batch)
-                
-                # Progress reporting
-                if self.rank == 0 and (idx+1) % max(1, total_evals//5) == 0:
-                    logging.info(f"Completed {idx+1}/{total_evals} negative sample evaluations")
-        
-        return negative_distances_all
     
     def visualize_samples(self):
         """
@@ -2074,17 +1995,12 @@ class WatermarkEvaluator:
             torch.Tensor: Transformed images
         """
         if 'truncation' in transformation:
-            # For truncation, we need to handle it differently since it requires model access
-            if hasattr(self.watermarked_model, 'module'):
-                w = self.watermarked_model.module.mapping(x, None)
-                x = self.watermarked_model.module.synthesis(w, noise_mode="const")
-            else:
-                w = self.watermarked_model.mapping(x, None)
-                x = self.watermarked_model.synthesis(w, noise_mode="const")
-            
-            # Apply truncation to the generated images
+            # For truncation, we need to apply it directly to the images
             truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
-            return apply_truncation(x, truncation_psi)
+            # Note: truncation should be applied during image generation, not after
+            # This is just a placeholder for compatibility - the actual truncation
+            # should be handled in _evaluate_negative_samples_direct_pixel
+            return x
             
         elif 'quantization_int2' in transformation:
             return quantize_model_weights(x, bit_width='int2')

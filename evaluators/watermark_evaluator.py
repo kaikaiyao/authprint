@@ -1268,6 +1268,25 @@ class WatermarkEvaluator:
                             # For truncation, use apply_truncation with the model and latent vectors
                             truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
                             x = apply_truncation(source_model, z, truncation_psi)
+                        elif 'quantization' in transformation:
+                            # For quantization, use the pre-quantized models
+                            precision = 'int8'
+                            if 'int4' in transformation:
+                                precision = 'int4'
+                            elif 'int2' in transformation:
+                                precision = 'int2'
+                                
+                            if use_watermarked:
+                                model = self.quantized_watermarked_models[precision]
+                            else:
+                                model = self.quantized_models[precision]
+                                
+                            if hasattr(model, 'module'):
+                                w = model.module.mapping(z, None)
+                                x = model.module.synthesis(w, noise_mode="const")
+                            else:
+                                w = model.mapping(z, None)
+                                x = model.synthesis(w, noise_mode="const")
                         else:
                             # Normal generation followed by transformation
                             if hasattr(source_model, 'module'):
@@ -2003,17 +2022,23 @@ class WatermarkEvaluator:
             return x
             
         elif 'quantization_int2' in transformation:
-            return quantize_model_weights(x, precision='int2')
+            # Note: quantization should be applied to the model during setup, not to tensors
+            # This is just a placeholder for compatibility
+            return x
                 
         elif 'quantization_int4' in transformation:
-            return quantize_model_weights(x, precision='int4')
+            # Note: quantization should be applied to the model during setup, not to tensors
+            # This is just a placeholder for compatibility
+            return x
                 
         elif 'quantization' in transformation:
-            return quantize_model_weights(x, precision='int8')
+            # Note: quantization should be applied to the model during setup, not to tensors
+            # This is just a placeholder for compatibility
+            return x
                 
         elif 'downsample' in transformation:
             downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)
-            return downsample_and_upsample(x, size=downsample_size)
+            return downsample_and_upsample(x, downsample_size)
                 
         elif 'jpeg' in transformation:
             jpeg_quality = getattr(self.config.evaluate, 'jpeg_quality', 55)

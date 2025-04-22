@@ -81,8 +81,7 @@ spec:
                           --evaluation_mode 'batch' \
                           --num_samples 500 \
                           --batch_size 32 \
-                          --use_image_pixels \
-                          --freeze_watermarked_model"
+                          --use_image_pixels"
               
               # Run evaluation 10 times
               for run in {1..10}; do

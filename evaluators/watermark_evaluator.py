@@ -1339,6 +1339,119 @@ class WatermarkEvaluator:
         
         return negative_results
     
+    def _evaluate_negative_samples(self, all_z):
+        """
+        Evaluate negative samples by comparing against pretrained models and transformations.
+        
+        Args:
+            all_z (torch.Tensor): All latent vectors for evaluation
+            
+        Returns:
+            dict: Dictionary mapping negative sample types to their MSE distances
+        """
+        negative_distances_all = {}
+        batch_size = self.config.evaluate.batch_size
+        num_samples = self.config.evaluate.num_samples
+        num_batches = (num_samples + batch_size - 1) // batch_size
+        
+        # Get the list of evaluations to run
+        evaluations_to_run = []
+        
+        # Add pretrained model evaluations
+        if getattr(self.config.evaluate, 'evaluate_pretrained', True):
+            if getattr(self.config.evaluate, 'evaluate_ffhq1k', True) and 'ffhq1k' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq1k', None))
+            
+            if getattr(self.config.evaluate, 'evaluate_ffhq30k', True) and 'ffhq30k' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq30k', None))
+            
+            if getattr(self.config.evaluate, 'evaluate_ffhq70k_bcr', True) and 'ffhq70k-bcr' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq70k-bcr', None))
+            
+            if getattr(self.config.evaluate, 'evaluate_ffhq70k_noaug', True) and 'ffhq70k-noaug' in self.pretrained_models:
+                evaluations_to_run.append(('ffhq70k-noaug', None))
+        
+        # Add transformations
+        if getattr(self.config.evaluate, 'evaluate_transforms', True):
+            # Truncation
+            if getattr(self.config.evaluate, 'evaluate_truncation', True):
+                evaluations_to_run.append((None, 'truncation_original'))
+            if getattr(self.config.evaluate, 'evaluate_truncation_watermarked', True):
+                evaluations_to_run.append((None, 'truncation_watermarked'))
+            
+            # Int8 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization', True):
+                evaluations_to_run.append((None, 'quantization_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_watermarked'))
+            
+            # Int4 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization_int4', True):
+                evaluations_to_run.append((None, 'quantization_int4_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_int4_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_int4_watermarked'))
+            
+            # Int2 Quantization
+            if getattr(self.config.evaluate, 'evaluate_quantization_int2', True):
+                evaluations_to_run.append((None, 'quantization_int2_original'))
+            if getattr(self.config.evaluate, 'evaluate_quantization_int2_watermarked', True):
+                evaluations_to_run.append((None, 'quantization_int2_watermarked'))
+            
+            # Downsampling
+            if getattr(self.config.evaluate, 'evaluate_downsample', True):
+                evaluations_to_run.append((None, 'downsample_original'))
+            if getattr(self.config.evaluate, 'evaluate_downsample_watermarked', True):
+                evaluations_to_run.append((None, 'downsample_watermarked'))
+            
+            # JPEG compression
+            if getattr(self.config.evaluate, 'evaluate_jpeg', True):
+                evaluations_to_run.append((None, 'jpeg_original'))
+            if getattr(self.config.evaluate, 'evaluate_jpeg_watermarked', True):
+                evaluations_to_run.append((None, 'jpeg_watermarked'))
+        
+        # Run evaluations
+        total_evals = len(evaluations_to_run)
+        if self.rank == 0 and total_evals > 0:
+            logging.info(f"Running {total_evals} negative sample evaluations...")
+        
+        with torch.no_grad():
+            for idx, (model_name, transformation) in enumerate(evaluations_to_run):
+                key = model_name if model_name else transformation
+                
+                # Skip if we've already evaluated this configuration
+                if key in negative_distances_all:
+                    continue
+                
+                distances_per_batch = []
+                
+                # Process in batches
+                for i in range(num_batches):
+                    start_idx = i * batch_size
+                    end_idx = min((i + 1) * batch_size, num_samples)
+                    
+                    # Extract batch of latent vectors
+                    z = all_z[start_idx:end_idx]
+                    
+                    # Process the negative sample batch
+                    batch_results = self._process_negative_sample_batch(z, model_name, transformation)
+                    
+                    if 'negative_mse_distances' not in batch_results:
+                        if self.rank == 0:
+                            logging.error(f"Missing MSE distances in batch results for {key}")
+                        continue
+                    
+                    distances_per_batch.append(batch_results['negative_mse_distances'])
+                
+                # Combine results
+                if distances_per_batch:
+                    negative_distances_all[key] = np.concatenate(distances_per_batch)
+                
+                # Progress reporting
+                if self.rank == 0 and (idx+1) % max(1, total_evals//5) == 0:
+                    logging.info(f"Completed {idx+1}/{total_evals} negative sample evaluations")
+        
+        return negative_distances_all
+    
     def visualize_samples(self):
         """
         Generate and visualize a set of samples with their watermark keys.

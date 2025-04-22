@@ -83,6 +83,7 @@ spec:
                           --batch_size 32 \
                           --use_image_pixels"
               
+              
               # Run evaluation 10 times
               for run in {1..10}; do
                 echo "Starting evaluation run $run/10..."

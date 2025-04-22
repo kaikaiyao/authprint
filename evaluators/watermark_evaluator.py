@@ -2129,27 +2129,50 @@ class WatermarkEvaluator:
             torch.Tensor: Transformed images
         """
         if 'truncation' in transformation:
-            # For truncation, we need to apply it directly to the images
+            # For truncation, we need to regenerate the images with truncation
+            use_watermarked = "watermarked" in transformation
+            source_model = self.watermarked_model if use_watermarked else self.gan_model
             truncation_psi = getattr(self.config.evaluate, 'truncation_psi', 2.0)
-            # Note: truncation should be applied during image generation, not after
-            # This is just a placeholder for compatibility - the actual truncation
-            # should be handled in _evaluate_negative_samples_direct_pixel
-            return x
             
-        elif 'quantization_int2' in transformation:
-            # Note: quantization should be applied to the model during setup, not to tensors
-            # This is just a placeholder for compatibility
-            return x
-                
-        elif 'quantization_int4' in transformation:
-            # Note: quantization should be applied to the model during setup, not to tensors
-            # This is just a placeholder for compatibility
-            return x
-                
+            # Generate new latents for the batch
+            batch_size = x.size(0)
+            z = torch.randn(batch_size, self.latent_dim, device=self.device)
+            
+            # Apply truncation during generation
+            if hasattr(source_model, 'module'):
+                w = source_model.module.mapping(z, None, truncation_psi=truncation_psi)
+                x_trunc = source_model.module.synthesis(w, noise_mode="const")
+            else:
+                w = source_model.mapping(z, None, truncation_psi=truncation_psi)
+                x_trunc = source_model.synthesis(w, noise_mode="const")
+            return x_trunc
+            
         elif 'quantization' in transformation:
-            # Note: quantization should be applied to the model during setup, not to tensors
-            # This is just a placeholder for compatibility
-            return x
+            use_watermarked = "watermarked" in transformation
+            precision = 'int8'
+            
+            if 'int4' in transformation:
+                precision = 'int4'
+            elif 'int2' in transformation:
+                precision = 'int2'
+            
+            # Use the pre-quantized models
+            if use_watermarked:
+                model = self.quantized_watermarked_models[precision]
+            else:
+                model = self.quantized_models[precision]
+            
+            # Generate new images using the quantized model
+            batch_size = x.size(0)
+            z = torch.randn(batch_size, self.latent_dim, device=self.device)
+            
+            if hasattr(model, 'module'):
+                w = model.module.mapping(z, None)
+                x_quant = model.module.synthesis(w, noise_mode="const")
+            else:
+                w = model.mapping(z, None)
+                x_quant = model.synthesis(w, noise_mode="const")
+            return x_quant
                 
         elif 'downsample' in transformation:
             downsample_size = getattr(self.config.evaluate, 'downsample_size', 128)

@@ -12,6 +12,7 @@ import numpy as np
 from tqdm import tqdm
 import sklearn.metrics as skmetrics
 import matplotlib.pyplot as plt
+import torch.nn as nn
 
 from config.default_config import Config
 from models.decoder import Decoder, FeatureDecoder
@@ -73,6 +74,7 @@ class WatermarkEvaluator:
         
         # Initialize loss functions
         self.lpips_loss_fn = None
+        self.bce_loss_fn = nn.BCEWithLogitsLoss()  # Add BCE loss initialization
         
         # ZCA whitening parameters
         self.use_zca_whitening = getattr(self.config.model, 'use_zca_whitening', False)

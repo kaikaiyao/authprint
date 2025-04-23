@@ -2088,39 +2088,75 @@ class WatermarkEvaluator:
             # Apply transformation
             x = self.apply_transformation(x, transformation)
         
-        # Extract features
-        if self.use_image_pixels:
-            features = self.extract_image_partial(x)
+        if self.enable_multi_decoder:
+            # Process each decoder separately
+            all_mse_distances = []
+            
+            for idx, (decoder, key_mapper, pixel_indices) in enumerate(zip(self.decoders, self.key_mappers, self.image_pixel_indices_list)):
+                # Extract features using current decoder's pixel indices
+                features = self.extract_image_partial(x, pixel_indices)
+                
+                # Generate true key using the key mapper
+                true_key = key_mapper(features)
+                
+                # Apply ZCA whitening to decoder input if enabled
+                x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
+                
+                # Predict key based on the decoder mode
+                if self.direct_feature_decoder:
+                    # Use features directly as input to the decoder
+                    pred_key_logits = decoder(features)
+                else:
+                    # Use the image as input
+                    pred_key_logits = decoder(x_decoder)
+                
+                # Get predicted probabilities
+                pred_key_probs = torch.sigmoid(pred_key_logits)
+                
+                # Calculate distance metrics
+                mse_distances = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1)
+                all_mse_distances.append(mse_distances)
+            
+            # Combine MSE distances from all decoders (using mean)
+            combined_mse = torch.mean(torch.stack(all_mse_distances), dim=0)
+            
+            return {
+                'negative_mse_distances': combined_mse.cpu().numpy()
+            }
         else:
-            if w.ndim == 3:
-                w_single = w[:, 0, :]
+            # Extract features
+            if self.use_image_pixels:
+                features = self.extract_image_partial(x)
             else:
-                w_single = w
-            features = w_single[:, self.latent_indices]
-        
-        # Generate true key using the key mapper
-        true_key = self.key_mapper(features)
-        
-        # Apply ZCA whitening to decoder input if enabled
-        x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
-        
-        # Predict key based on the decoder mode
-        if self.direct_feature_decoder:
-            # Use features directly as input to the decoder
-            pred_key_logits = self.decoder(features)
-        else:
-            # Use the image as input
-            pred_key_logits = self.decoder(x_decoder)
-        
-        # Get predicted probabilities
-        pred_key_probs = torch.sigmoid(pred_key_logits)
-        
-        # Calculate distance metrics
-        negative_mse_distances = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1).cpu().numpy()
-        
-        return {
-            'negative_mse_distances': negative_mse_distances
-        }
+                if w.ndim == 3:
+                    w_single = w[:, 0, :]
+                else:
+                    w_single = w
+                features = w_single[:, self.latent_indices]
+            
+            # Generate true key using the key mapper
+            true_key = self.key_mapper(features)
+            
+            # Apply ZCA whitening to decoder input if enabled
+            x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
+            
+            # Predict key based on the decoder mode
+            if self.direct_feature_decoder:
+                # Use features directly as input to the decoder
+                pred_key_logits = self.decoder(features)
+            else:
+                # Use the image as input
+                pred_key_logits = self.decoder(x_decoder)
+            
+            # Get predicted probabilities
+            pred_key_probs = torch.sigmoid(pred_key_logits)
+            
+            # Calculate distance metrics
+            negative_mse_distances = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1).cpu().numpy()
+            
+            return {
+                'negative_mse_distances': negative_mse_distances
+            }
     
     def _process_negative_sample_batch_direct_pixel(self, z, model_name=None, transformation=None):
         """

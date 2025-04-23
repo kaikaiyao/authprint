@@ -14,7 +14,7 @@ class ModelConfig:
     stylegan2_url: str = "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
     stylegan2_local_path: str = "ffhq70k-paper256-ada.pkl"
     img_size: int = 256
-    key_length: int = 4
+    key_length: int = 128
     selected_indices: Optional[List[int]] = None
     w_partial_set_seed: int = 42
     w_partial_length: int = 32

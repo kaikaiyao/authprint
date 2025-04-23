@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument("--checkpoint_path", type=str,
                         help="Path to checkpoint to evaluate (not required in multi-decoder mode)")
     parser.add_argument("--img_size", type=int, default=256, help="Image resolution")
-    parser.add_argument("--key_length", type=int, default=4, help="Length of the binary key (output dimension)")
+    parser.add_argument("--key_length", type=int, default=128, help="Length of the binary key (output dimension)")
     parser.add_argument("--selected_indices", type=str, default=None,
                         help="Optional: Comma-separated list of indices for latent partial. If not provided, indices will be generated using w_partial_set_seed")
     parser.add_argument("--w_partial_set_seed", type=int, default=42,

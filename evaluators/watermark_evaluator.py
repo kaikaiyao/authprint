@@ -879,7 +879,6 @@ class WatermarkEvaluator:
         if self.enable_multi_decoder:
             # Process each decoder separately
             all_mse_distances = []
-            all_mae_distances = []
             
             for idx, (decoder, key_mapper, pixel_indices) in enumerate(zip(self.decoders, self.key_mappers, self.image_pixel_indices_list)):
                 # Extract features using current decoder's pixel indices
@@ -897,21 +896,18 @@ class WatermarkEvaluator:
                 # Calculate metrics for this decoder
                 pred_probs = torch.sigmoid(predictions)
                 mse_distances = torch.mean(torch.pow(pred_probs - keys, 2), dim=1)
-                mae_distances = torch.mean(torch.abs(pred_probs - keys), dim=1)
                 
                 all_mse_distances.append(mse_distances)
-                all_mae_distances.append(mae_distances)
             
             # Combine metrics from all decoders (using mean)
             combined_mse = torch.mean(torch.stack(all_mse_distances), dim=0)
-            combined_mae = torch.mean(torch.stack(all_mae_distances), dim=0)
             
             # Calculate LPIPS loss
             lpips_loss = self.lpips_loss_fn(x, x).squeeze()
             
             return {
                 'watermarked_mse_distances': combined_mse.cpu().numpy(),
-                'original_mse_distances': combined_mae.cpu().numpy(),  # Using MAE as original for comparison
+                'original_mse_distances': combined_mse.cpu().numpy(),  # Use MSE for both
                 'lpips_losses': lpips_loss.cpu().numpy()
             }
         else:
@@ -931,14 +927,13 @@ class WatermarkEvaluator:
             # Calculate metrics
             pred_probs = torch.sigmoid(predictions)
             mse_distances = torch.mean(torch.pow(pred_probs - keys, 2), dim=1)
-            mae_distances = torch.mean(torch.abs(pred_probs - keys), dim=1)
             
             # Calculate LPIPS loss
             lpips_loss = self.lpips_loss_fn(x, x).squeeze()
             
             return {
                 'watermarked_mse_distances': mse_distances.cpu().numpy(),
-                'original_mse_distances': mae_distances.cpu().numpy(),  # Using MAE as original for comparison
+                'original_mse_distances': mse_distances.cpu().numpy(),  # Use MSE for both
                 'lpips_losses': lpips_loss.cpu().numpy()
             }
     

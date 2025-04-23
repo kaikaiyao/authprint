@@ -290,6 +290,108 @@ class WatermarkEvaluator:
             self.decoders = []
             self.key_mappers = []
             self.image_pixel_indices_list = []
+            
+            # Get configuration for each decoder
+            checkpoints = self.config.evaluate.multi_decoder_checkpoints
+            num_decoders = len(checkpoints)
+            
+            # Validate and set default values for multi-decoder parameters
+            if not self.key_lengths:
+                self.key_lengths = [self.config.model.key_length] * num_decoders
+            if not self.key_mapper_seeds:
+                self.key_mapper_seeds = [self.config.model.key_mapper_seed] * num_decoders
+            if not self.pixel_counts:
+                self.pixel_counts = [self.config.model.image_pixel_count] * num_decoders
+            if not self.pixel_seeds:
+                self.pixel_seeds = [self.config.model.image_pixel_set_seed + i for i in range(num_decoders)]
+            
+            if self.rank == 0:
+                logging.info(f"\nSetting up {num_decoders} decoders:")
+                for i in range(num_decoders):
+                    logging.info(f"\nDecoder {i+1}:")
+                    logging.info(f"  Checkpoint: {checkpoints[i]}")
+                    logging.info(f"  Key length: {self.key_lengths[i]}")
+                    logging.info(f"  Key mapper seed: {self.key_mapper_seeds[i]}")
+                    logging.info(f"  Pixel count: {self.pixel_counts[i]}")
+                    logging.info(f"  Pixel seed: {self.pixel_seeds[i]}")
+            
+            # Generate pixel indices for each decoder
+            if self.use_image_pixels:
+                img_size = self.config.model.img_size
+                channels = 3
+                total_pixels = channels * img_size * img_size
+                
+                for i in range(num_decoders):
+                    np.random.seed(self.pixel_seeds[i])
+                    pixel_count = self.pixel_counts[i]
+                    
+                    if pixel_count > total_pixels:
+                        if self.rank == 0:
+                            logging.warning(f"Decoder {i+1}: Requested {pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
+                        pixel_count = total_pixels
+                        indices = np.arange(total_pixels)
+                    else:
+                        indices = np.random.choice(total_pixels, size=pixel_count, replace=False)
+                    
+                    # Convert to torch tensor and move to device
+                    pixel_indices = torch.tensor(indices, dtype=torch.long, device=self.device)
+                    self.image_pixel_indices_list.append(pixel_indices)
+                    
+                    if self.rank == 0:
+                        logging.info(f"  Generated {len(pixel_indices)} pixel indices for decoder {i+1}")
+                
+                # Set the base image_pixel_indices to the first decoder's indices
+                self.image_pixel_indices = self.image_pixel_indices_list[0]
+            
+            # Initialize decoders and key mappers
+            for i in range(num_decoders):
+                # Initialize decoder
+                if self.direct_feature_decoder:
+                    input_dim = self.pixel_counts[i] if self.use_image_pixels else len(self.latent_indices)
+                    decoder = FeatureDecoder(
+                        input_dim=input_dim,
+                        output_dim=self.key_lengths[i],
+                        hidden_dims=self.config.decoder.hidden_dims,
+                        activation=self.config.decoder.activation,
+                        dropout_rate=self.config.decoder.dropout_rate,
+                        num_residual_blocks=self.config.decoder.num_residual_blocks,
+                        use_spectral_norm=self.config.decoder.use_spectral_norm,
+                        use_layer_norm=self.config.decoder.use_layer_norm,
+                        use_attention=self.config.decoder.use_attention
+                    ).to(self.device)
+                else:
+                    decoder_output_dim = self.pixel_counts[i] if self.direct_pixel_pred else self.key_lengths[i]
+                    decoder = Decoder(
+                        image_size=self.config.model.img_size,
+                        channels=3,
+                        output_dim=decoder_output_dim
+                    ).to(self.device)
+                decoder.eval()
+                
+                # Initialize key mapper
+                input_dim = self.pixel_counts[i] if self.use_image_pixels else len(self.latent_indices)
+                key_mapper = KeyMapper(
+                    input_dim=input_dim,
+                    output_dim=self.key_lengths[i],
+                    seed=self.key_mapper_seeds[i],
+                    use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
+                    sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
+                ).to(self.device)
+                key_mapper.eval()
+                
+                # Load checkpoint for this decoder
+                if self.rank == 0:
+                    logging.info(f"Loading checkpoint for decoder {i+1} from {checkpoints[i]}...")
+                load_checkpoint(
+                    checkpoint_path=checkpoints[i],
+                    watermarked_model=None,  # We already loaded the watermarked model
+                    decoder=decoder,
+                    key_mapper=None,  # Set to None to skip loading key mapper state
+                    device=self.device
+                )
+                
+                self.decoders.append(decoder)
+                self.key_mappers.append(key_mapper)
         else:
             # Initialize single decoder
             if self.direct_feature_decoder:
@@ -710,240 +812,89 @@ class WatermarkEvaluator:
         return torch.cat(x_whitened_chunks, dim=0)
     
     def process_batch(self, z, model_name=None, transformation=None):
-        """Process a batch of latent vectors through the model."""
-        batch_size = z.shape[0]
+        """
+        Process a batch of latent vectors through the model pipeline.
         
-        # Generate images using the specified model
-        if model_name is None:
-            # Use watermarked model
-            if hasattr(self.watermarked_model, 'module'):
-                w = self.watermarked_model.module.mapping(z, None)
-                x = self.watermarked_model.module.synthesis(w, noise_mode="const")
-            else:
-                w = self.watermarked_model.mapping(z, None)
-                x = self.watermarked_model.synthesis(w, noise_mode="const")
-        else:
-            # Use pretrained model
-            if hasattr(self.pretrained_models[model_name], 'module'):
-                w = self.pretrained_models[model_name].module.mapping(z, None)
-                x = self.pretrained_models[model_name].module.synthesis(w, noise_mode="const")
-            else:
-                w = self.pretrained_models[model_name].mapping(z, None)
-                x = self.pretrained_models[model_name].synthesis(w, noise_mode="const")
+        Args:
+            z (torch.Tensor): Batch of latent vectors
+            model_name (str, optional): Name of the model being evaluated (for logging)
+            transformation (str, optional): Name of the transformation being applied
+            
+        Returns:
+            dict: Dictionary containing batch processing results
+        """
+        # Generate images using either original or watermarked model
+        model = self.gan_model if model_name == "original" else self.watermarked_model
+        x = model(z)
         
         # Apply transformation if specified
-        if transformation is not None:
+        if transformation:
             x = self.apply_transformation(x, transformation)
         
-        # Handle multi-decoder mode
+        # Process batch differently based on mode
         if self.enable_multi_decoder:
             # Process each decoder separately
+            all_features = []
+            all_predictions = []
+            all_keys = []
             all_metrics = []
+            
             for idx, (decoder, key_mapper, pixel_indices) in enumerate(zip(self.decoders, self.key_mappers, self.image_pixel_indices_list)):
                 # Extract features using current decoder's pixel indices
                 features = self.extract_image_partial(x, pixel_indices)
+                all_features.append(features)
                 
-                # Generate true key using current key mapper
-                true_key = key_mapper(features)
-                
-                # Apply ZCA whitening to decoder input if enabled
-                x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
-                
-                # Predict key based on the decoder mode
+                # Get predictions from current decoder
                 if self.direct_feature_decoder:
-                    # Use features directly as input to the decoder
-                    pred_key_logits = decoder(features)
+                    predictions = decoder(features)
                 else:
-                    # Use the whitened watermarked image as input
-                    pred_key_logits = decoder(x_decoder)
+                    predictions = decoder(x)
+                all_predictions.append(predictions)
                 
-                # Get predicted probabilities
-                pred_key_probs = torch.sigmoid(pred_key_logits)
+                # Get keys from current key mapper
+                keys = key_mapper(features)
+                all_keys.append(keys)
                 
-                # Convert predicted logits to binary for match rate calculation
-                pred_key_binary = (pred_key_probs > 0.5).float()
-                # Calculate exact match rate (percentage of samples where all bits match)
-                key_matches = (pred_key_binary == true_key).all(dim=1).float().mean().item()
-                match_rate = key_matches * 100  # Convert to percentage
-                
-                # Calculate distance metrics
-                mse_distance = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1)
-                mse_distance_mean = mse_distance.mean().item()
-                mse_distance_std = mse_distance.std().item()
-                
-                mae_distance = torch.mean(torch.abs(pred_key_probs - true_key), dim=1)
-                mae_distance_mean = mae_distance.mean().item()
-                mae_distance_std = mae_distance.std().item()
-                
-                # Compute key loss (BCE with logits)
-                key_loss = self.bce_loss_fn(pred_key_logits, true_key)
+                # Calculate metrics for this decoder
+                pred_probs = torch.sigmoid(predictions)
+                mse_distances = torch.mean(torch.pow(pred_probs - keys, 2), dim=1)
+                mae_distances = torch.mean(torch.abs(pred_probs - keys), dim=1)
                 
                 metrics = {
                     'decoder_idx': idx,
-                    'key_loss': key_loss.item(),
-                    'match_rate': match_rate,
-                    'mse_distance_mean': mse_distance_mean,
-                    'mse_distance_std': mse_distance_std,
-                    'mae_distance_mean': mae_distance_mean,
-                    'mae_distance_std': mae_distance_std,
-                    'watermarked_mse_distances': mse_distance.cpu().numpy()
+                    'key_length': self.key_lengths[idx] if self.key_lengths else self.config.model.key_length,
+                    'pixel_count': len(pixel_indices),
+                    'mse_distances': mse_distances.cpu().numpy(),
+                    'mae_distances': mae_distances.cpu().numpy()
                 }
-                
-                # If this is for watermark evaluation (no model_name or transformation), we need to also process the original model
-                if model_name is None and transformation is None:
-                    # Generate the original image
-                    with torch.no_grad():
-                        w_orig = self.gan_model.mapping(z, None)
-                        x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
-                        
-                        # Extract features for original model
-                        features_orig = self.extract_image_partial(x_orig, pixel_indices)
-                        
-                        # Generate original model true key
-                        true_key_orig = key_mapper(features_orig)
-                        
-                        # Apply ZCA whitening to original image if enabled
-                        x_orig_decoder = self.apply_zca_whitening(x_orig) if self.use_zca_whitening else x_orig
-                        
-                        # Predict key for original image
-                        if self.direct_feature_decoder:
-                            pred_key_logits_orig = decoder(features_orig)
-                        else:
-                            pred_key_logits_orig = decoder(x_orig_decoder)
-                        
-                        # Get predicted probabilities for original
-                        pred_key_probs_orig = torch.sigmoid(pred_key_logits_orig)
-                        
-                        # Calculate distance metrics for original
-                        original_mse_distances = torch.mean(torch.pow(pred_key_probs_orig - true_key_orig, 2), dim=1).cpu().numpy()
-                        
-                        # Calculate LPIPS loss between original and watermarked
-                        lpips_losses = self.lpips_loss_fn(x_orig, x).squeeze().cpu().numpy()
-                        
-                        # Add comparison metrics
-                        metrics.update({
-                            'original_mse_distances': original_mse_distances,
-                            'lpips_losses': lpips_losses
-                        })
-                
                 all_metrics.append(metrics)
             
-            return all_metrics
-        else:
-            # Original single-decoder processing
-            # Extract features based on the approach
-            if self.use_image_pixels:
-                features = self.extract_image_partial(x)
-            else:
-                if w.ndim == 3:
-                    w_single = w[:, 0, :]
-                else:
-                    w_single = w
-                features = w_single[:, self.latent_indices]
-            
-            # Rest of the original process_batch code...
-            # [Previous single-decoder implementation remains unchanged]
-            
-            # Generate true key using the key mapper
-            true_key = self.key_mapper(features)
-            
-            # Apply ZCA whitening to decoder input if enabled
-            x_decoder = self.apply_zca_whitening(x) if self.use_zca_whitening else x
-            
-            # Predict key based on the decoder mode
-            if self.direct_feature_decoder:
-                # Use features directly as input to the decoder
-                pred_key_logits = self.decoder(features)
-            else:
-                # Use the whitened watermarked image as input
-                pred_key_logits = self.decoder(x_decoder)
-            
-            # Get predicted probabilities
-            pred_key_probs = torch.sigmoid(pred_key_logits)
-            
-            # Convert predicted logits to binary for match rate calculation
-            pred_key_binary = (pred_key_probs > 0.5).float()
-            # Calculate exact match rate (percentage of samples where all bits match)
-            key_matches = (pred_key_binary == true_key).all(dim=1).float().mean().item()
-            match_rate = key_matches * 100  # Convert to percentage
-            
-            # Calculate distance metrics
-            mse_distance = torch.mean(torch.pow(pred_key_probs - true_key, 2), dim=1)
-            mse_distance_mean = mse_distance.mean().item()
-            mse_distance_std = mse_distance.std().item()
-            
-            mae_distance = torch.mean(torch.abs(pred_key_probs - true_key), dim=1)
-            mae_distance_mean = mae_distance.mean().item()
-            mae_distance_std = mae_distance.std().item()
-            
-            # Compute key loss (BCE with logits)
-            key_loss = self.bce_loss_fn(pred_key_logits, true_key)
-            
-            # If this is for watermark evaluation (no model_name or transformation), we need to also process the original model
-            if model_name is None and transformation is None:
-                # For the comparison batch, we need to compute original vs watermarked
-                # Also generate the original image for comparison
-                with torch.no_grad():
-                    w_orig = self.gan_model.mapping(z, None)
-                    x_orig = self.gan_model.synthesis(w_orig, noise_mode="const")
-                    
-                    # Extract features for original model
-                    if self.use_image_pixels:
-                        features_orig = self.extract_image_partial(x_orig)
-                    else:
-                        if w_orig.ndim == 3:
-                            w_orig_single = w_orig[:, 0, :]
-                        else:
-                            w_orig_single = w_orig
-                        features_orig = w_orig_single[:, self.latent_indices]
-                    
-                    # Generate original model true key
-                    true_key_orig = self.key_mapper(features_orig)
-                    
-                    # Apply ZCA whitening to original image if enabled
-                    x_orig_decoder = self.apply_zca_whitening(x_orig) if self.use_zca_whitening else x_orig
-                    
-                    # Predict key for original image
-                    if self.direct_feature_decoder:
-                        # Use features directly as input to the decoder
-                        pred_key_logits_orig = self.decoder(features_orig)
-                    else:
-                        # Use the original image as input
-                        pred_key_logits_orig = self.decoder(x_orig_decoder)
-                    
-                    # Get predicted probabilities for original
-                    pred_key_probs_orig = torch.sigmoid(pred_key_logits_orig)
-                    
-                    # Calculate distance metrics for original
-                    original_mse_distances = torch.mean(torch.pow(pred_key_probs_orig - true_key_orig, 2), dim=1).cpu().numpy()
-                    
-                    # Calculate LPIPS loss between original and watermarked
-                    lpips_losses = self.lpips_loss_fn(x_orig, x).squeeze().cpu().numpy()
-                    
-                    # Convert watermarked distances to numpy for consistency with the evaluate_batch method
-                    watermarked_mse_distances = mse_distance.cpu().numpy()
-                
-                # Return full comparison metrics
-                return {
-                    'key_loss': key_loss.item(),
-                    'match_rate': match_rate,
-                    'mse_distance_mean': mse_distance_mean,
-                    'mse_distance_std': mse_distance_std,
-                    'mae_distance_mean': mae_distance_mean,
-                    'mae_distance_std': mae_distance_std,
-                    'watermarked_mse_distances': watermarked_mse_distances,
-                    'original_mse_distances': original_mse_distances,
-                    'lpips_losses': lpips_losses
-                }
-            
-            # For other cases (model_name or transformation specified), just return the basic metrics
             return {
-                'key_loss': key_loss.item(),
-                'match_rate': match_rate,
-                'mse_distance_mean': mse_distance_mean,
-                'mse_distance_std': mse_distance_std,
-                'mae_distance_mean': mae_distance_mean,
-                'mae_distance_std': mae_distance_std
+                'features': all_features,
+                'predictions': all_predictions,
+                'keys': all_keys,
+                'metrics': all_metrics,
+                'images': x
+            }
+        else:
+            # Single decoder mode
+            # Extract features using the base image_pixel_indices
+            features = self.extract_image_partial(x)
+            
+            # Get predictions from decoder
+            if self.direct_feature_decoder:
+                predictions = self.decoder(features)
+            else:
+                predictions = self.decoder(x)
+            
+            # Get keys from key mapper
+            keys = self.key_mapper(features)
+            
+            return {
+                'features': features,
+                'predictions': predictions,
+                'keys': keys,
+                'images': x
             }
     
     def evaluate_batch(self) -> Dict[str, float]:

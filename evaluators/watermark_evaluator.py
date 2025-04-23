@@ -291,14 +291,68 @@ class WatermarkEvaluator:
             self.key_mappers = []
             self.image_pixel_indices_list = []
             
+            # Get configuration for multi-decoder mode
+            checkpoints = self.config.evaluate.multi_decoder_checkpoints
+            if not isinstance(checkpoints, list):
+                checkpoints = checkpoints.split(',')
+            
+            # Parse key lengths if provided
+            if self.config.evaluate.multi_decoder_key_lengths:
+                if isinstance(self.config.evaluate.multi_decoder_key_lengths, str):
+                    self.key_lengths = [int(x) for x in self.config.evaluate.multi_decoder_key_lengths.split(',')]
+                else:
+                    self.key_lengths = self.config.evaluate.multi_decoder_key_lengths
+            else:
+                self.key_lengths = [self.config.model.key_length] * len(checkpoints)
+            
+            # Parse key mapper seeds
+            if self.config.evaluate.multi_decoder_key_mapper_seeds:
+                if isinstance(self.config.evaluate.multi_decoder_key_mapper_seeds, str):
+                    self.key_mapper_seeds = [int(x) for x in self.config.evaluate.multi_decoder_key_mapper_seeds.split(',')]
+                else:
+                    self.key_mapper_seeds = self.config.evaluate.multi_decoder_key_mapper_seeds
+            else:
+                self.key_mapper_seeds = [self.config.model.key_mapper_seed] * len(checkpoints)
+            
+            # Parse pixel counts
+            if self.config.evaluate.multi_decoder_pixel_counts:
+                if isinstance(self.config.evaluate.multi_decoder_pixel_counts, str):
+                    self.pixel_counts = [int(x) for x in self.config.evaluate.multi_decoder_pixel_counts.split(',')]
+                else:
+                    self.pixel_counts = self.config.evaluate.multi_decoder_pixel_counts
+            else:
+                self.pixel_counts = [self.config.model.image_pixel_count] * len(checkpoints)
+            
+            # Parse pixel seeds
+            if self.config.evaluate.multi_decoder_pixel_seeds:
+                if isinstance(self.config.evaluate.multi_decoder_pixel_seeds, str):
+                    self.pixel_seeds = [int(x) for x in self.config.evaluate.multi_decoder_pixel_seeds.split(',')]
+                else:
+                    self.pixel_seeds = self.config.evaluate.multi_decoder_pixel_seeds
+            else:
+                self.pixel_seeds = [self.config.model.image_pixel_set_seed] * len(checkpoints)
+            
+            # Validate configurations
+            if len(self.key_lengths) != len(checkpoints):
+                raise ValueError(f"Number of key lengths ({len(self.key_lengths)}) must match number of checkpoints ({len(checkpoints)})")
+            if len(self.key_mapper_seeds) != len(checkpoints):
+                raise ValueError(f"Number of key mapper seeds ({len(self.key_mapper_seeds)}) must match number of checkpoints ({len(checkpoints)})")
+            if len(self.pixel_counts) != len(checkpoints):
+                raise ValueError(f"Number of pixel counts ({len(self.pixel_counts)}) must match number of checkpoints ({len(checkpoints)})")
+            if len(self.pixel_seeds) != len(checkpoints):
+                raise ValueError(f"Number of pixel seeds ({len(self.pixel_seeds)}) must match number of checkpoints ({len(checkpoints)})")
+            
+            if self.rank == 0:
+                logging.info(f"Setting up {len(checkpoints)} decoders and key mappers...")
+            
             # Generate pixel indices for each decoder
             if self.use_image_pixels:
-                for pixel_seed in self.config.evaluate.multi_decoder_pixel_seeds:
+                for i, pixel_seed in enumerate(self.pixel_seeds):
                     np.random.seed(pixel_seed)
                     img_size = self.config.model.img_size
                     channels = 3
                     total_pixels = channels * img_size * img_size
-                    pixel_count = self.config.evaluate.multi_decoder_pixel_counts[0]  # Use first count as they're all the same
+                    pixel_count = self.pixel_counts[i]
                     
                     if pixel_count > total_pixels:
                         if self.rank == 0:
@@ -314,6 +368,67 @@ class WatermarkEvaluator:
                 
                 # Set the base image_pixel_indices to the first decoder's indices
                 self.image_pixel_indices = self.image_pixel_indices_list[0]
+            
+            # Initialize decoders and key mappers
+            for i, checkpoint_path in enumerate(checkpoints):
+                # Get configuration for this decoder
+                key_length = self.key_lengths[i]
+                key_mapper_seed = self.key_mapper_seeds[i]
+                pixel_count = self.pixel_counts[i]
+                
+                if self.rank == 0:
+                    logging.info(f"\nSetting up decoder {i+1}/{len(checkpoints)}:")
+                    logging.info(f"  Checkpoint: {checkpoint_path}")
+                    logging.info(f"  Key length: {key_length}")
+                    logging.info(f"  Key mapper seed: {key_mapper_seed}")
+                    logging.info(f"  Pixel count: {pixel_count}")
+                
+                # Initialize decoder
+                if self.direct_feature_decoder:
+                    input_dim = pixel_count if self.use_image_pixels else len(self.latent_indices)
+                    decoder = FeatureDecoder(
+                        input_dim=input_dim,
+                        output_dim=key_length,
+                        hidden_dims=self.config.decoder.hidden_dims,
+                        activation=self.config.decoder.activation,
+                        dropout_rate=self.config.decoder.dropout_rate,
+                        num_residual_blocks=self.config.decoder.num_residual_blocks,
+                        use_spectral_norm=self.config.decoder.use_spectral_norm,
+                        use_layer_norm=self.config.decoder.use_layer_norm,
+                        use_attention=self.config.decoder.use_attention
+                    ).to(self.device)
+                else:
+                    decoder = Decoder(
+                        image_size=self.config.model.img_size,
+                        channels=3,
+                        output_dim=key_length
+                    ).to(self.device)
+                decoder.eval()
+                
+                # Initialize key mapper
+                input_dim = pixel_count if self.use_image_pixels else len(self.latent_indices)
+                key_mapper = KeyMapper(
+                    input_dim=input_dim,
+                    output_dim=key_length,
+                    seed=key_mapper_seed,
+                    use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
+                    sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
+                ).to(self.device)
+                key_mapper.eval()
+                
+                # Load checkpoint for this decoder
+                if self.rank == 0:
+                    logging.info(f"Loading checkpoint from {checkpoint_path}...")
+                load_checkpoint(
+                    checkpoint_path=checkpoint_path,
+                    watermarked_model=None,  # We already loaded the watermarked model
+                    decoder=decoder,
+                    key_mapper=None,  # Set to None to skip loading key mapper state
+                    device=self.device
+                )
+                
+                self.decoders.append(decoder)
+                self.key_mappers.append(key_mapper)
         else:
             # Initialize single decoder
             if self.direct_feature_decoder:
@@ -763,50 +878,44 @@ class WatermarkEvaluator:
         # Process batch differently based on mode
         if self.enable_multi_decoder:
             # Process each decoder separately
-            all_features = []
-            all_predictions = []
-            all_keys = []
-            all_metrics = []
+            all_mse_distances = []
+            all_mae_distances = []
             
             for idx, (decoder, key_mapper, pixel_indices) in enumerate(zip(self.decoders, self.key_mappers, self.image_pixel_indices_list)):
                 # Extract features using current decoder's pixel indices
                 features = self.extract_image_partial(x, pixel_indices)
-                all_features.append(features)
                 
                 # Get predictions from current decoder
                 if self.direct_feature_decoder:
                     predictions = decoder(features)
                 else:
                     predictions = decoder(x)
-                all_predictions.append(predictions)
                 
                 # Get keys from current key mapper
                 keys = key_mapper(features)
-                all_keys.append(keys)
                 
                 # Calculate metrics for this decoder
                 pred_probs = torch.sigmoid(predictions)
                 mse_distances = torch.mean(torch.pow(pred_probs - keys, 2), dim=1)
                 mae_distances = torch.mean(torch.abs(pred_probs - keys), dim=1)
                 
-                metrics = {
-                    'decoder_idx': idx,
-                    'key_length': self.key_lengths[idx] if self.key_lengths else self.config.model.key_length,
-                    'pixel_count': len(pixel_indices),
-                    'mse_distances': mse_distances.cpu().numpy(),
-                    'mae_distances': mae_distances.cpu().numpy()
-                }
-                all_metrics.append(metrics)
+                all_mse_distances.append(mse_distances)
+                all_mae_distances.append(mae_distances)
+            
+            # Combine metrics from all decoders (using mean)
+            combined_mse = torch.mean(torch.stack(all_mse_distances), dim=0)
+            combined_mae = torch.mean(torch.stack(all_mae_distances), dim=0)
+            
+            # Calculate LPIPS loss
+            lpips_loss = self.lpips_loss_fn(x, x).squeeze()
             
             return {
-                'features': all_features,
-                'predictions': all_predictions,
-                'keys': all_keys,
-                'metrics': all_metrics,
-                'images': x
+                'watermarked_mse_distances': combined_mse.cpu().numpy(),
+                'original_mse_distances': combined_mae.cpu().numpy(),  # Using MAE as original for comparison
+                'lpips_losses': lpips_loss.cpu().numpy()
             }
         else:
-            # Single decoder mode
+            # Single decoder mode - existing code
             # Extract features using the base image_pixel_indices
             features = self.extract_image_partial(x)
             
@@ -819,11 +928,18 @@ class WatermarkEvaluator:
             # Get keys from key mapper
             keys = self.key_mapper(features)
             
+            # Calculate metrics
+            pred_probs = torch.sigmoid(predictions)
+            mse_distances = torch.mean(torch.pow(pred_probs - keys, 2), dim=1)
+            mae_distances = torch.mean(torch.abs(pred_probs - keys), dim=1)
+            
+            # Calculate LPIPS loss
+            lpips_loss = self.lpips_loss_fn(x, x).squeeze()
+            
             return {
-                'features': features,
-                'predictions': predictions,
-                'keys': keys,
-                'images': x
+                'watermarked_mse_distances': mse_distances.cpu().numpy(),
+                'original_mse_distances': mae_distances.cpu().numpy(),  # Using MAE as original for comparison
+                'lpips_losses': lpips_loss.cpu().numpy()
             }
     
     def evaluate_batch(self) -> Dict[str, float]:

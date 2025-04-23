@@ -747,7 +747,14 @@ class WatermarkEvaluator:
         """
         # Generate images using either original or watermarked model
         model = self.gan_model if model_name == "original" else self.watermarked_model
-        x = model(z)
+        
+        # Generate images with proper class conditioning
+        if hasattr(model, 'module'):
+            w = model.module.mapping(z, None)  # c=None for unconditional generation
+            x = model.module.synthesis(w, noise_mode="const")
+        else:
+            w = model.mapping(z, None)  # c=None for unconditional generation
+            x = model.synthesis(w, noise_mode="const")
         
         # Apply transformation if specified
         if transformation:

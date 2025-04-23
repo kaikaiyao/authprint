@@ -291,43 +291,18 @@ class WatermarkEvaluator:
             self.key_mappers = []
             self.image_pixel_indices_list = []
             
-            # Get configuration for each decoder
-            checkpoints = self.config.evaluate.multi_decoder_checkpoints
-            num_decoders = len(checkpoints)
-            
-            # Validate and set default values for multi-decoder parameters
-            if not self.key_lengths:
-                self.key_lengths = [self.config.model.key_length] * num_decoders
-            if not self.key_mapper_seeds:
-                self.key_mapper_seeds = [self.config.model.key_mapper_seed] * num_decoders
-            if not self.pixel_counts:
-                self.pixel_counts = [self.config.model.image_pixel_count] * num_decoders
-            if not self.pixel_seeds:
-                self.pixel_seeds = [self.config.model.image_pixel_set_seed + i for i in range(num_decoders)]
-            
-            if self.rank == 0:
-                logging.info(f"\nSetting up {num_decoders} decoders:")
-                for i in range(num_decoders):
-                    logging.info(f"\nDecoder {i+1}:")
-                    logging.info(f"  Checkpoint: {checkpoints[i]}")
-                    logging.info(f"  Key length: {self.key_lengths[i]}")
-                    logging.info(f"  Key mapper seed: {self.key_mapper_seeds[i]}")
-                    logging.info(f"  Pixel count: {self.pixel_counts[i]}")
-                    logging.info(f"  Pixel seed: {self.pixel_seeds[i]}")
-            
             # Generate pixel indices for each decoder
             if self.use_image_pixels:
-                img_size = self.config.model.img_size
-                channels = 3
-                total_pixels = channels * img_size * img_size
-                
-                for i in range(num_decoders):
-                    np.random.seed(self.pixel_seeds[i])
-                    pixel_count = self.pixel_counts[i]
+                for pixel_seed in self.config.evaluate.multi_decoder_pixel_seeds:
+                    np.random.seed(pixel_seed)
+                    img_size = self.config.model.img_size
+                    channels = 3
+                    total_pixels = channels * img_size * img_size
+                    pixel_count = self.config.evaluate.multi_decoder_pixel_counts[0]  # Use first count as they're all the same
                     
                     if pixel_count > total_pixels:
                         if self.rank == 0:
-                            logging.warning(f"Decoder {i+1}: Requested {pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
+                            logging.warning(f"Requested {pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
                         pixel_count = total_pixels
                         indices = np.arange(total_pixels)
                     else:
@@ -336,62 +311,9 @@ class WatermarkEvaluator:
                     # Convert to torch tensor and move to device
                     pixel_indices = torch.tensor(indices, dtype=torch.long, device=self.device)
                     self.image_pixel_indices_list.append(pixel_indices)
-                    
-                    if self.rank == 0:
-                        logging.info(f"  Generated {len(pixel_indices)} pixel indices for decoder {i+1}")
                 
                 # Set the base image_pixel_indices to the first decoder's indices
                 self.image_pixel_indices = self.image_pixel_indices_list[0]
-            
-            # Initialize decoders and key mappers
-            for i in range(num_decoders):
-                # Initialize decoder
-                if self.direct_feature_decoder:
-                    input_dim = self.pixel_counts[i] if self.use_image_pixels else len(self.latent_indices)
-                    decoder = FeatureDecoder(
-                        input_dim=input_dim,
-                        output_dim=self.key_lengths[i],
-                        hidden_dims=self.config.decoder.hidden_dims,
-                        activation=self.config.decoder.activation,
-                        dropout_rate=self.config.decoder.dropout_rate,
-                        num_residual_blocks=self.config.decoder.num_residual_blocks,
-                        use_spectral_norm=self.config.decoder.use_spectral_norm,
-                        use_layer_norm=self.config.decoder.use_layer_norm,
-                        use_attention=self.config.decoder.use_attention
-                    ).to(self.device)
-                else:
-                    decoder_output_dim = self.pixel_counts[i] if self.direct_pixel_pred else self.key_lengths[i]
-                    decoder = Decoder(
-                        image_size=self.config.model.img_size,
-                        channels=3,
-                        output_dim=decoder_output_dim
-                    ).to(self.device)
-                decoder.eval()
-                
-                # Initialize key mapper
-                input_dim = self.pixel_counts[i] if self.use_image_pixels else len(self.latent_indices)
-                key_mapper = KeyMapper(
-                    input_dim=input_dim,
-                    output_dim=self.key_lengths[i],
-                    seed=self.key_mapper_seeds[i],
-                    use_sine=getattr(self.config.model, 'key_mapper_use_sine', False),
-                    sensitivity=getattr(self.config.model, 'key_mapper_sensitivity', 10.0)
-                ).to(self.device)
-                key_mapper.eval()
-                
-                # Load checkpoint for this decoder
-                if self.rank == 0:
-                    logging.info(f"Loading checkpoint for decoder {i+1} from {checkpoints[i]}...")
-                load_checkpoint(
-                    checkpoint_path=checkpoints[i],
-                    watermarked_model=None,  # We already loaded the watermarked model
-                    decoder=decoder,
-                    key_mapper=None,  # Set to None to skip loading key mapper state
-                    device=self.device
-                )
-                
-                self.decoders.append(decoder)
-                self.key_mappers.append(key_mapper)
         else:
             # Initialize single decoder
             if self.direct_feature_decoder:

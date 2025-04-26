@@ -84,7 +84,7 @@ class WatermarkEvaluator:
         Generate random pixel indices for image-based approach.
         """
         # Set seed for reproducibility
-        np.random.seed(self.image_pixel_set_seed)
+        torch.manual_seed(self.image_pixel_set_seed)
         
         # Calculate total number of pixels
         img_size = self.config.model.img_size
@@ -96,16 +96,9 @@ class WatermarkEvaluator:
             if self.rank == 0:
                 logging.warning(f"Requested {self.image_pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
             self.image_pixel_count = total_pixels
-            self.image_pixel_indices = np.arange(total_pixels)
+            self.image_pixel_indices = torch.arange(total_pixels, device=self.device)
         else:
-            self.image_pixel_indices = np.random.choice(
-                total_pixels, 
-                size=self.image_pixel_count, 
-                replace=False
-            )
-        
-        # Convert to torch tensor and move to device for faster extraction
-        self.image_pixel_indices = torch.tensor(self.image_pixel_indices, dtype=torch.long, device=self.device)
+            self.image_pixel_indices = torch.randperm(total_pixels, device=self.device)[:self.image_pixel_count]
         
         if self.rank == 0:
             logging.info(f"Generated {len(self.image_pixel_indices)} pixel indices with seed {self.image_pixel_set_seed}")

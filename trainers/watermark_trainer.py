@@ -166,21 +166,26 @@ class WatermarkTrainer:
         features = self.extract_image_partial(x)
         true_values = features
         
-        # Use the image as input to the decoder
+        # Get decoder (handle DDP wrapping)
+        decoder = self.decoder.module if hasattr(self.decoder, 'module') else self.decoder
+        
+        # First compute training loss and do optimization
         pred_values = self.decoder(x)
-        
-        # Compute MSE loss between predicted values and actual pixel values
         key_loss = torch.mean(torch.pow(pred_values - true_values, 2))
-        
-        # Calculate distance metrics between true values and predicted values
-        mse_distance = torch.mean(torch.pow(pred_values - true_values, 2), dim=1)
-        mse_distance_mean = mse_distance.mean().item()
-        mse_distance_std = mse_distance.std().item()
         
         # Optimize
         self.optimizer.zero_grad()
         key_loss.backward()
         self.optimizer.step()
+        
+        # Now compute metrics in eval mode
+        decoder.eval()  # Temporarily set to eval mode
+        with torch.no_grad():
+            pred_values = self.decoder(x)
+            mse_distance = torch.mean(torch.pow(pred_values - true_values, 2), dim=1)
+            mse_distance_mean = mse_distance.mean().item()
+            mse_distance_std = mse_distance.std().item()
+        decoder.train()  # Set back to train mode
         
         return {
             'key_loss': key_loss.item(),

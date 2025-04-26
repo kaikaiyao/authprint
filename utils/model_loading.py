@@ -22,12 +22,11 @@ PRETRAINED_MODELS = {
 }
 
 
-def load_pretrained_models(config, device, rank=0):
+def load_pretrained_models(device, rank=0):
     """
-    Load pretrained StyleGAN2 models based on config.
+    Load all pretrained StyleGAN2 models.
     
     Args:
-        config: Configuration with options
         device: Device to load models on
         rank: Distributed training rank
         
@@ -36,25 +35,22 @@ def load_pretrained_models(config, device, rank=0):
     """
     models = {}
     
-    # Load models based on config flags
-    if hasattr(config.evaluate, 'evaluate_pretrained') and config.evaluate.evaluate_pretrained:
-        for model_name, (url, local_path) in PRETRAINED_MODELS.items():
-            flag_name = f'evaluate_{model_name.replace("-", "_")}'
-            if hasattr(config.evaluate, flag_name) and getattr(config.evaluate, flag_name):
-                if rank == 0:
-                    logging.info(f"Loading pretrained model: {model_name}")
-                
-                try:
-                    models[model_name] = load_stylegan2_model(url, local_path, device)
-                    models[model_name].eval()
-                    if rank == 0:
-                        logging.info(f"Successfully loaded pretrained model: {model_name}")
-                except Exception as e:
-                    if rank == 0:
-                        logging.error(f"Failed to load pretrained model {model_name}: {str(e)}")
-                        logging.error(traceback.format_exc())
-                    # Skip this model and continue with others
-                    continue
+    # Load all models from PRETRAINED_MODELS
+    for model_name, (url, local_path) in PRETRAINED_MODELS.items():
+        if rank == 0:
+            logging.info(f"Loading pretrained model: {model_name}")
+        
+        try:
+            models[model_name] = load_stylegan2_model(url, local_path, device)
+            models[model_name].eval()
+            if rank == 0:
+                logging.info(f"Successfully loaded pretrained model: {model_name}")
+        except Exception as e:
+            if rank == 0:
+                logging.error(f"Failed to load pretrained model {model_name}: {str(e)}")
+                logging.error(traceback.format_exc())
+            # Skip this model and continue with others
+            continue
     
     if rank == 0:
         logging.info(f"Loaded {len(models)} pretrained models: {list(models.keys())}")

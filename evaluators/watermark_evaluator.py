@@ -73,16 +73,11 @@ class WatermarkEvaluator:
         # Setup models
         self.setup_models()
         
-        # Load additional pretrained models if needed
-        self.pretrained_models = {}
-        if hasattr(config.evaluate, 'evaluate_pretrained') and config.evaluate.evaluate_pretrained:
-            self.pretrained_models = load_pretrained_models(config, device, rank)
+        # Load retrained models
+        self.pretrained_models = load_pretrained_models(device, rank)
         
-        # Setup the quantized model if we're evaluating quantization
+        # Setup the quantized model
         self.quantized_models = {}
-        if getattr(self.config.evaluate, 'evaluate_quantization', False):
-            # Setup the quantized models will happen in setup_models
-            pass
     
     def _generate_pixel_indices(self) -> None:
         """

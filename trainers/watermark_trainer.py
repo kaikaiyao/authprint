@@ -116,7 +116,8 @@ class WatermarkTrainer:
         self.image_pixel_indices = torch.randperm(total_pixels)[:self.image_pixel_count]
         
         if self.rank == 0:
-            logging.info(f"Generated {self.image_pixel_count} pixel indices")
+            logging.info(f"Generated {self.image_pixel_count} pixel indices with seed {self.image_pixel_set_seed}")
+            logging.info(f"Selected pixel indices: {self.image_pixel_indices.tolist()}")
     
     def validate_indices(self) -> None:
         """

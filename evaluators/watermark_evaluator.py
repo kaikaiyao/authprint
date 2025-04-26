@@ -164,9 +164,7 @@ class WatermarkEvaluator:
         
         load_checkpoint(
             checkpoint_path=self.config.checkpoint_path,
-            watermarked_model=None,  # No watermarked model needed
             decoder=self.decoder,
-            key_mapper=None,  # No key mapper needed
             device=self.device
         )
         

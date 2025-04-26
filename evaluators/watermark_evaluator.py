@@ -168,17 +168,35 @@ class WatermarkEvaluator:
             device=self.device
         )
         
-        # Setup quantized models - always set up int8 and int4
-        if self.rank == 0:
-            logging.info("Setting up int8 quantized model...")
+        # Initialize quantized models dictionary
         self.quantized_models = {}
-        self.quantized_models['int8'] = quantize_model_weights(self.gan_model, 'int8')
-        self.quantized_models['int8'].eval()
         
-        if self.rank == 0:
-            logging.info("Setting up int4 quantized model...")
-        self.quantized_models['int4'] = quantize_model_weights(self.gan_model, 'int4')
-        self.quantized_models['int4'].eval()
+        try:
+            # Setup quantized models - always set up int8 and int4
+            if self.rank == 0:
+                logging.info("Setting up int8 quantized model...")
+            
+            int8_model = quantize_model_weights(self.gan_model, 'int8')
+            int8_model.eval()
+            self.quantized_models['int8'] = int8_model
+            
+            if self.rank == 0:
+                logging.info("Successfully created int8 quantized model")
+                logging.info("Setting up int4 quantized model...")
+            
+            int4_model = quantize_model_weights(self.gan_model, 'int4')
+            int4_model.eval()
+            self.quantized_models['int4'] = int4_model
+            
+            if self.rank == 0:
+                logging.info("Successfully created int4 quantized model")
+                logging.info(f"Available quantized models: {list(self.quantized_models.keys())}")
+        
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error setting up quantized models: {str(e)}")
+                logging.error("Continuing without quantized models...")
+            self.quantized_models = {}  # Reset to empty dict if quantization failed
     
     def evaluate_batch(self) -> Dict[str, float]:
         """
@@ -296,17 +314,21 @@ class WatermarkEvaluator:
             if model_name in self.pretrained_models:
                 evaluations_to_run.append((model_name, None))
         
-        # Add transformations - always evaluate int8, int4, and downsample
-        evaluations_to_run.extend([
-            (None, 'quantization_int8'),
-            (None, 'quantization_int4'),
-            (None, 'downsample')
-        ])
+        # Add transformations - only add quantization if models are available
+        if self.quantized_models:
+            if 'int8' in self.quantized_models:
+                evaluations_to_run.append((None, 'quantization_int8'))
+            if 'int4' in self.quantized_models:
+                evaluations_to_run.append((None, 'quantization_int4'))
+        
+        # Always add downsample
+        evaluations_to_run.append((None, 'downsample'))
         
         # Run evaluations
         total_evals = len(evaluations_to_run)
         if self.rank == 0:
             logging.info(f"Running {total_evals} evaluations...")
+            logging.info(f"Evaluations to run: {[e[1] if e[1] else e[0] for e in evaluations_to_run]}")
         
         with torch.no_grad():
             for idx, (model_name, transformation) in enumerate(evaluations_to_run):

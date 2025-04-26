@@ -219,14 +219,13 @@ class WatermarkEvaluator:
             # Generate all latent vectors upfront for consistency
             all_z = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
             
-            # Process batches
+            # Process batches for original model
             mse_values = []
             
             with torch.no_grad():
                 for i in range(num_batches):
                     start_idx = i * batch_size
                     end_idx = min((i + 1) * batch_size, num_samples)
-                    current_batch_size = end_idx - start_idx
                     
                     # Extract batch of latent vectors
                     z = all_z[start_idx:end_idx]
@@ -257,18 +256,23 @@ class WatermarkEvaluator:
             # Combine results
             mse_all = np.concatenate(mse_values)
             
+            # Calculate threshold for 95% TPR
+            threshold = np.percentile(mse_all, 95)
+            if self.rank == 0:
+                logging.info(f"Threshold at 95% TPR: {threshold:.6f}")
+            
             # Calculate metrics
             metrics = {
                 'pixel_mse_mean': np.mean(mse_all),
                 'pixel_mse_std': np.std(mse_all),
-                'pixel_mse_values': mse_all
+                'pixel_mse_values': mse_all,
+                'threshold_95tpr': threshold
             }
             
-            # Evaluate negative samples if enabled
-            if getattr(self.config.evaluate, 'evaluate_neg_samples', True):
-                negative_results = self._evaluate_negative_samples(all_z)
-                if negative_results:
-                    metrics['negative_results'] = negative_results
+            # Evaluate negative samples
+            negative_results = self._evaluate_negative_samples(all_z, threshold)
+            if negative_results:
+                metrics['negative_results'] = negative_results
             
             # Save metrics
             if self.rank == 0:
@@ -282,16 +286,14 @@ class WatermarkEvaluator:
                 logging.error(str(e), exc_info=True)
             return {}
     
-    def _evaluate_negative_samples(self, all_z):
+    def _evaluate_negative_samples(self, all_z, threshold):
         """
         Evaluate negative samples by comparing against pretrained models and transformations.
-        Always evaluates:
-        - FFHQ1K, FFHQ30K, FFHQ70K-BCR, FFHQ70K-NOAUG models
-        - Int8 and Int4 quantization
-        - Downsampling
+        Computes FPR at 95% TPR threshold for each negative case.
         
         Args:
             all_z (torch.Tensor): All latent vectors for evaluation
+            threshold (float): MSE threshold at 95% TPR from original model
             
         Returns:
             dict: Dictionary mapping negative sample types to their metrics
@@ -313,11 +315,20 @@ class WatermarkEvaluator:
         if self.quantized_models:
             if 'int8' in self.quantized_models:
                 evaluations_to_run.append((None, 'quantization_int8'))
+                if self.rank == 0:
+                    logging.info(f"Added int8 quantization evaluation")
             if 'int4' in self.quantized_models:
                 evaluations_to_run.append((None, 'quantization_int4'))
+                if self.rank == 0:
+                    logging.info(f"Added int4 quantization evaluation")
+        else:
+            if self.rank == 0:
+                logging.warning("No quantized models available, skipping quantization evaluation")
         
         # Always add downsample
         evaluations_to_run.append((None, 'downsample'))
+        if self.rank == 0:
+            logging.info("Added downsample evaluation")
         
         # Run evaluations
         total_evals = len(evaluations_to_run)
@@ -328,6 +339,8 @@ class WatermarkEvaluator:
         with torch.no_grad():
             for idx, (model_name, transformation) in enumerate(evaluations_to_run):
                 key = model_name if model_name else transformation
+                if self.rank == 0:
+                    logging.info(f"Starting evaluation for: {key}")
                 
                 mse_per_batch = []
                 
@@ -360,19 +373,26 @@ class WatermarkEvaluator:
                             x = self.gan_model.synthesis(w, noise_mode="const")
                         
                         # Apply transformations
-                        if transformation.startswith('quantization'):
+                        if transformation and transformation.startswith('quantization'):
                             # For quantization, use the pre-quantized models
                             precision = transformation.split('_')[-1]
-                            model = self.quantized_models[precision]
-                                
-                            if hasattr(model, 'module'):
-                                w = model.module.mapping(z, None)
-                                x = model.module.synthesis(w, noise_mode="const")
+                            if precision in self.quantized_models:
+                                model = self.quantized_models[precision]
+                                if hasattr(model, 'module'):
+                                    w = model.module.mapping(z, None)
+                                    x = model.module.synthesis(w, noise_mode="const")
+                                else:
+                                    w = model.mapping(z, None)
+                                    x = model.synthesis(w, noise_mode="const")
+                                if self.rank == 0 and i == 0:
+                                    logging.info(f"Using {precision} quantized model for batch")
                             else:
-                                w = model.mapping(z, None)
-                                x = model.synthesis(w, noise_mode="const")
+                                if self.rank == 0 and i == 0:
+                                    logging.warning(f"Quantized model for precision {precision} not found")
                         elif transformation == 'downsample':
-                            x = downsample_and_upsample(x, downsample_size=128)  # Hardcoded downsample size
+                            if self.rank == 0 and i == 0:
+                                logging.info("Applying downsample transformation")
+                            x = downsample_and_upsample(x, downsample_size=128)
                     
                     # Extract features (real pixel values)
                     features = self.extract_image_partial(x)
@@ -388,12 +408,19 @@ class WatermarkEvaluator:
                 # Combine results
                 mse_all = np.concatenate(mse_per_batch)
                 
+                # Calculate FPR at 95% TPR threshold
+                fpr = np.mean(mse_all <= threshold)  # Proportion of negative samples below threshold
+                
                 # Store metrics
                 negative_results[key] = {
                     'mse_mean': np.mean(mse_all),
                     'mse_std': np.std(mse_all),
-                    'mse_values': mse_all
+                    'mse_values': mse_all,
+                    'fpr_at_95tpr': fpr
                 }
+                
+                if self.rank == 0:
+                    logging.info(f"FPR at 95% TPR for {key}: {fpr:.4f}")
                 
                 # Progress reporting
                 if self.rank == 0 and (idx+1) % max(1, total_evals//5) == 0:
@@ -419,19 +446,20 @@ class WatermarkEvaluator:
         # Print metrics table if we have results and are on rank 0
         if metrics and self.rank == 0:
             logging.info("\nEvaluation Results:")
-            logging.info("-" * 100)
-            logging.info(f"{'Model/Transform':<40}{'Avg MSE':>15}{'Std MSE':>15}")
-            logging.info("-" * 100)
+            logging.info("-" * 120)
+            logging.info(f"{'Model/Transform':<40}{'Avg MSE':>15}{'Std MSE':>15}{'FPR@95%TPR':>15}")
+            logging.info("-" * 120)
             
-            # Print original model results
-            logging.info(f"{'Original Model':<40}{metrics['pixel_mse_mean']:>15.6f}{metrics['pixel_mse_std']:>15.6f}")
+            # Print original model results and threshold
+            logging.info(f"{'Original Model':<40}{metrics['pixel_mse_mean']:>15.6f}{metrics['pixel_mse_std']:>15.6f}{'N/A':>15}")
+            logging.info(f"Threshold at 95% TPR: {metrics['threshold_95tpr']:.6f}")
             
             # Print negative sample results if available
             if 'negative_results' in metrics:
                 logging.info("\nNegative Sample Results:")
                 for name, result in metrics['negative_results'].items():
-                    logging.info(f"{name:<40}{result['mse_mean']:>15.6f}{result['mse_std']:>15.6f}")
+                    logging.info(f"{name:<40}{result['mse_mean']:>15.6f}{result['mse_std']:>15.6f}{result['fpr_at_95tpr']:>15.4f}")
             
-            logging.info("-" * 100)
+            logging.info("-" * 120)
         
         return metrics

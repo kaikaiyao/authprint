@@ -91,14 +91,17 @@ class WatermarkEvaluator:
         channels = 3  # RGB image
         total_pixels = channels * img_size * img_size
         
-        # Generate random indices (without replacement)
+        # Generate random indices (without replacement) on CPU first
         if self.image_pixel_count > total_pixels:
             if self.rank == 0:
                 logging.warning(f"Requested {self.image_pixel_count} pixels exceeds total pixels {total_pixels}. Using all pixels.")
             self.image_pixel_count = total_pixels
-            self.image_pixel_indices = torch.arange(total_pixels, device=self.device)
+            self.image_pixel_indices = torch.arange(total_pixels)
         else:
-            self.image_pixel_indices = torch.randperm(total_pixels, device=self.device)[:self.image_pixel_count]
+            self.image_pixel_indices = torch.randperm(total_pixels)[:self.image_pixel_count]
+        
+        # Move to device after generation
+        self.image_pixel_indices = self.image_pixel_indices.to(self.device)
         
         if self.rank == 0:
             logging.info(f"Generated {len(self.image_pixel_indices)} pixel indices with seed {self.image_pixel_set_seed}")

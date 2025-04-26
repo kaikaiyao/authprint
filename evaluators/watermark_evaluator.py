@@ -248,27 +248,28 @@ class WatermarkEvaluator:
                     # Predict pixel values
                     pred_values = self.decoder(x)
                     
-                    # Calculate metrics
-                    mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
+                    # Calculate metrics - now matching training MSE calculation
+                    mse = torch.mean(torch.pow(pred_values - true_values, 2)).cpu().numpy()
                     mse_values.append(mse)
                     
                     # Progress reporting
                     if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
                         logging.info(f"Processed {i+1}/{num_batches} batches")
             
-            # Combine results
-            mse_all = np.concatenate(mse_values)
+            # Combine results - now taking mean of batch MSEs
+            mse_all = np.mean(mse_values)
+            mse_std = np.std(mse_values)
             
-            # Calculate threshold for 95% TPR
-            threshold = np.percentile(mse_all, 95)
+            # Calculate threshold for 95% TPR - using batch MSEs
+            threshold = np.percentile(mse_values, 95)
             if self.rank == 0:
                 logging.info(f"Threshold at 95% TPR: {threshold:.6f}")
             
             # Calculate metrics
             metrics = {
-                'pixel_mse_mean': np.mean(mse_all),
-                'pixel_mse_std': np.std(mse_all),
-                'pixel_mse_values': mse_all,
+                'pixel_mse_mean': mse_all,
+                'pixel_mse_std': mse_std,
+                'pixel_mse_values': np.array(mse_values),
                 'threshold_95tpr': threshold
             }
             
@@ -406,21 +407,22 @@ class WatermarkEvaluator:
                     # Predict pixel values
                     pred_values = self.decoder(x)
                     
-                    # Calculate metrics
-                    mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
+                    # Calculate metrics - now matching training MSE calculation
+                    mse = torch.mean(torch.pow(pred_values - true_values, 2)).cpu().numpy()
                     mse_per_batch.append(mse)
                 
-                # Combine results
-                mse_all = np.concatenate(mse_per_batch)
+                # Combine results - now taking mean of batch MSEs
+                mse_all = np.mean(mse_per_batch)
+                mse_std = np.std(mse_per_batch)
                 
                 # Calculate FPR at 95% TPR threshold
-                fpr = np.mean(mse_all <= threshold)  # Proportion of negative samples below threshold
+                fpr = np.mean(np.array(mse_per_batch) <= threshold)  # Proportion of negative samples below threshold
                 
                 # Store metrics
                 negative_results[key] = {
-                    'mse_mean': np.mean(mse_all),
-                    'mse_std': np.std(mse_all),
-                    'mse_values': mse_all,
+                    'mse_mean': mse_all,
+                    'mse_std': mse_std,
+                    'mse_values': np.array(mse_per_batch),
                     'fpr_at_95tpr': fpr
                 }
                 

@@ -12,12 +12,10 @@ from config.default_config import Config
 from models.decoder import Decoder
 from models.model_utils import load_stylegan2_model
 from utils.checkpoint import load_checkpoint
-from utils.metrics import save_metrics_text
+from utils.metrics import save_metrics_text, calculate_fid
 from utils.image_transforms import (
-    apply_truncation, 
     quantize_model_weights, 
-    downsample_and_upsample, 
-    apply_jpeg_compression
+    downsample_and_upsample
 )
 from utils.model_loading import load_pretrained_models
 
@@ -345,6 +343,25 @@ class WatermarkEvaluator:
             logging.info(f"Running {total_evals} evaluations...")
             logging.info(f"Evaluations to run: {[e[1] if e[1] else e[0] for e in evaluations_to_run]}")
         
+        # Generate original model images for FID comparison
+        original_images = []
+        with torch.no_grad():
+            for i in range(num_batches):
+                start_idx = i * batch_size
+                end_idx = min((i + 1) * batch_size, num_samples)
+                z = all_z[start_idx:end_idx]
+                
+                if hasattr(self.gan_model, 'module'):
+                    w = self.gan_model.module.mapping(z, None)
+                    x = self.gan_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.gan_model.mapping(z, None)
+                    x = self.gan_model.synthesis(w, noise_mode="const")
+                
+                original_images.append(x)
+        
+        original_images = torch.cat(original_images, dim=0)
+        
         with torch.no_grad():
             for idx, (model_name, transformation) in enumerate(evaluations_to_run):
                 key = model_name if model_name else transformation
@@ -352,6 +369,7 @@ class WatermarkEvaluator:
                     logging.info(f"Starting evaluation for: {key}")
                 
                 mse_per_batch = []
+                negative_images = []
                 
                 # Process in batches
                 for i in range(num_batches):
@@ -403,6 +421,9 @@ class WatermarkEvaluator:
                                 logging.info("Applying downsample transformation")
                             x = downsample_and_upsample(x, downsample_size=128)
                     
+                    # Store images for FID calculation
+                    negative_images.append(x)
+                    
                     # Extract features (real pixel values)
                     features = self.extract_image_partial(x)
                     true_values = features
@@ -413,6 +434,12 @@ class WatermarkEvaluator:
                     # Calculate metrics - now matching training MSE calculation
                     mse = torch.mean(torch.pow(pred_values - true_values, 2)).cpu().numpy()
                     mse_per_batch.append(mse)
+                
+                # Combine all negative images
+                negative_images = torch.cat(negative_images, dim=0)
+                
+                # Calculate FID score
+                fid_score = calculate_fid(original_images, negative_images, batch_size=batch_size, device=self.device)
                 
                 # Combine results - now taking mean of batch MSEs
                 mse_all = np.mean(mse_per_batch)
@@ -426,11 +453,13 @@ class WatermarkEvaluator:
                     'mse_mean': mse_all,
                     'mse_std': mse_std,
                     'mse_values': np.array(mse_per_batch),
-                    'fpr_at_95tpr': fpr
+                    'fpr_at_95tpr': fpr,
+                    'fid_score': fid_score
                 }
                 
                 if self.rank == 0:
                     logging.info(f"FPR at 95% TPR for {key}: {fpr:.4f}")
+                    logging.info(f"FID score for {key}: {fid_score:.4f}")
                 
                 # Progress reporting
                 if self.rank == 0 and (idx+1) % max(1, total_evals//5) == 0:
@@ -456,20 +485,20 @@ class WatermarkEvaluator:
         # Print metrics table if we have results and are on rank 0
         if metrics and self.rank == 0:
             logging.info("\nEvaluation Results:")
-            logging.info("-" * 120)
-            logging.info(f"{'Model/Transform':<40}{'Avg MSE':>15}{'Std MSE':>15}{'FPR@95%TPR':>15}")
-            logging.info("-" * 120)
+            logging.info("-" * 150)
+            logging.info(f"{'Model/Transform':<40}{'Avg MSE':>15}{'Std MSE':>15}{'FPR@95%TPR':>15}{'FID Score':>15}")
+            logging.info("-" * 150)
             
             # Print original model results and threshold
-            logging.info(f"{'Original Model':<40}{metrics['pixel_mse_mean']:>15.6f}{metrics['pixel_mse_std']:>15.6f}{'N/A':>15}")
+            logging.info(f"{'Original Model':<40}{metrics['pixel_mse_mean']:>15.6f}{metrics['pixel_mse_std']:>15.6f}{'N/A':>15}{'N/A':>15}")
             logging.info(f"Threshold at 95% TPR: {metrics['threshold_95tpr']:.6f}")
             
             # Print negative sample results if available
             if 'negative_results' in metrics:
                 logging.info("\nNegative Sample Results:")
                 for name, result in metrics['negative_results'].items():
-                    logging.info(f"{name:<40}{result['mse_mean']:>15.6f}{result['mse_std']:>15.6f}{result['fpr_at_95tpr']:>15.4f}")
+                    logging.info(f"{name:<40}{result['mse_mean']:>15.6f}{result['mse_std']:>15.6f}{result['fpr_at_95tpr']:>15.4f}{result['fid_score']:>15.4f}")
             
-            logging.info("-" * 120)
+            logging.info("-" * 150)
         
         return metrics

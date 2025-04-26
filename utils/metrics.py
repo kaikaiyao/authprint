@@ -3,192 +3,11 @@ Metrics utilities for StyleGAN watermarking evaluation.
 """
 import os
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn import metrics as skmetrics
-import logging
-import seaborn as sns
+import torch
+import torch.nn as nn
+from torchvision import models
+from scipy import linalg
 
-
-def calculate_metrics(
-    all_watermarked_mse_distances, 
-    all_original_mse_distances,
-    all_watermarked_mae_distances, 
-    all_original_mae_distances,
-    watermarked_correct,
-    original_correct,
-    total_samples,
-    all_lpips_losses
-):
-    """
-    Calculate evaluation metrics.
-    
-    Args:
-        all_watermarked_mse_distances (list): MSE distances for watermarked images
-        all_original_mse_distances (list): MSE distances for original images
-        all_watermarked_mae_distances (list): MAE distances for watermarked images
-        all_original_mae_distances (list): MAE distances for original images
-        watermarked_correct (int): Number of correctly matched watermarked keys
-        original_correct (int): Number of correctly matched original keys
-        total_samples (int): Total number of samples
-        all_lpips_losses (list): LPIPS losses between original and watermarked images
-        
-    Returns:
-        dict: Dictionary of metrics
-    """
-    # Calculate match rates
-    watermarked_match_rate = (watermarked_correct / total_samples) * 100
-    original_match_rate = (original_correct / total_samples) * 100
-    
-    # Calculate distance statistics
-    watermarked_mse_distance_avg = np.mean(all_watermarked_mse_distances)
-    watermarked_mse_distance_std = np.std(all_watermarked_mse_distances)
-    watermarked_mae_distance_avg = np.mean(all_watermarked_mae_distances)
-    watermarked_mae_distance_std = np.std(all_watermarked_mae_distances)
-    
-    original_mse_distance_avg = np.mean(all_original_mse_distances)
-    original_mse_distance_std = np.std(all_original_mse_distances)
-    original_mae_distance_avg = np.mean(all_original_mae_distances)
-    original_mae_distance_std = np.std(all_original_mae_distances)
-    
-    # Calculate LPIPS statistics
-    lpips_loss_avg = np.mean(all_lpips_losses)
-    lpips_loss_std = np.std(all_lpips_losses)
-    
-    # Calculate ROC-AUC scores
-    # For watermarked vs original detection based on distance:
-    # Lower distance is better for watermarked images, so we need to negate the distances
-    # 1 = watermarked (positive class), 0 = original (negative class)
-    y_true = np.concatenate([
-        np.ones(len(all_watermarked_mse_distances)), 
-        np.zeros(len(all_original_mse_distances))
-    ])
-    
-    # Negate distances since lower is better for watermarked images
-    # (ROC-AUC expects higher scores for positive class)
-    y_score_mse = np.concatenate([
-        -np.array(all_watermarked_mse_distances), 
-        -np.array(all_original_mse_distances)
-    ])
-    
-    y_score_mae = np.concatenate([
-        -np.array(all_watermarked_mae_distances), 
-        -np.array(all_original_mae_distances)
-    ])
-    
-    # Calculate ROC-AUC
-    roc_auc_mse = skmetrics.roc_auc_score(y_true, y_score_mse)
-    roc_auc_mae = skmetrics.roc_auc_score(y_true, y_score_mae)
-    
-    # Use MSE as the primary ROC-AUC metric
-    roc_auc_score = roc_auc_mse
-    
-    # Create metrics dictionary
-    metrics = {
-        'watermarked_match_rate': watermarked_match_rate,
-        'original_match_rate': original_match_rate,
-        'watermarked_lpips_loss_avg': lpips_loss_avg,
-        'watermarked_lpips_loss_std': lpips_loss_std,
-        'watermarked_mse_distance_avg': watermarked_mse_distance_avg,
-        'watermarked_mse_distance_std': watermarked_mse_distance_std,
-        'watermarked_mae_distance_avg': watermarked_mae_distance_avg,
-        'watermarked_mae_distance_std': watermarked_mae_distance_std,
-        'original_mse_distance_avg': original_mse_distance_avg,
-        'original_mse_distance_std': original_mse_distance_std,
-        'original_mae_distance_avg': original_mae_distance_avg,
-        'original_mae_distance_std': original_mae_distance_std,
-        'roc_auc_score_mse': roc_auc_mse,
-        'roc_auc_score_mae': roc_auc_mae,
-        'roc_auc_score': roc_auc_score,
-        'num_samples_processed': total_samples
-    }
-    
-    return metrics, (y_true, y_score_mse, y_score_mae)
-
-
-def save_metrics_plots(metrics, y_data, watermarked_mse_distances, original_mse_distances, 
-                   watermarked_mae_distances=None, original_mae_distances=None, output_dir=None):
-    """Save metrics plots to output directory."""
-    # Create output directory if it doesn't exist
-    if output_dir is None:
-        output_dir = 'evaluation_results'
-    os.makedirs(output_dir, exist_ok=True)
-
-    try:
-        from sklearn.metrics import roc_curve, auc
-        
-        plt.style.use('seaborn-v0_8-darkgrid')
-
-        # Unpack y_data
-        if len(y_data) == 3:
-            y_true, y_score_mse, y_score_mae = y_data
-        else:
-            y_true, y_score_mse = y_data
-            y_score_mae = None
-        
-        # Create ROC curve figure
-        plt.figure(figsize=(10, 8))
-        
-        # Calculate ROC curve for MSE
-        fpr_mse, tpr_mse, _ = roc_curve(y_true, y_score_mse)
-        roc_auc_mse = auc(fpr_mse, tpr_mse)
-        
-        # Plot MSE ROC curve
-        plt.plot(fpr_mse, tpr_mse, color='blue', lw=2, 
-                label=f'MSE (AUC = {roc_auc_mse:.4f})')
-        
-        # Calculate and plot MAE ROC curve if available
-        if y_score_mae is not None and watermarked_mae_distances is not None and original_mae_distances is not None:
-            fpr_mae, tpr_mae, _ = roc_curve(y_true, y_score_mae)
-            roc_auc_mae = auc(fpr_mae, tpr_mae)
-            plt.plot(fpr_mae, tpr_mae, color='green', lw=2, 
-                    label=f'MAE (AUC = {roc_auc_mae:.4f})')
-        
-        # Plot random classifier
-        plt.plot([0, 1], [0, 1], color='red', lw=1, linestyle='--',
-                label='Random Classifier')
-        
-        plt.xlim([0.0, 1.0])
-        plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title('Receiver Operating Characteristic (ROC) Curve')
-        plt.legend(loc="lower right")
-        plt.grid(True)
-        plt.savefig(os.path.join(output_dir, 'roc_curve.png'), dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Create distance distribution plot
-        plt.figure(figsize=(12, 10))
-        
-        # MSE distance distribution
-        plt.subplot(2, 1, 1)
-        sns.histplot(watermarked_mse_distances, bins=50, alpha=0.5, color='blue', label='Watermarked')
-        sns.histplot(original_mse_distances, bins=50, alpha=0.5, color='red', label='Original')
-        plt.title('MSE Distance Distribution')
-        plt.xlabel('MSE Distance')
-        plt.ylabel('Frequency')
-        plt.legend()
-        plt.grid(True)
-        
-        # MAE distance distribution if available
-        if watermarked_mae_distances is not None and original_mae_distances is not None:
-            plt.subplot(2, 1, 2)
-            sns.histplot(watermarked_mae_distances, bins=50, alpha=0.5, color='blue', label='Watermarked')
-            sns.histplot(original_mae_distances, bins=50, alpha=0.5, color='red', label='Original')
-            plt.title('MAE Distance Distribution')
-            plt.xlabel('MAE Distance')
-            plt.ylabel('Frequency')
-            plt.legend()
-            plt.grid(True)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'distance_distribution.png'), dpi=300, bbox_inches='tight')
-        plt.close()
-        
-    except ImportError:
-        logging.warning("matplotlib and/or seaborn not available. Skipping plot generation.")
-    except Exception as e:
-        logging.warning(f"Error generating plots: {str(e)}")
 
 
 def save_metrics_text(metrics, output_dir):
@@ -202,4 +21,234 @@ def save_metrics_text(metrics, output_dir):
     metrics_path = os.path.join(output_dir, "evaluation_metrics.txt")
     with open(metrics_path, 'w') as f:
         for key, value in metrics.items():
-            f.write(f"{key}: {value}\n") 
+            f.write(f"{key}: {value}\n")
+
+
+class InceptionV3(nn.Module):
+    """Pretrained InceptionV3 network returning feature maps"""
+
+    # Index of default block of inception to return,
+    # corresponds to output of final average pooling
+    DEFAULT_BLOCK_IDX = 3
+
+    # Maps feature dimensionality to their output blocks indices
+    BLOCK_INDEX_BY_DIM = {
+        64: 0,   # First max pooling features
+        192: 1,  # Second max pooling features
+        768: 2,  # Pre-aux classifier features
+        2048: 3  # Final average pooling features
+    }
+
+    def __init__(self,
+                 output_blocks=(DEFAULT_BLOCK_IDX,),
+                 resize_input=True,
+                 normalize_input=True,
+                 requires_grad=False,
+                 use_fid_inception=True):
+        """Build pretrained InceptionV3
+
+        Parameters
+        ----------
+        output_blocks : list of int
+            Indices of blocks to return features of. Possible values are:
+                - 0: corresponds to output of first max pooling
+                - 1: corresponds to output of second max pooling
+                - 2: corresponds to output which is fed to aux classifier
+                - 3: corresponds to output of final average pooling
+        resize_input : bool
+            If true, bilinearly resizes input to width and height 299 before
+            feeding input to model. As the network without fully connected
+            layers is fully convolutional, it should be able to handle inputs
+            of arbitrary size, so resizing might not be strictly needed
+        normalize_input : bool
+            If true, scales the input from range (0, 1) to the range the
+            pretrained Inception network expects, namely (-1, 1)
+        requires_grad : bool
+            If true, parameters of the model require gradients. Possibly useful
+            for finetuning the network
+        use_fid_inception : bool
+            If true, uses the pretrained Inception model used in Tensorflow's
+            FID implementation. If false, uses the pretrained Inception model
+            available in torchvision. The FID Inception model has different
+            weights and a slightly different structure from torchvision's
+            Inception model. If you want to compute FID scores, you are
+            strongly advised to set this parameter to true to get comparable
+            results.
+        """
+        super(InceptionV3, self).__init__()
+
+        self.resize_input = resize_input
+        self.normalize_input = normalize_input
+        self.output_blocks = sorted(output_blocks)
+        self.last_needed_block = max(output_blocks)
+
+        assert self.last_needed_block <= 3, \
+            'Last possible output block index is 3'
+
+        self.blocks = nn.ModuleList()
+
+        if use_fid_inception:
+            inception = models.inception_v3(pretrained=True)
+            inception.Mixed_5b = models.inception_v3.InceptionA(192, pool_features=32)
+            inception.Mixed_5c = models.inception_v3.InceptionA(256, pool_features=64)
+            inception.Mixed_5d = models.inception_v3.InceptionA(288, pool_features=64)
+            inception.Mixed_6b = models.inception_v3.InceptionC(768, channels_7x7=128)
+            inception.Mixed_6c = models.inception_v3.InceptionC(768, channels_7x7=160)
+            inception.Mixed_6d = models.inception_v3.InceptionC(768, channels_7x7=160)
+            inception.Mixed_6e = models.inception_v3.InceptionC(768, channels_7x7=192)
+            inception.Mixed_7b = models.inception_v3.InceptionE(1280)
+            inception.Mixed_7c = models.inception_v3.InceptionE(2048)
+        else:
+            inception = models.inception_v3(pretrained=True)
+
+        # Block 0: input to maxpool1
+        block0 = [
+            inception.Conv2d_1a_3x3,
+            inception.Conv2d_2a_3x3,
+            inception.Conv2d_2b_3x3,
+            nn.MaxPool2d(kernel_size=3, stride=2)
+        ]
+        self.blocks.append(nn.Sequential(*block0))
+
+        # Block 1: maxpool1 to maxpool2
+        if self.last_needed_block >= 1:
+            block1 = [
+                inception.Conv2d_3b_1x1,
+                inception.Conv2d_4a_3x3,
+                nn.MaxPool2d(kernel_size=3, stride=2)
+            ]
+            self.blocks.append(nn.Sequential(*block1))
+
+        # Block 2: maxpool2 to aux classifier
+        if self.last_needed_block >= 2:
+            block2 = [
+                inception.Mixed_5b,
+                inception.Mixed_5c,
+                inception.Mixed_5d,
+                inception.Mixed_6a,
+                inception.Mixed_6b,
+                inception.Mixed_6c,
+                inception.Mixed_6d,
+                inception.Mixed_6e,
+            ]
+            self.blocks.append(nn.Sequential(*block2))
+
+        # Block 3: aux classifier to final avgpool
+        if self.last_needed_block >= 3:
+            block3 = [
+                inception.Mixed_7a,
+                inception.Mixed_7b,
+                inception.Mixed_7c,
+                nn.AdaptiveAvgPool2d(output_size=(1, 1))
+            ]
+            self.blocks.append(nn.Sequential(*block3))
+
+        for param in self.parameters():
+            param.requires_grad = requires_grad
+
+    def forward(self, inp):
+        """Get Inception feature maps
+
+        Parameters
+        ----------
+        inp : torch.autograd.Variable
+            Input tensor of shape Bx3xHxW. Values are expected to be in
+            range (0, 1)
+
+        Returns
+        -------
+        List of torch.autograd.Variable, corresponding to the selected output
+        block, sorted ascending by index
+        """
+        outp = []
+        x = inp
+
+        if self.resize_input:
+            x = nn.functional.interpolate(x,
+                                        size=(299, 299),
+                                        mode='bilinear',
+                                        align_corners=False)
+
+        if self.normalize_input:
+            x = 2 * x - 1  # Scale from range (0, 1) to range (-1, 1)
+
+        for idx, block in enumerate(self.blocks):
+            x = block(x)
+            if idx in self.output_blocks:
+                outp.append(x)
+
+            if idx == self.last_needed_block:
+                break
+
+        return outp
+
+
+def calculate_activation_statistics(images, model, batch_size=50, dims=2048, device='cpu'):
+    """Calculation of the statistics used by the FID.
+    Params:
+    -- images      : Tensor of images, of shape (N,C,H,W) and in range [0, 1]
+    -- model       : Instance of inception model
+    -- batch_size  : The images numpy array is split into batches with
+                    batch size batch_size. A reasonable batch size
+                    depends on the hardware.
+    -- dims        : Dimensionality of features returned by Inception
+    -- device      : Device to run calculations
+
+    Returns:
+    -- mu    : The mean over samples of the activations of the pool_3 layer of
+               the inception model.
+    -- sigma : The covariance matrix of the activations of the pool_3 layer of
+               the inception model.
+    """
+    model.eval()
+    
+    n_batches = (images.size(0) + batch_size - 1) // batch_size
+    n_used_imgs = n_batches * batch_size
+    
+    pred_arr = np.empty((n_used_imgs, dims))
+    
+    for i in range(n_batches):
+        start = i * batch_size
+        end = min((i + 1) * batch_size, images.size(0))
+        
+        batch = images[start:end].to(device)
+        with torch.no_grad():
+            pred = model(batch)[0]
+        
+        pred_arr[start:end] = pred.cpu().numpy().reshape(pred.size(0), -1)
+    
+    mu = np.mean(pred_arr[:images.size(0)], axis=0)
+    sigma = np.cov(pred_arr[:images.size(0)], rowvar=False)
+    
+    return mu, sigma
+
+
+def calculate_fid(images1, images2, batch_size=50, device='cpu'):
+    """Calculate FID between two sets of images.
+    
+    Args:
+        images1: First set of images, tensor of shape (N,C,H,W) in range [0,1]
+        images2: Second set of images, tensor of shape (N,C,H,W) in range [0,1]
+        batch_size: Batch size for processing
+        device: Device to run calculations on
+        
+    Returns:
+        FID score
+    """
+    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
+    model = InceptionV3([block_idx]).to(device)
+    
+    mu1, sigma1 = calculate_activation_statistics(images1, model, batch_size, device=device)
+    mu2, sigma2 = calculate_activation_statistics(images2, model, batch_size, device=device)
+    
+    # Calculate FID
+    ssdiff = np.sum((mu1 - mu2) ** 2.0)
+    covmean = linalg.sqrtm(sigma1.dot(sigma2))
+    
+    # Numerical error might give slight imaginary component
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+    
+    fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
+    
+    return float(fid) 

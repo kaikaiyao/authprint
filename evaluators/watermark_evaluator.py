@@ -164,27 +164,40 @@ class WatermarkEvaluator:
             if self.rank == 0:
                 logging.info("Setting up int8 quantized model...")
             
-            int8_model = quantize_model_weights(self.gan_model, 'int8')
-            int8_model.eval()
-            self.quantized_models['int8'] = int8_model
+            try:
+                int8_model = quantize_model_weights(self.gan_model, 'int8')
+                int8_model.eval()
+                self.quantized_models['int8'] = int8_model
+                if self.rank == 0:
+                    logging.info("Successfully created int8 quantized model")
+            except Exception as e:
+                if self.rank == 0:
+                    logging.error(f"Failed to create int8 model: {str(e)}")
+                    logging.error("int8 quantization error:", exc_info=True)
             
             if self.rank == 0:
-                logging.info("Successfully created int8 quantized model")
                 logging.info("Setting up int4 quantized model...")
             
-            int4_model = quantize_model_weights(self.gan_model, 'int4')
-            int4_model.eval()
-            self.quantized_models['int4'] = int4_model
+            try:
+                int4_model = quantize_model_weights(self.gan_model, 'int4')
+                int4_model.eval()
+                self.quantized_models['int4'] = int4_model
+                if self.rank == 0:
+                    logging.info("Successfully created int4 quantized model")
+            except Exception as e:
+                if self.rank == 0:
+                    logging.error(f"Failed to create int4 model: {str(e)}")
+                    logging.error("int4 quantization error:", exc_info=True)
             
             if self.rank == 0:
-                logging.info("Successfully created int4 quantized model")
                 logging.info(f"Available quantized models: {list(self.quantized_models.keys())}")
         
         except Exception as e:
             if self.rank == 0:
-                logging.error(f"Error setting up quantized models: {str(e)}")
+                logging.error(f"Error in quantization setup: {str(e)}")
+                logging.error("Quantization setup error:", exc_info=True)
                 logging.error("Continuing without quantized models...")
-            self.quantized_models = {}  # Reset to empty dict if quantization failed
+            self.quantized_models = {}
     
     def evaluate_batch(self) -> Dict[str, float]:
         """

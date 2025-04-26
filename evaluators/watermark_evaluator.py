@@ -70,14 +70,14 @@ class WatermarkEvaluator:
         if self.rank == 0:
             logging.info(f"Using direct pixel prediction with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
         
+        # Initialize quantized models dictionary
+        self.quantized_models = {}
+        
         # Setup models
         self.setup_models()
         
         # Load retrained models
         self.pretrained_models = load_pretrained_models(device, rank)
-        
-        # Setup the quantized model
-        self.quantized_models = {}
     
     def _generate_pixel_indices(self) -> None:
         """
@@ -155,9 +155,6 @@ class WatermarkEvaluator:
             decoder=self.decoder,
             device=self.device
         )
-        
-        # Initialize quantized models dictionary
-        self.quantized_models = {}
         
         try:
             # Setup quantized models - always set up int8 and int4
@@ -327,6 +324,8 @@ class WatermarkEvaluator:
                 evaluations_to_run.append((None, 'quantization_int4'))
                 if self.rank == 0:
                     logging.info(f"Added int4 quantization evaluation")
+            if self.rank == 0:
+                logging.info(f"Added quantization evaluations for: {list(self.quantized_models.keys())}")
         else:
             if self.rank == 0:
                 logging.warning("No quantized models available, skipping quantization evaluation")

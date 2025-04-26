@@ -77,8 +77,8 @@ def parse_args():
                         help="In w-latent mode, use both images and w_partial as input to surrogate decoders")
     parser.add_argument("--image_pixel_set_seed", type=int, default=42,
                         help="Random seed for selecting pixel indices from the generated image")
-    parser.add_argument("--image_pixel_count", type=int, default=8192,
-                        help="Number of pixels to select from the image (default: 8192)")
+    parser.add_argument("--image_pixel_count", type=int, default=32,
+                        help="Number of pixels to select from the image (default: 32)")
     parser.add_argument("--key_mapper_seed", type=int, default=2025, 
                         help="Specific random seed for KeyMapper initialization for reproducibility")
     parser.add_argument("--key_mapper_use_sine", action="store_true", default=False,

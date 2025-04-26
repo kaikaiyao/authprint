@@ -26,7 +26,7 @@ flowchart LR
     
     %% Configuration elements - positioned to avoid crossings
     Config["Configuration
-    • Pixel Count: 8192
+    • Pixel Count: 32
     • Pixel Selection Seed: 42
     • Key Mapper Seed: 2025"]
     
@@ -133,7 +133,7 @@ The model learns to subtly modify pixel values at specific locations to embed a 
 
 ## Configuration Components
 
-- **Pixel Count** (8192): Number of specific pixels sampled from each generated image
+- **Pixel Count** (32): Number of specific pixels sampled from each generated image
 - **Pixel Selection Seed** (42): Controls which specific pixels are selected consistently
 - **Key Mapper Seed** (2025): Ensures consistent initialization of the Key Mapper network
 
@@ -158,7 +158,7 @@ The model learns to subtly modify pixel values at specific locations to embed a 
 
 ### Setup Phase
 1. **Configuration**: 
-   - Set number of pixels to sample (default: 8192)
+   - Set number of pixels to sample (default: 32)
    - Define seeds for reproducibility
    
 2. **Initialization**:
@@ -195,7 +195,7 @@ The trainable model learns to embed recoverable watermarks while maintaining vis
 
 The pipeline uses several configuration parameters:
 
-1. **image_pixel_count** (default: 8192): The number of pixels to select from generated images
+1. **image_pixel_count** (default: 32): The number of pixels to select from generated images
 2. **Pixel Selection Seed** (default: 42): Used to generate the fixed set of specific pixel indices
 3. **Key Mapper Seed** (default: 2025): Used to initialize the Key Mapper
 

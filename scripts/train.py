@@ -30,62 +30,15 @@ def parse_args():
     parser.add_argument("--checkpoint_path", type=str, default=None,
                         help="Path to checkpoint to resume training from")
     parser.add_argument("--img_size", type=int, default=256, help="Image resolution")
-    parser.add_argument("--key_length", type=int, default=4, help="Length of the binary key (output dimension)")
-    parser.add_argument("--selected_indices", type=str, default=None,
-                        help="Optional: Comma-separated list of indices for latent partial. If not provided, indices will be generated using w_partial_set_seed")
-    parser.add_argument("--w_partial_set_seed", type=int, default=42,
-                        help="Random seed for selecting latent indices from the w vector")
-    parser.add_argument("--w_partial_length", type=int, default=32,
-                        help="Number of dimensions to select from the w vector (default: 32)")
-    parser.add_argument("--use_image_pixels", action="store_true", default=False,
-                        help="Use image pixels for watermarking instead of latent vectors")
     parser.add_argument("--image_pixel_set_seed", type=int, default=42,
                         help="Random seed for selecting pixel indices from the generated image")
-    parser.add_argument("--image_pixel_count", type=int, default=8192,
-                        help="Number of pixels to select from the image (default: 8192)")
-    parser.add_argument("--key_mapper_seed", type=int, default=2025, 
-                        help="Specific random seed for KeyMapper initialization for reproducibility")
-    parser.add_argument("--key_mapper_use_sine", action="store_true", default=False,
-                        help="Use sine-based mapping in the KeyMapper (more sensitive to input changes)")
-    parser.add_argument("--key_mapper_sensitivity", type=float, default=20.0,
-                        help="Sensitivity parameter for sine-based mapping (higher values: more sensitive to changes)")
-    parser.add_argument("--freeze_watermarked_model", action="store_true", default=False,
-                        help="Freeze the watermarked model parameters, only train the decoder")
-    parser.add_argument("--direct_feature_decoder", action="store_true", default=False,
-                        help="When true and using image pixels with a frozen watermarked model, train decoder directly on pixel features instead of full images")
-    parser.add_argument("--direct_pixel_pred", action="store_true", default=False,
-                        help="Use selected pixel values directly as keys instead of using KeyMapper (requires use_image_pixels=True and freeze_watermarked_model=True)")
-    
-    # New: Mutual information estimation parameters
-    parser.add_argument("--estimate_mutual_info", action="store_true", default=False,
-                        help="Estimate mutual information between selected pixels and full images at the start of training")
-    parser.add_argument("--mi_n_samples", type=int, default=1000,
-                        help="Number of samples to use for mutual information estimation")
-    parser.add_argument("--mi_k_neighbors", type=int, default=3,
-                        help="Number of nearest neighbors for k-NN entropy estimation")
-    
-    # Enhanced FeatureDecoder configuration
-    parser.add_argument("--decoder_hidden_dims", type=str, default="1024,2048,1024,512,256",
-                        help="Comma-separated list of hidden layer dimensions for FeatureDecoder")
-    parser.add_argument("--decoder_activation", type=str, default="gelu",
-                        choices=["leaky_relu", "relu", "gelu", "swish", "mish"],
-                        help="Activation function for FeatureDecoder")
-    parser.add_argument("--decoder_dropout_rate", type=float, default=0.3,
-                        help="Dropout rate for FeatureDecoder")
-    parser.add_argument("--decoder_num_residual_blocks", type=int, default=3,
-                        help="Number of residual blocks in FeatureDecoder")
-    parser.add_argument("--decoder_no_spectral_norm", action="store_true", default=False,
-                        help="Disable spectral normalization in FeatureDecoder")
-    parser.add_argument("--decoder_no_layer_norm", action="store_true", default=False,
-                        help="Disable layer normalization in FeatureDecoder")
-    parser.add_argument("--decoder_no_attention", action="store_true", default=False,
-                        help="Disable self-attention mechanism in FeatureDecoder")
+    parser.add_argument("--image_pixel_count", type=int, default=32,
+                        help="Number of pixels to select from the image (default: 32)")
     
     # Training configuration
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
     parser.add_argument("--total_iterations", type=int, default=100000, help="Total number of training iterations")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--lambda_lpips", type=float, default=1.0, help="Weight for LPIPS loss")
     parser.add_argument("--log_interval", type=int, default=1, help="Interval for logging training progress")
     parser.add_argument("--checkpoint_interval", type=int, default=10000, help="Interval for saving checkpoints")
     
@@ -94,14 +47,6 @@ def parse_args():
     
     # Other configuration
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
-    
-    # ZCA whitening configuration
-    parser.add_argument("--use_zca_whitening", action="store_true", default=False,
-                        help="Apply ZCA whitening to decoder input images")
-    parser.add_argument("--zca_eps", type=float, default=1e-5,
-                        help="Epsilon for numerical stability in ZCA whitening")
-    parser.add_argument("--zca_batch_size", type=int, default=1000,
-                        help="Batch size for computing ZCA statistics")
     
     return parser.parse_args()
 

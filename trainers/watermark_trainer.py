@@ -244,10 +244,13 @@ class WatermarkTrainer:
             # Save checkpoint
             if self.rank == 0 and iteration % self.config.training.checkpoint_interval == 0:
                 save_checkpoint(
-                    checkpoint_dir=self.config.output_dir,
                     iteration=iteration,
                     decoder=self.decoder,
-                    optimizer=self.optimizer
+                    output_dir=self.config.output_dir,
+                    rank=self.rank,
+                    optimizer=self.optimizer,
+                    metrics=metrics,
+                    global_step=self.global_step
                 )
         
         if self.rank == 0:

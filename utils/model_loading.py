@@ -11,6 +11,8 @@ from models.model_utils import load_stylegan2_model
 
 # Dictionary of pretrained model URLs and local paths
 PRETRAINED_MODELS = {
+    'ffhq70k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
+               "ffhq70k-paper256-ada.pkl"), # this serves as a control test
     'ffhq1k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq1k-paper256-ada.pkl",
                "ffhq1k-paper256-ada.pkl"),
     'ffhq30k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq30k-paper256-ada.pkl",

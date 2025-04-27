@@ -336,10 +336,11 @@ class WatermarkEvaluator:
             if self.rank == 0:
                 logging.warning("No quantized models available, skipping quantization evaluation")
         
-        # Always add downsample
-        evaluations_to_run.append((None, 'downsample'))
+        # Add downsample evaluations for both sizes
+        evaluations_to_run.append((None, 'downsample_128'))
+        evaluations_to_run.append((None, 'downsample_224'))
         if self.rank == 0:
-            logging.info("Added downsample evaluation")
+            logging.info("Added downsample evaluations for sizes 128 and 224")
         
         # Run evaluations
         total_evals = len(evaluations_to_run)
@@ -421,10 +422,12 @@ class WatermarkEvaluator:
                             else:
                                 if self.rank == 0 and i == 0:
                                     logging.warning(f"Quantized model for precision {precision} not found")
-                        elif transformation == 'downsample':
+                        elif transformation.startswith('downsample'):
                             if self.rank == 0 and i == 0:
-                                logging.info("Applying downsample transformation")
-                            x = downsample_and_upsample(x, downsample_size=128)
+                                downsample_size = int(transformation.split('_')[1])
+                                logging.info(f"Applying downsample transformation with size {downsample_size}")
+                            downsample_size = int(transformation.split('_')[1])
+                            x = downsample_and_upsample(x, downsample_size=downsample_size)
                     
                     # Store images for FID calculation
                     negative_images.append(x)

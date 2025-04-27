@@ -225,7 +225,7 @@ class WatermarkEvaluator:
             all_z_negative = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
             
             # Process batches for original model
-            mse_values = []
+            mse_per_sample = []  # Changed from mse_values to mse_per_sample
             
             with torch.no_grad():
                 for i in range(num_batches):
@@ -250,20 +250,23 @@ class WatermarkEvaluator:
                     # Predict pixel values
                     pred_values = self.decoder(x)
                     
-                    # Calculate metrics - now matching training MSE calculation
-                    mse = torch.mean(torch.pow(pred_values - true_values, 2)).cpu().numpy()
-                    mse_values.append(mse)
+                    # Calculate metrics - now calculating MSE per sample
+                    mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
+                    mse_per_sample.extend(mse.tolist())  # extend list with individual sample MSEs
                     
                     # Progress reporting
                     if self.rank == 0 and num_batches > 10 and (i+1) % max(1, num_batches//10) == 0:
                         logging.info(f"Processed {i+1}/{num_batches} batches")
             
-            # Combine results - now taking mean of batch MSEs
-            mse_all = np.mean(mse_values)
-            mse_std = np.std(mse_values)
+            # Convert to numpy array for calculations
+            mse_per_sample = np.array(mse_per_sample)
             
-            # Calculate threshold for 95% TPR - using batch MSEs
-            threshold = np.percentile(mse_values, 95)
+            # Combine results - now taking mean and std of per-sample MSEs
+            mse_all = np.mean(mse_per_sample)
+            mse_std = np.std(mse_per_sample)
+            
+            # Calculate threshold for 95% TPR - using per-sample MSEs
+            threshold = np.percentile(mse_per_sample, 95)
             if self.rank == 0:
                 logging.info(f"Threshold at 95% TPR: {threshold:.6f}")
             
@@ -271,7 +274,7 @@ class WatermarkEvaluator:
             metrics = {
                 'pixel_mse_mean': mse_all,
                 'pixel_mse_std': mse_std,
-                'pixel_mse_values': np.array(mse_values),
+                'pixel_mse_values': mse_per_sample,  # Now storing all per-sample MSEs
                 'threshold_95tpr': threshold
             }
             
@@ -313,7 +316,7 @@ class WatermarkEvaluator:
         evaluations_to_run = []
         
         # Add pretrained model evaluations
-        for model_name in ['ffhq70k', 'ffhq1k', 'ffhq30k', 'ffhq70k-bcr', 'ffhq70k-noaug']:
+        for model_name in ['ffhq70k-ada', 'ffhq1k', 'ffhq30k', 'ffhq70k-bcr', 'ffhq70k-noaug']:
             if model_name in self.pretrained_models:
                 evaluations_to_run.append((model_name, None))
         

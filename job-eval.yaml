@@ -77,7 +77,7 @@ spec:
                           --image_pixel_count 32 \
                           --image_pixel_set_seed 42 \
                           --num_samples 1024 \
-                          --batch_size 32"
+                          --batch_size 128"
               
               
               # Run evaluation 10 times

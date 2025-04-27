@@ -221,7 +221,8 @@ class WatermarkEvaluator:
             num_batches = (num_samples + batch_size - 1) // batch_size  # Ceiling division
             
             # Generate all latent vectors upfront for consistency
-            all_z = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
+            all_z_original = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
+            all_z_negative = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
             
             # Process batches for original model
             mse_values = []
@@ -232,7 +233,7 @@ class WatermarkEvaluator:
                     end_idx = min((i + 1) * batch_size, num_samples)
                     
                     # Extract batch of latent vectors
-                    z = all_z[start_idx:end_idx]
+                    z = all_z_original[start_idx:end_idx]
                     
                     # Generate images
                     if hasattr(self.gan_model, 'module'):
@@ -275,7 +276,7 @@ class WatermarkEvaluator:
             }
             
             # Evaluate negative samples
-            negative_results = self._evaluate_negative_samples(all_z, threshold)
+            negative_results = self._evaluate_negative_samples(all_z_original,all_z_negative, threshold)
             if negative_results:
                 metrics['negative_results'] = negative_results
             
@@ -291,7 +292,7 @@ class WatermarkEvaluator:
                 logging.error(str(e), exc_info=True)
             return {}
     
-    def _evaluate_negative_samples(self, all_z, threshold):
+    def _evaluate_negative_samples(self, all_z_original, all_z_negative, threshold):
         """
         Evaluate negative samples by comparing against pretrained models and transformations.
         Computes FPR at 95% TPR threshold for each negative case.
@@ -349,7 +350,7 @@ class WatermarkEvaluator:
             for i in range(num_batches):
                 start_idx = i * batch_size
                 end_idx = min((i + 1) * batch_size, num_samples)
-                z = all_z[start_idx:end_idx]
+                z = all_z_original[start_idx:end_idx]
                 
                 if hasattr(self.gan_model, 'module'):
                     w = self.gan_model.module.mapping(z, None)
@@ -362,13 +363,14 @@ class WatermarkEvaluator:
         
         original_images = torch.cat(original_images, dim=0)
         
+        # Generate negative case images for FID comparison
         with torch.no_grad():
             for idx, (model_name, transformation) in enumerate(evaluations_to_run):
                 key = model_name if model_name else transformation
                 if self.rank == 0:
                     logging.info(f"Starting evaluation for: {key}")
                 
-                mse_per_batch = []
+                mse_per_sample = []  # Changed from mse_per_batch to mse_per_sample
                 negative_images = []
                 
                 # Process in batches
@@ -377,7 +379,7 @@ class WatermarkEvaluator:
                     end_idx = min((i + 1) * batch_size, num_samples)
                     
                     # Extract batch of latent vectors
-                    z = all_z[start_idx:end_idx]
+                    z = all_z_negative[start_idx:end_idx]
                     
                     # Generate negative sample images
                     if model_name is not None:
@@ -431,9 +433,9 @@ class WatermarkEvaluator:
                     # Predict pixel values
                     pred_values = self.decoder(x)
                     
-                    # Calculate metrics - now matching training MSE calculation
-                    mse = torch.mean(torch.pow(pred_values - true_values, 2)).cpu().numpy()
-                    mse_per_batch.append(mse)
+                    # Calculate per-sample MSE - mean over features dimension only, not batch
+                    mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
+                    mse_per_sample.extend(mse.tolist())  # extend list with individual sample MSEs
                 
                 # Combine all negative images
                 negative_images = torch.cat(negative_images, dim=0)
@@ -441,24 +443,27 @@ class WatermarkEvaluator:
                 # Calculate FID score
                 fid_score = calculate_fid(original_images, negative_images, batch_size=batch_size, device=self.device)
                 
-                # Combine results - now taking mean of batch MSEs
-                mse_all = np.mean(mse_per_batch)
-                mse_std = np.std(mse_per_batch)
+                # Convert to numpy array for calculations
+                mse_per_sample = np.array(mse_per_sample)
                 
-                # Calculate FPR at 95% TPR threshold
-                fpr = np.mean(np.array(mse_per_batch) <= threshold)  # Proportion of negative samples below threshold
+                # Calculate metrics
+                mse_all = np.mean(mse_per_sample)
+                mse_std = np.std(mse_per_sample)
+                
+                # Calculate FPR at 95% TPR threshold - now using per-sample MSEs
+                fpr = np.mean(mse_per_sample <= threshold)  # Proportion of negative samples below threshold
                 
                 # Store metrics
                 negative_results[key] = {
                     'mse_mean': mse_all,
                     'mse_std': mse_std,
-                    'mse_values': np.array(mse_per_batch),
+                    'mse_values': mse_per_sample,  # Now storing all per-sample MSEs
                     'fpr_at_95tpr': fpr,
                     'fid_score': fid_score
                 }
                 
                 if self.rank == 0:
-                    logging.info(f"FPR at 95% TPR for {key}: {fpr:.4f}")
+                    logging.info(f"FPR at 95% TPR for {key}: {fpr:.4f} (computed over {len(mse_per_sample)} samples)")
                     logging.info(f"FID score for {key}: {fid_score:.4f}")
                 
                 # Progress reporting

@@ -312,7 +312,7 @@ class WatermarkEvaluator:
         evaluations_to_run = []
         
         # Add pretrained model evaluations
-        for model_name in ['ffhq1k', 'ffhq30k', 'ffhq70k-bcr', 'ffhq70k-noaug']:
+        for model_name in ['ffhq70k', 'ffhq1k', 'ffhq30k', 'ffhq70k-bcr', 'ffhq70k-noaug']:
             if model_name in self.pretrained_models:
                 evaluations_to_run.append((model_name, None))
         

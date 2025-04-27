@@ -76,8 +76,8 @@ spec:
               SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/new/num_pixel_32/checkpoint_iter740000.pth' \
                           --image_pixel_count 32 \
                           --image_pixel_set_seed 42 \
-                          --num_samples 1280 \
-                          --batch_size 128"
+                          --num_samples 256 \
+                          --batch_size 32"
               
               
               # Run evaluation 10 times

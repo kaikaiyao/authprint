@@ -43,8 +43,7 @@ class InceptionV3(nn.Module):
                  output_blocks=(DEFAULT_BLOCK_IDX,),
                  resize_input=True,
                  normalize_input=True,
-                 requires_grad=False,
-                 use_fid_inception=True):
+                 requires_grad=False):
         """Build pretrained InceptionV3
 
         Parameters
@@ -66,14 +65,6 @@ class InceptionV3(nn.Module):
         requires_grad : bool
             If true, parameters of the model require gradients. Possibly useful
             for finetuning the network
-        use_fid_inception : bool
-            If true, uses the pretrained Inception model used in Tensorflow's
-            FID implementation. If false, uses the pretrained Inception model
-            available in torchvision. The FID Inception model has different
-            weights and a slightly different structure from torchvision's
-            Inception model. If you want to compute FID scores, you are
-            strongly advised to set this parameter to true to get comparable
-            results.
         """
         super(InceptionV3, self).__init__()
 
@@ -85,27 +76,19 @@ class InceptionV3(nn.Module):
         assert self.last_needed_block <= 3, \
             'Last possible output block index is 3'
 
+        # Load pretrained model
+        self.inception = models.inception_v3(pretrained=True)
+        self.inception.aux_logits = False
+        self.inception.fc = nn.Identity()
+
+        # Block definitions
         self.blocks = nn.ModuleList()
-
-        if use_fid_inception:
-            inception = models.inception_v3(pretrained=True)
-            inception.Mixed_5b = models.inception_v3.InceptionA(192, pool_features=32)
-            inception.Mixed_5c = models.inception_v3.InceptionA(256, pool_features=64)
-            inception.Mixed_5d = models.inception_v3.InceptionA(288, pool_features=64)
-            inception.Mixed_6b = models.inception_v3.InceptionC(768, channels_7x7=128)
-            inception.Mixed_6c = models.inception_v3.InceptionC(768, channels_7x7=160)
-            inception.Mixed_6d = models.inception_v3.InceptionC(768, channels_7x7=160)
-            inception.Mixed_6e = models.inception_v3.InceptionC(768, channels_7x7=192)
-            inception.Mixed_7b = models.inception_v3.InceptionE(1280)
-            inception.Mixed_7c = models.inception_v3.InceptionE(2048)
-        else:
-            inception = models.inception_v3(pretrained=True)
-
+        
         # Block 0: input to maxpool1
         block0 = [
-            inception.Conv2d_1a_3x3,
-            inception.Conv2d_2a_3x3,
-            inception.Conv2d_2b_3x3,
+            self.inception.Conv2d_1a_3x3,
+            self.inception.Conv2d_2a_3x3,
+            self.inception.Conv2d_2b_3x3,
             nn.MaxPool2d(kernel_size=3, stride=2)
         ]
         self.blocks.append(nn.Sequential(*block0))
@@ -113,8 +96,8 @@ class InceptionV3(nn.Module):
         # Block 1: maxpool1 to maxpool2
         if self.last_needed_block >= 1:
             block1 = [
-                inception.Conv2d_3b_1x1,
-                inception.Conv2d_4a_3x3,
+                self.inception.Conv2d_3b_1x1,
+                self.inception.Conv2d_4a_3x3,
                 nn.MaxPool2d(kernel_size=3, stride=2)
             ]
             self.blocks.append(nn.Sequential(*block1))
@@ -122,23 +105,23 @@ class InceptionV3(nn.Module):
         # Block 2: maxpool2 to aux classifier
         if self.last_needed_block >= 2:
             block2 = [
-                inception.Mixed_5b,
-                inception.Mixed_5c,
-                inception.Mixed_5d,
-                inception.Mixed_6a,
-                inception.Mixed_6b,
-                inception.Mixed_6c,
-                inception.Mixed_6d,
-                inception.Mixed_6e,
+                self.inception.Mixed_5b,
+                self.inception.Mixed_5c,
+                self.inception.Mixed_5d,
+                self.inception.Mixed_6a,
+                self.inception.Mixed_6b,
+                self.inception.Mixed_6c,
+                self.inception.Mixed_6d,
+                self.inception.Mixed_6e,
             ]
             self.blocks.append(nn.Sequential(*block2))
 
         # Block 3: aux classifier to final avgpool
         if self.last_needed_block >= 3:
             block3 = [
-                inception.Mixed_7a,
-                inception.Mixed_7b,
-                inception.Mixed_7c,
+                self.inception.Mixed_7a,
+                self.inception.Mixed_7b,
+                self.inception.Mixed_7c,
                 nn.AdaptiveAvgPool2d(output_size=(1, 1))
             ]
             self.blocks.append(nn.Sequential(*block3))

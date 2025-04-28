@@ -144,6 +144,32 @@ class WatermarkTrainer:
         flattened = images.view(batch_size, -1)
         return flattened[:, self.image_pixel_indices]
     
+    def _mask_selected_pixels(self, images: torch.Tensor) -> torch.Tensor:
+        """
+        Mask selected pixels in the images by setting them to -1.
+        
+        Args:
+            images (torch.Tensor): Input images [batch_size, channels, height, width].
+            
+        Returns:
+            torch.Tensor: Images with selected pixels masked.
+        """
+        # Ensure indices are generated
+        self.validate_indices()
+        
+        # Create a copy of the images to avoid modifying the original
+        masked_images = images.clone()
+        
+        # Flatten images for masking
+        batch_size = images.size(0)
+        flattened = masked_images.view(batch_size, -1)
+        
+        # Set selected pixels to -1
+        flattened[:, self.image_pixel_indices] = -1
+        
+        # Reshape back to original shape
+        return flattened.view_as(images)
+    
     def train_iteration(self) -> Dict[str, float]:
         """
         Run a single training iteration.
@@ -169,8 +195,9 @@ class WatermarkTrainer:
         # Get decoder (handle DDP wrapping)
         decoder = self.decoder.module if hasattr(self.decoder, 'module') else self.decoder
         
-        # First compute training loss and do optimization
-        pred_values = self.decoder(x)
+        # Mask selected pixels and get predictions
+        masked_x = self._mask_selected_pixels(x)
+        pred_values = self.decoder(masked_x)
         key_loss = torch.mean(torch.pow(pred_values - true_values, 2))
         
         # Optimize
@@ -181,7 +208,8 @@ class WatermarkTrainer:
         # Now compute metrics in eval mode
         decoder.eval()  # Temporarily set to eval mode
         with torch.no_grad():
-            pred_values = self.decoder(x)
+            masked_x = self._mask_selected_pixels(x)
+            pred_values = self.decoder(masked_x)
             mse_distance = torch.mean(torch.pow(pred_values - true_values, 2), dim=1)
             mse_distance_mean = mse_distance.mean().item()
             mse_distance_std = mse_distance.std().item()

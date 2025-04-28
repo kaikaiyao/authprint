@@ -75,7 +75,7 @@ spec:
               
               SCRIPT_ARGS="--num_samples 1"
               
-              
+
               # Run visualization 10 times
               for run in {1..10}; do
                 echo "Starting visualization run $run/10..."
@@ -97,7 +97,8 @@ spec:
                   
                   echo ""
                   echo "Finished at: $(date)"
-                  echo "Exit status: $?"
+                  echo "Exit status: $?"`
+                  sleep 10000
                 ) 2>&1 | tee "$log_file"
                 
                 # Also append to a combined log file

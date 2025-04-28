@@ -144,33 +144,34 @@ class WatermarkTrainer:
         flattened = images.view(batch_size, -1)
         return flattened[:, self.image_pixel_indices]
     
-    def _mask_selected_pixels(self, images: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _mask_selected_pixels(self, images: torch.Tensor) -> torch.Tensor:
         """
-        Create a binary mask for the selected pixels, where 1 indicates valid pixels and 0 indicates masked pixels.
+        Mask selected pixels in the images by setting them to random values between -1 and 1.
         
         Args:
             images (torch.Tensor): Input images [batch_size, channels, height, width].
             
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: Tuple containing:
-                - Original images unchanged
-                - Binary mask tensor where 1 indicates valid pixels and 0 indicates masked pixels
+            torch.Tensor: Images with selected pixels masked.
         """
         # Ensure indices are generated
         self.validate_indices()
         
-        # Create a mask tensor initialized to all ones (valid pixels)
+        # Create a copy of the images to avoid modifying the original
+        masked_images = images.clone()
+        
+        # Flatten images for masking
         batch_size = images.size(0)
-        total_pixels = images.size(1) * images.size(2) * images.size(3)
-        mask = torch.ones((batch_size, total_pixels), device=images.device)
+        flattened = masked_images.view(batch_size, -1)
         
-        # Set mask to 0 for selected pixels
-        mask[:, self.image_pixel_indices] = 0
+        # Generate random values between -1 and 1 for the selected pixels
+        random_values = torch.rand(batch_size, len(self.image_pixel_indices), device=images.device) * 2 - 1
         
-        # Reshape mask to match image dimensions with single channel
-        mask = mask.view(batch_size, 1, images.size(2), images.size(3))
+        # Set selected pixels to random values
+        flattened[:, self.image_pixel_indices] = random_values
         
-        return images, mask
+        # Reshape back to original shape
+        return flattened.view_as(images)
     
     def train_iteration(self) -> Dict[str, float]:
         """
@@ -197,9 +198,9 @@ class WatermarkTrainer:
         # Get decoder (handle DDP wrapping)
         decoder = self.decoder.module if hasattr(self.decoder, 'module') else self.decoder
         
-        # Get original images and mask for selected pixels
-        x_orig, mask = self._mask_selected_pixels(x)
-        pred_values = self.decoder(x_orig, mask)
+        # Mask selected pixels and get predictions
+        masked_x = self._mask_selected_pixels(x)
+        pred_values = self.decoder(masked_x)
         key_loss = torch.mean(torch.pow(pred_values - true_values, 2))
         
         # Optimize
@@ -210,8 +211,8 @@ class WatermarkTrainer:
         # Now compute metrics in eval mode
         decoder.eval()  # Temporarily set to eval mode
         with torch.no_grad():
-            x_orig, mask = self._mask_selected_pixels(x)
-            pred_values = self.decoder(x_orig, mask)
+            masked_x = self._mask_selected_pixels(x)
+            pred_values = self.decoder(masked_x)
             mse_distance = torch.mean(torch.pow(pred_values - true_values, 2), dim=1)
             mse_distance_mean = mse_distance.mean().item()
             mse_distance_std = mse_distance.std().item()

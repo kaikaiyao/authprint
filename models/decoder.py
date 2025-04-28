@@ -20,13 +20,10 @@ class Decoder(nn.Module):
             output_dim (int): Output dimension (key length).
         """
         super(Decoder, self).__init__()
-        # Input channels + 1 for the mask channel
-        input_channels = channels + 1
-        
         # Increase number of filters and add more layers
         self.features = nn.Sequential(
             # Initial layer: 256 -> 128
-            nn.Conv2d(input_channels, 64, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(channels, 64, kernel_size=4, stride=2, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
             
             # 128 -> 64
@@ -68,19 +65,15 @@ class Decoder(nn.Module):
             nn.Linear(256, output_dim)
         )
     
-    def forward(self, x, mask):
+    def forward(self, x):
         """
         Forward pass of the decoder.
         
         Args:
             x (torch.Tensor): Input tensor of shape (B, C, H, W).
-            mask (torch.Tensor): Binary mask tensor of shape (B, 1, H, W) where 1 indicates valid pixels
-                               and 0 indicates masked/disabled pixels.
             
         Returns:
             torch.Tensor: Output tensor of shape (B, output_dim).
         """
-        # Concatenate the mask with the input along the channel dimension
-        x_masked = torch.cat([x, mask], dim=1)
-        features = self.features(x_masked)
+        features = self.features(x)
         return self.classifier(features) 

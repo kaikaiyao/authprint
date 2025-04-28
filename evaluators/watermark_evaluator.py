@@ -273,8 +273,9 @@ class WatermarkEvaluator:
                     features = self.extract_image_partial(x)
                     true_values = features
                     
-                    # Mask selected pixels and predict values
-                    masked_x = self._mask_selected_pixels(x)
+                    # # Mask selected pixels and predict values
+                    # masked_x = self._mask_selected_pixels(x)
+                    masked_x = (x)
                     pred_values = self.decoder(masked_x)
                     
                     # Calculate metrics - now calculating MSE per sample
@@ -463,8 +464,9 @@ class WatermarkEvaluator:
                     features = self.extract_image_partial(x)
                     true_values = features
                     
-                    # Mask selected pixels and predict values
-                    masked_x = self._mask_selected_pixels(x)
+                    # # Mask selected pixels and predict values
+                    # masked_x = self._mask_selected_pixels(x)
+                    masked_x = (x)
                     pred_values = self.decoder(masked_x)
                     
                     # Calculate per-sample MSE - mean over features dimension only, not batch

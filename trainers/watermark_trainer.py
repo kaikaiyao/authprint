@@ -198,8 +198,9 @@ class WatermarkTrainer:
         # Get decoder (handle DDP wrapping)
         decoder = self.decoder.module if hasattr(self.decoder, 'module') else self.decoder
         
-        # Mask selected pixels and get predictions
-        masked_x = self._mask_selected_pixels(x)
+        # # Mask selected pixels and get predictions
+        # masked_x = self._mask_selected_pixels(x)
+        masked_x = x
         pred_values = self.decoder(masked_x)
         key_loss = torch.mean(torch.pow(pred_values - true_values, 2))
         
@@ -211,7 +212,8 @@ class WatermarkTrainer:
         # Now compute metrics in eval mode
         decoder.eval()  # Temporarily set to eval mode
         with torch.no_grad():
-            masked_x = self._mask_selected_pixels(x)
+            # masked_x = self._mask_selected_pixels(x)
+            masked_x = x
             pred_values = self.decoder(masked_x)
             mse_distance = torch.mean(torch.pow(pred_values - true_values, 2), dim=1)
             mse_distance_mean = mse_distance.mean().item()

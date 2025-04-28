@@ -125,32 +125,6 @@ class WatermarkEvaluator:
         
         return image_partial
     
-    def _mask_selected_pixels(self, images: torch.Tensor) -> torch.Tensor:
-        """
-        Mask selected pixels in the images by setting them to random values between -1 and 1.
-        
-        Args:
-            images (torch.Tensor): Input images [batch_size, channels, height, width].
-            
-        Returns:
-            torch.Tensor: Images with selected pixels masked.
-        """
-        # Create a copy of the images to avoid modifying the original
-        masked_images = images.clone()
-        
-        # Flatten images for masking
-        batch_size = images.size(0)
-        flattened = masked_images.view(batch_size, -1)
-        
-        # Generate random values between -1 and 1 for the selected pixels
-        random_values = torch.rand(batch_size, len(self.image_pixel_indices), device=images.device) * 2 - 1
-        
-        # Set selected pixels to random values
-        flattened[:, self.image_pixel_indices] = random_values
-        
-        # Reshape back to original shape
-        return flattened.view_as(images)
-    
     def setup_models(self):
         """
         Initialize and set up all models.
@@ -273,9 +247,8 @@ class WatermarkEvaluator:
                     features = self.extract_image_partial(x)
                     true_values = features
                     
-                    # Mask selected pixels and predict values
-                    masked_x = self._mask_selected_pixels(x)
-                    pred_values = self.decoder(masked_x)
+                    # Predict values using original images
+                    pred_values = self.decoder(x)
                     
                     # Calculate metrics - now calculating MSE per sample
                     mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
@@ -463,9 +436,8 @@ class WatermarkEvaluator:
                     features = self.extract_image_partial(x)
                     true_values = features
                     
-                    # Mask selected pixels and predict values
-                    masked_x = self._mask_selected_pixels(x)
-                    pred_values = self.decoder(masked_x)
+                    # Predict values using original images
+                    pred_values = self.decoder(x)
                     
                     # Calculate per-sample MSE - mean over features dimension only, not batch
                     mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()

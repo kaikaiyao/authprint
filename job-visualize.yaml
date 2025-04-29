@@ -73,7 +73,7 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--num_samples 1"
+              SCRIPT_ARGS="--num_samples 9"
               
 
               # Run visualization 10 times

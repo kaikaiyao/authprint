@@ -73,8 +73,8 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/new/num_pixel_1024/checkpoint_iter1480000.pth' \
-                          --image_pixel_count 1024 \
+              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/new/num_pixel_32/checkpoint_iter120000addmask.pth' \
+                          --image_pixel_count 32 \
                           --image_pixel_set_seed 42 \
                           --num_samples 32768 \
                           --batch_size 128"

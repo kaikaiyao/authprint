@@ -187,7 +187,7 @@ def main():
         for size in [128, 224]:
             img = generate_image(original_model, z)[0]
             downsampled_img = downsample_and_upsample(img.unsqueeze(0), downsample_size=size)[0]
-            case_images[f'downsampled_{size}'].append(img)
+            case_images[f'downsampled_{size}'].append(downsampled_img)
     
     # Create and save grid for each case
     for case_name, images in case_images.items():

@@ -65,8 +65,13 @@ class WatermarkEvaluator:
         self.image_pixel_count = self.config.model.image_pixel_count
         self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
         
+        # Random masking parameters
+        self.mask_pixel_count = 10000  # Number of pixels to mask
+        self.mask_value = -1.0  # Value to use for masking
+        
         if self.rank == 0:
             logging.info(f"Using direct pixel prediction with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
+            logging.info(f"Using random masking with {self.mask_pixel_count} pixels set to {self.mask_value}")
         
         # Initialize quantized models dictionary
         self.quantized_models = {}
@@ -197,6 +202,51 @@ class WatermarkEvaluator:
                 logging.error("Continuing without quantized models...")
             self.quantized_models = {}
     
+    def _generate_random_mask_indices(self, batch_size: int) -> torch.Tensor:
+        """
+        Generate random indices for masking pixels in each image of the batch.
+        
+        Args:
+            batch_size (int): Size of the current batch.
+            
+        Returns:
+            torch.Tensor: Random indices for masking [batch_size, mask_pixel_count]
+        """
+        total_pixels = self.config.model.img_size * self.config.model.img_size * 3  # RGB images
+        # Generate different random indices for each image in the batch
+        mask_indices = torch.stack([
+            torch.randperm(total_pixels, device=self.device)[:self.mask_pixel_count]
+            for _ in range(batch_size)
+        ])
+        return mask_indices
+    
+    def apply_random_masking(self, images: torch.Tensor) -> torch.Tensor:
+        """
+        Apply random masking to the input images.
+        
+        Args:
+            images (torch.Tensor): Input images [batch_size, channels, height, width]
+            
+        Returns:
+            torch.Tensor: Masked images with same shape
+        """
+        batch_size = images.size(0)
+        # Get random mask indices for this batch
+        mask_indices = self._generate_random_mask_indices(batch_size)
+        
+        # Flatten images for masking
+        flattened = images.view(batch_size, -1)
+        
+        # Create mask indices for each image in batch
+        batch_indices = torch.arange(batch_size, device=self.device).unsqueeze(1).expand(-1, self.mask_pixel_count)
+        
+        # Apply masking
+        flattened[batch_indices, mask_indices] = self.mask_value
+        
+        # Reshape back to image format
+        masked_images = flattened.view_as(images)
+        return masked_images
+
     def evaluate_batch(self) -> Dict[str, float]:
         """
         Run batch evaluation to compute metrics.
@@ -243,12 +293,15 @@ class WatermarkEvaluator:
                         w = self.gan_model.mapping(z, None)
                         x = self.gan_model.synthesis(w, noise_mode="const")
                     
-                    # Extract features (real pixel values)
+                    # Extract features (real pixel values) before masking
                     features = self.extract_image_partial(x)
                     true_values = features
                     
-                    # Predict values using original images
-                    pred_values = self.decoder(x)
+                    # Apply random masking to images before decoder
+                    x_masked = self.apply_random_masking(x)
+                    
+                    # Predict values using masked images
+                    pred_values = self.decoder(x_masked)
                     
                     # Calculate metrics - now calculating MSE per sample
                     mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
@@ -374,7 +427,7 @@ class WatermarkEvaluator:
                 if self.rank == 0:
                     logging.info(f"Starting evaluation for: {key}")
                 
-                mse_per_sample = []  # Changed from mse_per_batch to mse_per_sample
+                mse_per_sample = []
                 negative_images = []
                 
                 # Process in batches
@@ -417,31 +470,29 @@ class WatermarkEvaluator:
                                 else:
                                     w = model.mapping(z, None)
                                     x = model.synthesis(w, noise_mode="const")
-                                if self.rank == 0 and i == 0:
-                                    logging.info(f"Using {precision} quantized model for batch")
                             else:
                                 if self.rank == 0 and i == 0:
                                     logging.warning(f"Quantized model for precision {precision} not found")
                         elif transformation.startswith('downsample'):
-                            if self.rank == 0 and i == 0:
-                                downsample_size = int(transformation.split('_')[1])
-                                logging.info(f"Applying downsample transformation with size {downsample_size}")
                             downsample_size = int(transformation.split('_')[1])
                             x = downsample_and_upsample(x, downsample_size=downsample_size)
                     
                     # Store images for FID calculation
                     negative_images.append(x)
                     
-                    # Extract features (real pixel values)
+                    # Extract features (real pixel values) before masking
                     features = self.extract_image_partial(x)
                     true_values = features
                     
-                    # Predict values using original images
-                    pred_values = self.decoder(x)
+                    # Apply random masking to images before decoder
+                    x_masked = self.apply_random_masking(x)
                     
-                    # Calculate per-sample MSE - mean over features dimension only, not batch
+                    # Predict values using masked images
+                    pred_values = self.decoder(x_masked)
+                    
+                    # Calculate per-sample MSE
                     mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
-                    mse_per_sample.extend(mse.tolist())  # extend list with individual sample MSEs
+                    mse_per_sample.extend(mse.tolist())
                 
                 # Combine all negative images
                 negative_images = torch.cat(negative_images, dim=0)

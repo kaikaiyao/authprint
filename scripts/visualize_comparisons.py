@@ -1,18 +1,20 @@
 #!/usr/bin/env python
 """
 Script to visualize and compare images generated from different models and transformations.
-Takes a fixed latent vector and generates images using original model and all negative cases.
+Takes fixed latent vectors and generates images using original model and all negative cases.
+Each case's images are combined into a single grid visualization.
 """
 import argparse
 import logging
 import os
 import sys
+import math
 from pathlib import Path
 
 import torch
 import torchvision.utils as vutils
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -27,8 +29,14 @@ from utils.image_transforms import (
 from utils.logging_utils import setup_logging
 
 
+def is_perfect_square(n):
+    """Check if a number is a perfect square."""
+    root = int(math.sqrt(n))
+    return root * root == n
+
+
 def tensor_to_pil(tensor):
-    """Convert a tensor to a PIL Image."""
+    """Convert a tensor to a PIL Image with proper RGB handling."""
     # Convert from [-1, 1] to [0, 1]
     tensor = (tensor + 1) / 2
     # Clamp values to [0, 1]
@@ -36,6 +44,32 @@ def tensor_to_pil(tensor):
     # Convert to PIL Image
     ndarr = tensor.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
     return Image.fromarray(ndarr)
+
+
+def create_grid_with_borders(images, nrow):
+    """Create a grid of images with black borders."""
+    # Convert tensors to PIL images
+    pil_images = [tensor_to_pil(img) for img in images]
+    
+    # Get dimensions
+    w, h = pil_images[0].size
+    margin = 2  # Border width
+    grid_size = int(math.sqrt(len(images)))
+    
+    # Create new image with space for borders
+    grid_w = grid_size * (w + margin) + margin
+    grid_h = grid_size * (h + margin) + margin
+    grid_img = Image.new('RGB', (grid_w, grid_h), 'black')
+    
+    # Paste images
+    for idx, img in enumerate(pil_images):
+        row = idx // grid_size
+        col = idx % grid_size
+        x = col * (w + margin) + margin
+        y = row * (h + margin) + margin
+        grid_img.paste(img, (x, y))
+    
+    return grid_img
 
 
 def parse_args():
@@ -55,10 +89,15 @@ def parse_args():
                         help="Random seed for reproducibility")
     parser.add_argument("--output_dir", type=str, default="comparison_images",
                         help="Directory to save comparison images")
-    parser.add_argument("--num_samples", type=int, default=5,
-                        help="Number of different z vectors to generate comparisons for")
+    parser.add_argument("--num_samples", type=int, default=9,
+                        help="Number of different z vectors to generate comparisons for (must be a perfect square)")
     
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    if not is_perfect_square(args.num_samples):
+        raise ValueError(f"num_samples must be a perfect square (e.g., 4, 9, 16). Got {args.num_samples}")
+    
+    return args
 
 
 def generate_image(model, z, noise_mode="const"):
@@ -116,77 +155,54 @@ def main():
     except Exception as e:
         logging.error(f"Failed to create int4 model: {str(e)}")
     
-    # Generate multiple samples
-    for sample_idx in range(args.num_samples):
-        sample_dir = output_dir / f"sample_{sample_idx}"
-        sample_dir.mkdir(exist_ok=True)
-        
-        # Generate fixed latent vector
-        z = torch.randn(1, original_model.z_dim, device=device)
-        
-        # Generate and save original image
+    # Generate latent vectors for all samples
+    z_vectors = [torch.randn(1, original_model.z_dim, device=device) for _ in range(args.num_samples)]
+    grid_size = int(math.sqrt(args.num_samples))
+    
+    # Dictionary to store images for each case
+    case_images = {
+        'original': [],
+        **{f'pretrained_{name}': [] for name in pretrained_models.keys()},
+        **{f'quantized_{name}': [] for name in quantized_models.keys()},
+        **{f'downsampled_{size}': [] for size in [128, 224]}
+    }
+    
+    # Generate images for all cases
+    for z in z_vectors:
+        # Original model
         original_img = generate_image(original_model, z)[0]
-        original_pil = tensor_to_pil(original_img)
-        original_pil.save(sample_dir / "original.png")
-        logging.info(f"Saved original image for sample {sample_idx}")
+        case_images['original'].append(original_img)
         
-        # Generate and save images from pretrained models
+        # Pretrained models
         for model_name, model in pretrained_models.items():
             img = generate_image(model, z)[0]
-            pil_img = tensor_to_pil(img)
-            pil_img.save(sample_dir / f"pretrained_{model_name}.png")
-            logging.info(f"Saved image for pretrained model {model_name}")
+            case_images[f'pretrained_{model_name}'].append(img)
         
-        # Generate and save images from quantized models
+        # Quantized models
         for quant_name, model in quantized_models.items():
             img = generate_image(model, z)[0]
-            pil_img = tensor_to_pil(img)
-            pil_img.save(sample_dir / f"quantized_{quant_name}.png")
-            logging.info(f"Saved image for quantized model {quant_name}")
+            case_images[f'quantized_{quant_name}'].append(img)
         
-        # Generate and save downsampled images
+        # Downsampled images
         for size in [128, 224]:
             img = generate_image(original_model, z)[0]
             downsampled_img = downsample_and_upsample(img.unsqueeze(0), downsample_size=size)[0]
-            pil_img = tensor_to_pil(downsampled_img)
-            pil_img.save(sample_dir / f"downsampled_{size}.png")
-            logging.info(f"Saved image for downsample size {size}")
-        
-        # Create a grid of all images
-        all_images = [original_img]
-        all_labels = ['original']
-        
-        # Add pretrained model images
-        for model_name in pretrained_models.keys():
-            img = generate_image(pretrained_models[model_name], z)[0]
-            all_images.append(img)
-            all_labels.append(f'pretrained_{model_name}')
-        
-        # Add quantized model images
-        for quant_name in quantized_models.keys():
-            img = generate_image(quantized_models[quant_name], z)[0]
-            all_images.append(img)
-            all_labels.append(f'quantized_{quant_name}')
-        
-        # Add downsampled images
-        for size in [128, 224]:
-            img = generate_image(original_model, z)[0]
-            downsampled_img = downsample_and_upsample(img.unsqueeze(0), downsample_size=size)[0]
-            all_images.append(downsampled_img)
-            all_labels.append(f'downsampled_{size}')
-        
-        # Create and save grid
-        grid = vutils.make_grid(torch.stack(all_images), nrow=4, padding=2, normalize=True)
-        grid_pil = tensor_to_pil(grid)
-        grid_pil.save(sample_dir / "comparison_grid.png")
-        logging.info(f"Saved comparison grid for sample {sample_idx}")
-        
-        # Save labels
-        with open(sample_dir / "image_labels.txt", "w") as f:
-            for label in all_labels:
-                f.write(f"{label}\n")
-        
-        logging.info(f"Completed processing sample {sample_idx}")
+            case_images[f'downsampled_{size}'].append(img)
+    
+    # Create and save grid for each case
+    for case_name, images in case_images.items():
+        if images:  # Only process if we have images for this case
+            grid_img = create_grid_with_borders(images, grid_size)
+            grid_img.save(output_dir / f"{case_name}_grid.png")
+            logging.info(f"Saved grid for {case_name}")
+    
+    # Save configuration
+    with open(output_dir / "visualization_config.txt", "w") as f:
+        f.write(f"Number of samples: {args.num_samples}\n")
+        f.write(f"Grid size: {grid_size}x{grid_size}\n")
+        f.write("\nCases generated:\n")
+        for case_name in case_images.keys():
+            f.write(f"- {case_name}\n")
     
     logging.info("Visualization completed successfully")
 

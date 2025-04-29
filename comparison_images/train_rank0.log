@@ -1,0 +1,35 @@
+2025-04-29 16:02:43,693 - INFO - Logging initialized (rank 0). Log file: comparison_images/train_rank0.log
+2025-04-29 16:02:43,693 - INFO - Configuration:
+Namespace(stylegan2_url='https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl', stylegan2_local_path='ffhq70k-paper256-ada.pkl', img_size=256, seed=42, output_dir='comparison_images', num_samples=9)
+2025-04-29 16:02:44,770 - INFO - Loading pretrained model: ffhq70k-ada
+2025-04-29 16:02:45,255 - INFO - Successfully loaded pretrained model: ffhq70k-ada
+2025-04-29 16:02:45,255 - INFO - Loading pretrained model: ffhq1k
+2025-04-29 16:02:45,255 - INFO - Downloading StyleGAN2 model to ffhq1k-paper256-ada.pkl...
+2025-04-29 16:02:46,441 - INFO - Download complete.
+2025-04-29 16:02:46,696 - INFO - Successfully loaded pretrained model: ffhq1k
+2025-04-29 16:02:46,697 - INFO - Loading pretrained model: ffhq30k
+2025-04-29 16:02:46,697 - INFO - Downloading StyleGAN2 model to ffhq30k-paper256-ada.pkl...
+2025-04-29 16:02:47,948 - INFO - Download complete.
+2025-04-29 16:02:48,209 - INFO - Successfully loaded pretrained model: ffhq30k
+2025-04-29 16:02:48,209 - INFO - Loading pretrained model: ffhq70k-bcr
+2025-04-29 16:02:48,209 - INFO - Downloading StyleGAN2 model to ffhq70k-paper256-ada-bcr.pkl...
+2025-04-29 16:02:49,337 - INFO - Download complete.
+2025-04-29 16:02:49,583 - INFO - Successfully loaded pretrained model: ffhq70k-bcr
+2025-04-29 16:02:49,583 - INFO - Loading pretrained model: ffhq70k-noaug
+2025-04-29 16:02:49,583 - INFO - Downloading StyleGAN2 model to ffhq70k-paper256-noaug.pkl...
+2025-04-29 16:02:50,907 - INFO - Download complete.
+2025-04-29 16:02:51,163 - INFO - Successfully loaded pretrained model: ffhq70k-noaug
+2025-04-29 16:02:51,163 - INFO - Loaded 5 pretrained models: ['ffhq70k-ada', 'ffhq1k', 'ffhq30k', 'ffhq70k-bcr', 'ffhq70k-noaug']
+2025-04-29 16:02:51,258 - INFO - Successfully created int8 quantized model
+2025-04-29 16:02:51,309 - INFO - Successfully created int4 quantized model
+2025-04-29 16:03:29,847 - INFO - Saved grid for original
+2025-04-29 16:03:32,923 - INFO - Saved grid for pretrained_ffhq70k-ada
+2025-04-29 16:03:36,196 - INFO - Saved grid for pretrained_ffhq1k
+2025-04-29 16:03:39,262 - INFO - Saved grid for pretrained_ffhq30k
+2025-04-29 16:03:42,265 - INFO - Saved grid for pretrained_ffhq70k-bcr
+2025-04-29 16:03:45,330 - INFO - Saved grid for pretrained_ffhq70k-noaug
+2025-04-29 16:03:48,592 - INFO - Saved grid for quantized_int8
+2025-04-29 16:03:51,866 - INFO - Saved grid for quantized_int4
+2025-04-29 16:03:54,950 - INFO - Saved grid for downsampled_128
+2025-04-29 16:03:58,355 - INFO - Saved grid for downsampled_224
+2025-04-29 16:03:58,355 - INFO - Visualization completed successfully

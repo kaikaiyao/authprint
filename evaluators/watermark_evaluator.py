@@ -65,13 +65,8 @@ class WatermarkEvaluator:
         self.image_pixel_count = self.config.model.image_pixel_count
         self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
         
-        # Random masking parameters
-        self.mask_pixel_count = 10000  # Number of pixels to mask
-        self.mask_value = -1.0  # Value to use for masking
-        
         if self.rank == 0:
             logging.info(f"Using direct pixel prediction with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
-            logging.info(f"Using random masking with {self.mask_pixel_count} pixels set to {self.mask_value}")
         
         # Initialize quantized models dictionary
         self.quantized_models = {}
@@ -248,7 +243,7 @@ class WatermarkEvaluator:
                         w = self.gan_model.mapping(z, None)
                         x = self.gan_model.synthesis(w, noise_mode="const")
                     
-                    # Extract features (real pixel values) before masking
+                    # Extract features (real pixel values)
                     features = self.extract_image_partial(x)
                     true_values = features
                     
@@ -432,7 +427,7 @@ class WatermarkEvaluator:
                     # Store images for FID calculation
                     negative_images.append(x)
                     
-                    # Extract features (real pixel values) before masking
+                    # Extract features (real pixel values)
                     features = self.extract_image_partial(x)
                     true_values = features
                     

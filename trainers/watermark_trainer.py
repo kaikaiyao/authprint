@@ -59,10 +59,6 @@ class WatermarkTrainer:
         self.image_pixel_count = self.config.model.image_pixel_count
         self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
         logging.info(f"Using image-based approach with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
-        
-        # Random masking parameters
-        self.mask_pixel_count = 10000  # Number of pixels to mask
-        self.mask_value = -1.0  # Value to use for masking
     
     def setup_models(self) -> None:
         """
@@ -166,14 +162,14 @@ class WatermarkTrainer:
             w = self.gan_model.mapping(z, None)
             x = self.gan_model.synthesis(w, noise_mode="const")
         
-        # Extract features (real pixel values) before masking
+        # Extract features (real pixel values)
         features = self.extract_image_partial(x)
         true_values = features
         
         # Get decoder (handle DDP wrapping)
         decoder = self.decoder.module if hasattr(self.decoder, 'module') else self.decoder
         
-        # Get predictions from masked images
+        # Get predictions
         pred_values = self.decoder(x)
         key_loss = torch.mean(torch.pow(pred_values - true_values, 2))
         

@@ -364,12 +364,12 @@ def format_results_table(all_results):
     # Add rows
     for case_name, results in all_results.items():
         row = f"{case_name:<40}"
-        row += f"{results['success_rate']:.2%:>15}"
-        row += f"{results['avg_queries']:.1f:>15}"
-        row += f"{results['avg_metrics']['lpips']:.4f:>15}"
-        row += f"{results['avg_metrics']['psnr']:.2f:>15}"
-        row += f"{results['avg_metrics']['ssim']:.4f:>15}"
-        row += f"{results['avg_metrics']['fid']:.2f:>15}\n"
+        row += f"{results['success_rate']*100:>15.2f}%"  # Fixed format specifier
+        row += f"{results['avg_queries']:>15.1f}"
+        row += f"{results['avg_metrics']['lpips']:>15.4f}"
+        row += f"{results['avg_metrics']['psnr']:>15.2f}"
+        row += f"{results['avg_metrics']['ssim']:>15.4f}"
+        row += f"{results['avg_metrics']['fid']:>15.2f}\n"
         table_str += row
     
     table_str += "-" * 150 + "\n"

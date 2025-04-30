@@ -78,7 +78,7 @@ spec:
                           --epsilon 0.1 \
                           --max_queries 1000 \
                           --binary_search_steps 10 \
-                          --detection_threshold 0.01 \
+                          --detection_threshold 0.002883 \
                           --output_dir query_based_attack_results"
               
               

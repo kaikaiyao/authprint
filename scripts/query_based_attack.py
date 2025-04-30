@@ -101,13 +101,15 @@ class QueryBasedAttack:
         decoder,
         device=None,
         rank=0,
-        batch_size=16
+        batch_size=32,
+        config=None
     ):
         self.original_model = original_model
         self.decoder = decoder
         self.device = device or next(decoder.parameters()).device
         self.rank = rank
         self.batch_size = batch_size
+        self.config = config
         
         # Initialize quality metrics for evaluation only
         self.quality_metrics = ImageQualityMetrics(self.device)
@@ -486,11 +488,10 @@ def main():
         attacker = QueryBasedAttack(
             original_model=original_model,
             decoder=decoder_wrapper,
-            epsilon=config.query_based_attack.epsilon,
-            binary_search_steps=config.query_based_attack.binary_search_steps,
             device=device,
             rank=rank,
-            batch_size=config.query_based_attack.batch_size
+            batch_size=config.query_based_attack.batch_size,
+            config=config.query_based_attack  # Pass the config to the attacker
         )
         
         # Run attack on all cases

@@ -11,7 +11,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from torchmetrics.image import StructuralSimilarityIndexMeasure, PeakSignalNoiseRatio
-from tabulate import tabulate
 
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -77,7 +76,8 @@ class QueryBasedAttack:
         max_queries=1000,
         binary_search_steps=10,
         device=None,
-        rank=0
+        rank=0,
+        batch_size=16
     ):
         self.original_model = original_model
         self.decoder = decoder
@@ -86,6 +86,7 @@ class QueryBasedAttack:
         self.binary_search_steps = binary_search_steps
         self.device = device or next(decoder.parameters()).device
         self.rank = rank
+        self.batch_size = batch_size
         
         # Initialize quality metrics for evaluation only
         self.quality_metrics = ImageQualityMetrics(self.device)
@@ -184,7 +185,7 @@ class QueryBasedAttack:
             fid = calculate_fid(
                 original_images,
                 perturbed_images,
-                batch_size=self.query_based_attack.batch_size,
+                batch_size=self.batch_size,
                 device=self.device
             )
         else:
@@ -276,22 +277,26 @@ def parse_args():
 
 
 def format_results_table(all_results):
-    """Format results into a nice table."""
-    headers = ['Negative Case', 'Success Rate', 'Avg Queries', 'LPIPS', 'PSNR', 'SSIM', 'FID']
-    rows = []
+    """Format results into a nice table using fixed-width columns."""
+    # Print table header
+    table_str = "\nAttack Results Summary:\n"
+    table_str += "-" * 150 + "\n"
+    table_str += f"{'Negative Case':<40}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}{'SSIM':>15}{'FID':>15}\n"
+    table_str += "-" * 150 + "\n"
     
+    # Add rows
     for case_name, results in all_results.items():
-        rows.append([
-            case_name,
-            f"{results['success_rate']:.2%}",
-            f"{results['avg_queries']:.1f}",
-            f"{results['avg_metrics']['lpips']:.4f}",
-            f"{results['avg_metrics']['psnr']:.2f}",
-            f"{results['avg_metrics']['ssim']:.4f}",
-            f"{results['avg_metrics']['fid']:.2f}"
-        ])
+        row = f"{case_name:<40}"
+        row += f"{results['success_rate']:.2%:>15}"
+        row += f"{results['avg_queries']:.1f:>15}"
+        row += f"{results['avg_metrics']['lpips']:.4f:>15}"
+        row += f"{results['avg_metrics']['psnr']:.2f:>15}"
+        row += f"{results['avg_metrics']['ssim']:.4f:>15}"
+        row += f"{results['avg_metrics']['fid']:.2f:>15}\n"
+        table_str += row
     
-    return tabulate(rows, headers=headers, tablefmt='grid')
+    table_str += "-" * 150 + "\n"
+    return table_str
 
 
 def main():
@@ -385,7 +390,8 @@ def main():
             max_queries=config.query_based_attack.max_queries,
             binary_search_steps=config.query_based_attack.binary_search_steps,
             device=device,
-            rank=rank
+            rank=rank,
+            batch_size=config.query_based_attack.batch_size
         )
         
         # Run attack on all cases
@@ -401,8 +407,7 @@ def main():
         # Print results table
         if rank == 0:
             table = format_results_table(all_results)
-            logging.info("\nAttack Results Summary:")
-            logging.info("\n" + table)
+            logging.info(table)
     
     except Exception as e:
         if rank == 0:

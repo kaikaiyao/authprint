@@ -11,7 +11,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from torchmetrics.image import StructuralSimilarityIndexMeasure, PeakSignalNoiseRatio
-from pytorch_fid import fid_score
 from tabulate import tabulate
 
 # Add the parent directory (project root) to the Python path
@@ -23,6 +22,7 @@ from utils.distributed import setup_distributed, cleanup_distributed
 from utils.logging_utils import setup_logging
 from utils.image_transforms import quantize_model_weights, downsample_and_upsample
 from utils.model_loading import load_pretrained_models
+from utils.metrics import calculate_fid, InceptionV3
 
 
 class ImageQualityMetrics:
@@ -181,9 +181,11 @@ class QueryBasedAttack:
         if successful_attacks > 0:
             original_images = torch.stack([r['original_image'] for r in results])
             perturbed_images = torch.stack([r['perturbed_image'] for r in results])
-            fid = fid_score.calculate_fid_given_images(
-                original_images.cpu().numpy(),
-                perturbed_images.cpu().numpy()
+            fid = calculate_fid(
+                original_images,
+                perturbed_images,
+                batch_size=self.query_based_attack.batch_size,
+                device=self.device
             )
         else:
             fid = float('inf')

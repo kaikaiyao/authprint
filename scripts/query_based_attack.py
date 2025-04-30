@@ -133,20 +133,45 @@ class QueryBasedAttack:
         
         # Check if the image already passes
         initial_prediction = self.decoder.predict(image)
-        if initial_prediction:
+        if self.rank == 0:
+            with torch.no_grad():
+                initial_mse = torch.mean(torch.pow(self.decoder.decoder(image) - self.decoder.extract_features(image), 2), dim=1)
+                logging.info(f"Initial state - Prediction: {initial_prediction.cpu().numpy()[0]}, MSE: {initial_mse.cpu().numpy()[0]:.6f} (threshold: {self.decoder.threshold:.6f})")
+        
+        if initial_prediction.all():
             # If it already passes, just return the original image
+            if self.rank == 0:
+                logging.info("Image already passes detection, no perturbation needed")
             return image, 0.0
         
-        for _ in range(self.binary_search_steps):
+        for step in range(self.binary_search_steps):
             alpha = (low + high) / 2
             perturbed = self.apply_perturbation(image, alpha, z)
+            current_prediction = self.decoder.predict(perturbed)
             
-            if self.decoder.predict(perturbed):  # Successfully fooled - decoder thinks it's original
+            if self.rank == 0:
+                with torch.no_grad():
+                    current_mse = torch.mean(torch.pow(self.decoder.decoder(perturbed) - self.decoder.extract_features(perturbed), 2), dim=1)
+                    logging.info(f"Step {step+1}/{self.binary_search_steps} - "
+                               f"Alpha: {alpha:.4f}, "
+                               f"Prediction: {current_prediction.cpu().numpy()[0]}, "
+                               f"MSE: {current_mse.cpu().numpy()[0]:.6f}")
+            
+            if current_prediction.all():  # Successfully fooled - decoder thinks it's original
                 high = alpha
                 best_perturbed = perturbed
                 best_alpha = alpha
+                if self.rank == 0:
+                    logging.info(f"Found successful perturbation at alpha={alpha:.4f}")
             else:
                 low = alpha
+        
+        if best_perturbed is not None and self.rank == 0:
+            with torch.no_grad():
+                final_mse = torch.mean(torch.pow(self.decoder.decoder(best_perturbed) - self.decoder.extract_features(best_perturbed), 2), dim=1)
+                logging.info(f"Final result - Alpha: {best_alpha:.4f}, MSE: {final_mse.cpu().numpy()[0]:.6f}")
+        elif self.rank == 0:
+            logging.info("Failed to find successful perturbation")
         
         return best_perturbed, best_alpha
     
@@ -161,6 +186,11 @@ class QueryBasedAttack:
         perturbed_images = []
         
         for i in range(num_samples):
+            if self.rank == 0:
+                logging.info(f"\nProcessing sample {i+1}/{num_samples}")
+                if negative_case_type:
+                    logging.info(f"Negative case type: {negative_case_type}")
+            
             # Generate z vector and image from negative model
             z = torch.randn(1, negative_model.z_dim, device=self.device)
             if hasattr(negative_model, 'module'):
@@ -168,14 +198,18 @@ class QueryBasedAttack:
                 negative_img = negative_model.module.synthesis(w, noise_mode="const")
             else:
                 w = negative_model.mapping(z, None)
-                negative_img = negative_model.module.synthesis(w, noise_mode="const")
+                negative_img = negative_model.synthesis(w, noise_mode="const")
             
             # Apply transformations for special cases
             if negative_case_type and negative_case_type.startswith('downsample'):
                 size = int(negative_case_type.split('_')[1])
                 negative_img = downsample_and_upsample(negative_img, downsample_size=size)
+                if self.rank == 0:
+                    logging.info(f"Applied downsampling transformation with size {size}")
             
             # Try to find fooling perturbation using same z vector
+            if self.rank == 0:
+                logging.info("Starting binary search for perturbation...")
             perturbed, alpha = self.binary_search_perturbation(negative_img, z)
             
             if perturbed is not None:
@@ -191,12 +225,18 @@ class QueryBasedAttack:
                     'alpha': alpha,
                     'metrics': metrics
                 })
+                
+                if self.rank == 0:
+                    logging.info(f"Attack successful - Alpha: {alpha:.4f}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
+            else:
+                if self.rank == 0:
+                    logging.info("Attack failed for this sample")
             
             total_queries += self.max_queries
             
             # Log progress
             if (i + 1) % 10 == 0 and self.rank == 0:
-                logging.info(f"Processed {i+1}/{num_samples} samples. Current success rate: {successful_attacks/(i+1):.2%}")
+                logging.info(f"Progress: {i+1}/{num_samples} samples. Current success rate: {successful_attacks/(i+1):.2%}")
         
         # Calculate FID score for all successful attacks
         if successful_attacks > 0:

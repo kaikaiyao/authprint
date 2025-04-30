@@ -78,7 +78,6 @@ class QueryBasedAttackConfig:
     num_samples: int = 1000
     batch_size: int = 16
     epsilon: float = 0.1
-    max_queries: int = 1000
     binary_search_steps: int = 10
     detection_threshold: float = 0.002883  # 95% TPR threshold for detection
     
@@ -139,8 +138,6 @@ class Config:
                 self.query_based_attack.batch_size = args.batch_size
             if hasattr(args, 'epsilon'):
                 self.query_based_attack.epsilon = args.epsilon
-            if hasattr(args, 'max_queries'):
-                self.query_based_attack.max_queries = args.max_queries
             if hasattr(args, 'binary_search_steps'):
                 self.query_based_attack.binary_search_steps = args.binary_search_steps
             if hasattr(args, 'detection_threshold'):

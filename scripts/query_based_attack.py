@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from torchmetrics.image import StructuralSimilarityIndexMeasure, PeakSignalNoiseRatio
+from dataclasses import dataclass
 
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -69,6 +70,20 @@ class DecoderWrapper:
             return mse <= self.threshold
 
 
+@dataclass
+class QueryBasedAttackConfig:
+    """Configuration for query-based attack against the watermarking."""
+    # Attack parameters
+    num_samples: int = 1000
+    batch_size: int = 16
+    epsilon: float = 0.1
+    binary_search_steps: int = 10
+    detection_threshold: float = 0.002883  # 95% TPR threshold for detection
+    
+    # Logging
+    log_interval: int = 10
+
+
 class QueryBasedAttack:
     """Query-based attack implementation for StyleGAN watermarking."""
     def __init__(
@@ -76,7 +91,6 @@ class QueryBasedAttack:
         original_model,
         decoder,
         epsilon=0.1,
-        max_queries=1000,
         binary_search_steps=10,
         device=None,
         rank=0,
@@ -85,7 +99,6 @@ class QueryBasedAttack:
         self.original_model = original_model
         self.decoder = decoder
         self.epsilon = epsilon
-        self.max_queries = max_queries
         self.binary_search_steps = binary_search_steps
         self.device = device or next(decoder.parameters()).device
         self.rank = rank
@@ -127,12 +140,16 @@ class QueryBasedAttack:
         that makes the decoder predict True (think it's an original image).
         For original model (control case), this should be easy as they already pass.
         For negative cases, we need to find perturbation that makes them pass.
+        
+        Returns:
+            Tuple of (perturbed_image, alpha, queries_used)
         """
-        best_perturbed = None
-        best_alpha = None
+        queries_used = 0
         
         # Check if the image already passes
         initial_prediction = self.decoder.predict(image)
+        queries_used += 1
+        
         if self.rank == 0:
             with torch.no_grad():
                 initial_mse = torch.mean(torch.pow(self.decoder.decoder(image) - self.decoder.extract_features(image), 2), dim=1)
@@ -142,12 +159,13 @@ class QueryBasedAttack:
             # If it already passes, just return the original image
             if self.rank == 0:
                 logging.info("Image already passes detection, no perturbation needed")
-            return image, 0.0
+            return image, 0.0, queries_used
         
         for step in range(self.binary_search_steps):
             alpha = (low + high) / 2
             perturbed = self.apply_perturbation(image, alpha, z)
             current_prediction = self.decoder.predict(perturbed)
+            queries_used += 1
             
             if self.rank == 0:
                 with torch.no_grad():
@@ -158,22 +176,17 @@ class QueryBasedAttack:
                                f"MSE: {current_mse.cpu().numpy()[0]:.6f}")
             
             if current_prediction.all():  # Successfully fooled - decoder thinks it's original
-                high = alpha
-                best_perturbed = perturbed
-                best_alpha = alpha
+                # Found a successful perturbation - can return immediately since we don't need to minimize alpha
                 if self.rank == 0:
                     logging.info(f"Found successful perturbation at alpha={alpha:.4f}")
+                return perturbed, alpha, queries_used
             else:
                 low = alpha
         
-        if best_perturbed is not None and self.rank == 0:
-            with torch.no_grad():
-                final_mse = torch.mean(torch.pow(self.decoder.decoder(best_perturbed) - self.decoder.extract_features(best_perturbed), 2), dim=1)
-                logging.info(f"Final result - Alpha: {best_alpha:.4f}, MSE: {final_mse.cpu().numpy()[0]:.6f}")
-        elif self.rank == 0:
+        if self.rank == 0:
             logging.info("Failed to find successful perturbation")
         
-        return best_perturbed, best_alpha
+        return None, None, queries_used
     
     def attack_negative_case(self, negative_model, num_samples, negative_case_type=None):
         """Attack a specific negative case."""
@@ -210,7 +223,8 @@ class QueryBasedAttack:
             # Try to find fooling perturbation using same z vector
             if self.rank == 0:
                 logging.info("Starting binary search for perturbation...")
-            perturbed, alpha = self.binary_search_perturbation(negative_img, z)
+            perturbed, alpha, queries = self.binary_search_perturbation(negative_img, z)
+            total_queries += queries
             
             if perturbed is not None:
                 successful_attacks += 1
@@ -223,20 +237,20 @@ class QueryBasedAttack:
                 
                 results.append({
                     'alpha': alpha,
-                    'metrics': metrics
+                    'metrics': metrics,
+                    'queries': queries
                 })
                 
                 if self.rank == 0:
-                    logging.info(f"Attack successful - Alpha: {alpha:.4f}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
+                    logging.info(f"Attack successful - Alpha: {alpha:.4f}, Queries: {queries}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
             else:
                 if self.rank == 0:
-                    logging.info("Attack failed for this sample")
-            
-            total_queries += self.max_queries
+                    logging.info(f"Attack failed for this sample after {queries} queries")
             
             # Log progress
             if (i + 1) % 10 == 0 and self.rank == 0:
-                logging.info(f"Progress: {i+1}/{num_samples} samples. Current success rate: {successful_attacks/(i+1):.2%}")
+                avg_queries_so_far = total_queries / (i + 1)
+                logging.info(f"Progress: {i+1}/{num_samples} samples. Current success rate: {successful_attacks/(i+1):.2%}, Avg queries per sample: {avg_queries_so_far:.1f}")
         
         # Calculate FID score for all successful attacks
         if successful_attacks > 0:
@@ -339,8 +353,6 @@ def parse_args():
                         help="Number of samples to attack")
     parser.add_argument("--epsilon", type=float, default=0.1,
                         help="Maximum perturbation size")
-    parser.add_argument("--max_queries", type=int, default=1000,
-                        help="Maximum number of queries per sample")
     parser.add_argument("--binary_search_steps", type=int, default=10,
                         help="Number of binary search steps")
     parser.add_argument("--detection_threshold", type=float, default=0.002883,
@@ -468,7 +480,6 @@ def main():
             original_model=original_model,
             decoder=decoder_wrapper,
             epsilon=config.query_based_attack.epsilon,
-            max_queries=config.query_based_attack.max_queries,
             binary_search_steps=config.query_based_attack.binary_search_steps,
             device=device,
             rank=rank,

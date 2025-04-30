@@ -89,7 +89,7 @@ spec:
                 
                 # Run attack using torchrun for consistency with training
                 (
-                  echo "=== Evaluation Run $run/10 ===" 
+                  echo "=== Attack Run $run/10 ===" 
                   echo "Started at: $(date)"
                   echo ""
                   

@@ -119,15 +119,26 @@ class QueryBasedAttack:
         return perturbed
     
     def binary_search_perturbation(self, image, z, low=0.0, high=1.0):
-        """Binary search for minimal perturbation."""
+        """Binary search for minimal perturbation.
+        For all cases (both original and negative), we want to find a perturbation
+        that makes the decoder predict True (think it's an original image).
+        For original model (control case), this should be easy as they already pass.
+        For negative cases, we need to find perturbation that makes them pass.
+        """
         best_perturbed = None
         best_alpha = None
+        
+        # Check if the image already passes
+        initial_prediction = self.decoder.predict(image)
+        if initial_prediction:
+            # If it already passes, just return the original image
+            return image, 0.0
         
         for _ in range(self.binary_search_steps):
             alpha = (low + high) / 2
             perturbed = self.apply_perturbation(image, alpha, z)
             
-            if not self.decoder.predict(perturbed):  # Successfully fooled
+            if self.decoder.predict(perturbed):  # Successfully fooled - decoder thinks it's original
                 high = alpha
                 best_perturbed = perturbed
                 best_alpha = alpha
@@ -142,6 +153,10 @@ class QueryBasedAttack:
         total_queries = 0
         results = []
         
+        # Lists to store images for FID calculation
+        original_images = []
+        perturbed_images = []
+        
         for i in range(num_samples):
             # Generate z vector and image from negative model
             z = torch.randn(1, negative_model.z_dim, device=self.device)
@@ -150,7 +165,7 @@ class QueryBasedAttack:
                 negative_img = negative_model.module.synthesis(w, noise_mode="const")
             else:
                 w = negative_model.mapping(z, None)
-                negative_img = negative_model.synthesis(w, noise_mode="const")
+                negative_img = negative_model.module.synthesis(w, noise_mode="const")
             
             # Apply transformations for special cases
             if negative_case_type and negative_case_type.startswith('downsample'):
@@ -164,10 +179,12 @@ class QueryBasedAttack:
                 successful_attacks += 1
                 # Compute quality metrics only for successful attacks
                 metrics = self.quality_metrics.compute_metrics(negative_img, perturbed)
+                
+                # Store images for FID calculation
+                original_images.append(negative_img)
+                perturbed_images.append(perturbed)
+                
                 results.append({
-                    'perturbed_image': perturbed,
-                    'original_image': negative_img,
-                    'z_vector': z,  # Store z vector for reference
                     'alpha': alpha,
                     'metrics': metrics
                 })
@@ -180,14 +197,31 @@ class QueryBasedAttack:
         
         # Calculate FID score for all successful attacks
         if successful_attacks > 0:
-            original_images = torch.stack([r['original_image'] for r in results])
-            perturbed_images = torch.stack([r['perturbed_image'] for r in results])
-            fid = calculate_fid(
-                original_images,
-                perturbed_images,
-                batch_size=self.batch_size,
-                device=self.device
-            )
+            # Concatenate all images
+            original_images = torch.cat(original_images, dim=0)
+            perturbed_images = torch.cat(perturbed_images, dim=0)
+            
+            # Convert from [-1, 1] to [0, 1] range for FID calculation
+            original_images = (original_images + 1) / 2
+            perturbed_images = (perturbed_images + 1) / 2
+            
+            try:
+                if self.rank == 0:
+                    logging.info(f"Computing FID score for {len(original_images)} successful attacks...")
+                
+                fid = calculate_fid(
+                    original_images,
+                    perturbed_images,
+                    batch_size=self.batch_size,
+                    device=self.device
+                )
+                
+                if self.rank == 0:
+                    logging.info(f"FID score computed: {fid:.4f}")
+            except Exception as e:
+                if self.rank == 0:
+                    logging.error(f"Error computing FID score: {str(e)}")
+                fid = float('inf')
         else:
             fid = float('inf')
         

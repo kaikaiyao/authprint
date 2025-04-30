@@ -58,11 +58,14 @@ class DecoderWrapper:
         return flattened[:, self.image_pixel_indices]
     
     def predict(self, x):
-        """Return True if image is detected as original, False if undetected."""
+        """Return True if image is detected as original, False if undetected.
+        Calculates MSE per sample, matching evaluator's implementation."""
         with torch.no_grad():
             features = self.extract_features(x)
             pred_values = self.decoder(x)
-            mse = torch.mean(torch.pow(pred_values - features, 2))
+            # Calculate MSE per sample (dim=1)
+            mse = torch.mean(torch.pow(pred_values - features, 2), dim=1)
+            # Compare each sample's MSE with threshold
             return mse <= self.threshold
 
 
@@ -408,6 +411,10 @@ def main():
         torch.manual_seed(config.model.image_pixel_set_seed)
         total_pixels = config.model.img_size * config.model.img_size * 3
         image_pixel_indices = torch.randperm(total_pixels)[:config.model.image_pixel_count].to(device)
+        
+        if rank == 0:
+            logging.info(f"Generated {len(image_pixel_indices)} pixel indices with seed {config.model.image_pixel_set_seed}")
+            logging.info(f"Selected pixel indices: {image_pixel_indices.tolist()}")
         
         # Create decoder wrapper with threshold from config
         decoder_wrapper = DecoderWrapper(

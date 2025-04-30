@@ -149,6 +149,16 @@ class Config:
                 self.query_based_attack.detection_threshold = args.detection_threshold
             if hasattr(args, 'log_interval'):
                 self.query_based_attack.log_interval = args.log_interval
+            # Add new classifier parameters
+            if hasattr(args, 'classifier_iterations'):
+                self.query_based_attack.classifier_iterations = args.classifier_iterations
+            if hasattr(args, 'classifier_lr'):
+                self.query_based_attack.classifier_lr = args.classifier_lr
+            # Add new PGD parameters
+            if hasattr(args, 'pgd_step_size'):
+                self.query_based_attack.pgd_step_size = args.pgd_step_size
+            if hasattr(args, 'pgd_steps'):
+                self.query_based_attack.pgd_steps = args.pgd_steps
         
         # Other configuration
         if hasattr(args, 'output_dir'):

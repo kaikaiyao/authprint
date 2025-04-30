@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ${USER}-job-attack-${JOB_SUFFIX}
+  generateName: ${USER}-job-attack-${JOB_SUFFIX}
   labels:
     eidf/user: ${USER}
     kueue.x-k8s.io/queue-name: ${QUEUE_NAME}
@@ -27,7 +27,7 @@ spec:
                   - key: nvidia.com/gpu.product
                     operator: In
                     values:
-                      - NVIDIA-A100-SXM4-40GB
+                      - NVIDIA-H200
       # Add tolerations to allow scheduling on nodes with specific taints.
       tolerations:
         - key: "eidf098"
@@ -81,14 +81,15 @@ spec:
                           --detection_threshold 0.01 \
                           --output_dir query_based_attack_results"
               
+              
               # Run attack 10 times
               for run in {1..10}; do
                 echo "Starting attack run $run/10..."
                 log_file="/workspace/kubernets/attack_results/logs/run_${run}.log"
                 
-                # Run attack with torchrun for distributed processing
+                # Run attack using torchrun for consistency with training
                 (
-                  echo "=== Attack Run $run/10 ===" 
+                  echo "=== Evaluation Run $run/10 ===" 
                   echo "Started at: $(date)"
                   echo ""
                   
@@ -117,8 +118,8 @@ spec:
           resources:
             limits:
               nvidia.com/gpu: "1"
-              cpu: "8"
-              memory: "32Gi"
+              cpu: "4"
+              memory: "16Gi"
           volumeMounts:
             - name: nfs-user-107
               mountPath: /nfs-user-107

@@ -8,8 +8,10 @@ import os
 import sys
 import lpips
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from torchvision import models
 from torchmetrics.image import StructuralSimilarityIndexMeasure, PeakSignalNoiseRatio
 from dataclasses import dataclass
 
@@ -23,6 +25,26 @@ from utils.logging_utils import setup_logging
 from utils.image_transforms import quantize_model_weights, downsample_and_upsample
 from utils.model_loading import load_pretrained_models
 from utils.metrics import calculate_fid, InceptionV3
+
+
+class ClassifierModel(nn.Module):
+    """ResNet-18 based binary classifier."""
+    def __init__(self):
+        super().__init__()
+        # Load pretrained ResNet-18 but modify for our use case
+        self.resnet = models.resnet18(pretrained=True)
+        # Modify first conv layer to accept 3 channels and maintain size
+        self.resnet.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=1, padding=3, bias=False)
+        # Modify final layer for binary classification
+        self.resnet.fc = nn.Linear(512, 1)
+        self.sigmoid = nn.Sigmoid()
+    
+    def forward(self, x):
+        # x is expected to be in [-1, 1]
+        # Convert to [0, 1] for ResNet
+        x = (x + 1) / 2
+        x = self.resnet(x)
+        return self.sigmoid(x)
 
 
 class ImageQualityMetrics:
@@ -70,36 +92,19 @@ class DecoderWrapper:
             return mse <= self.threshold
 
 
-@dataclass
-class QueryBasedAttackConfig:
-    """Configuration for query-based attack against the watermarking."""
-    # Attack parameters
-    num_samples: int = 1000
-    batch_size: int = 16
-    epsilon: float = 0.1
-    binary_search_steps: int = 10
-    detection_threshold: float = 0.002883  # 95% TPR threshold for detection
-    
-    # Logging
-    log_interval: int = 10
-
 
 class QueryBasedAttack:
-    """Query-based attack implementation for StyleGAN watermarking."""
+    """Query-based attack implementation for StyleGAN watermarking using PGD."""
     def __init__(
         self,
         original_model,
         decoder,
-        epsilon=0.1,
-        binary_search_steps=10,
         device=None,
         rank=0,
         batch_size=16
     ):
         self.original_model = original_model
         self.decoder = decoder
-        self.epsilon = epsilon
-        self.binary_search_steps = binary_search_steps
         self.device = device or next(decoder.parameters()).device
         self.rank = rank
         self.batch_size = batch_size
@@ -107,89 +112,105 @@ class QueryBasedAttack:
         # Initialize quality metrics for evaluation only
         self.quality_metrics = ImageQualityMetrics(self.device)
     
-    def apply_perturbation(self, image, alpha, z):
-        """Apply controlled perturbation to image.
-        
-        Args:
-            image: The negative case image to perturb
-            alpha: Interpolation coefficient
-            z: The latent vector used to generate both negative and original images
-            negative_case_type: Type of negative case being attacked
-        """
-        # Generate original image using the same z vector
-        if hasattr(self.original_model, 'module'):
-            w = self.original_model.module.mapping(z, None)
-            original_img = self.original_model.module.synthesis(w, noise_mode="const")
-        else:
-            w = self.original_model.mapping(z, None)
-            original_img = self.original_model.synthesis(w, noise_mode="const")
-        
-        # Interpolate between negative and original image
-        perturbed = (1 - alpha) * image + alpha * original_img
-        
-        # Ensure perturbation is within epsilon bound
-        delta = perturbed - image
-        delta = torch.clamp(delta, -self.epsilon, self.epsilon)
-        perturbed = image + delta
-        
-        return perturbed
-    
-    def binary_search_perturbation(self, image, z, low=0.0, high=1.0):
-        """Binary search for minimal perturbation.
-        For all cases (both original and negative), we want to find a perturbation
-        that makes the decoder predict True (think it's an original image).
-        For original model (control case), this should be easy as they already pass.
-        For negative cases, we need to find perturbation that makes them pass.
-        
-        Returns:
-            Tuple of (perturbed_image, alpha, queries_used)
-        """
-        queries_used = 0
-        
-        # Check if the image already passes
-        initial_prediction = self.decoder.predict(image)
-        queries_used += 1
-        
+    def train_classifier(self, negative_model, negative_case_type=None):
+        """Train classifier to distinguish between original and negative images."""
         if self.rank == 0:
+            logging.info("Starting classifier training...")
+        
+        classifier = ClassifierModel().to(self.device)
+        optimizer = torch.optim.Adam(classifier.parameters(), lr=self.config.classifier_lr)
+        criterion = nn.BCELoss()
+        
+        classifier.train()
+        for iteration in range(self.config.classifier_iterations):
+            # Generate batch of z vectors
+            z_batch = torch.randn(self.config.batch_size, self.original_model.z_dim, device=self.device)
+            
+            # Generate original images
             with torch.no_grad():
-                initial_mse = torch.mean(torch.pow(self.decoder.decoder(image) - self.decoder.extract_features(image), 2), dim=1)
-                logging.info(f"Initial state - Prediction: {initial_prediction.cpu().numpy()[0]}, MSE: {initial_mse.cpu().numpy()[0]:.6f} (threshold: {self.decoder.threshold:.6f})")
-        
-        if initial_prediction.all():
-            # If it already passes, just return the original image
-            if self.rank == 0:
-                logging.info("Image already passes detection, no perturbation needed")
-            return image, 0.0, queries_used
-        
-        for step in range(self.binary_search_steps):
-            alpha = (low + high) / 2
-            perturbed = self.apply_perturbation(image, alpha, z)
-            current_prediction = self.decoder.predict(perturbed)
-            queries_used += 1
+                if hasattr(self.original_model, 'module'):
+                    w = self.original_model.module.mapping(z_batch, None)
+                    original_images = self.original_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = self.original_model.mapping(z_batch, None)
+                    original_images = self.original_model.synthesis(w, noise_mode="const")
+                
+                # Generate negative case images
+                if negative_case_type and negative_case_type.startswith('downsample'):
+                    size = int(negative_case_type.split('_')[1])
+                    negative_images = downsample_and_upsample(original_images, downsample_size=size)
+                else:
+                    if hasattr(negative_model, 'module'):
+                        w = negative_model.module.mapping(z_batch, None)
+                        negative_images = negative_model.module.synthesis(w, noise_mode="const")
+                    else:
+                        w = negative_model.mapping(z_batch, None)
+                        negative_images = negative_model.synthesis(w, noise_mode="const")
             
-            if self.rank == 0:
-                with torch.no_grad():
-                    current_mse = torch.mean(torch.pow(self.decoder.decoder(perturbed) - self.decoder.extract_features(perturbed), 2), dim=1)
-                    logging.info(f"Step {step+1}/{self.binary_search_steps} - "
-                               f"Alpha: {alpha:.4f}, "
-                               f"Prediction: {current_prediction.cpu().numpy()[0]}, "
-                               f"MSE: {current_mse.cpu().numpy()[0]:.6f}")
+            # Combine into training batch
+            all_images = torch.cat([original_images, negative_images])
+            labels = torch.cat([
+                torch.ones(self.config.batch_size, 1),
+                torch.zeros(self.config.batch_size, 1)
+            ]).to(self.device)
             
-            if current_prediction.all():  # Successfully fooled - decoder thinks it's original
-                # Found a successful perturbation - can return immediately since we don't need to minimize alpha
+            # Train step
+            optimizer.zero_grad()
+            predictions = classifier(all_images)
+            loss = criterion(predictions, labels)
+            loss.backward()
+            optimizer.step()
+            
+            if self.rank == 0 and iteration % self.config.log_interval == 0:
+                logging.info(f"Classifier training iteration {iteration}/{self.config.classifier_iterations}, Loss: {loss.item():.4f}")
+        
+        classifier.eval()
+        return classifier
+    
+    def pgd_attack(self, image, classifier, z):
+        """Perform PGD attack using trained classifier."""
+        perturbed = image.clone()
+        criterion = nn.BCELoss()
+        
+        # Target is 1 (original class)
+        target = torch.ones(1, 1).to(self.device)
+        
+        for step in range(self.config.pgd_steps):
+            perturbed.requires_grad = True
+            
+            # Forward pass through classifier
+            pred = classifier(perturbed)
+            loss = criterion(pred, target)
+            
+            # Compute gradient
+            grad = torch.autograd.grad(loss, perturbed)[0]
+            
+            # PGD step
+            with torch.no_grad():
+                perturbed = perturbed + self.config.pgd_step_size * grad.sign()
+                
+                # Project back to epsilon ball
+                delta = perturbed - image
+                delta = torch.clamp(delta, -self.config.epsilon, self.config.epsilon)
+                perturbed = image + delta
+                perturbed = torch.clamp(perturbed, -1, 1)
+            
+            # Check if decoder is fooled
+            if self.decoder.predict(perturbed):
                 if self.rank == 0:
-                    logging.info(f"Found successful perturbation at alpha={alpha:.4f}")
-                return perturbed, alpha, queries_used
-            else:
-                low = alpha
+                    logging.info(f"Attack succeeded at step {step+1}")
+                return perturbed, True
         
-        if self.rank == 0:
-            logging.info("Failed to find successful perturbation")
-        
-        return None, None, queries_used
+        return perturbed, False
     
     def attack_negative_case(self, negative_model, num_samples, negative_case_type=None):
-        """Attack a specific negative case."""
+        """Attack a specific negative case using PGD."""
+        if self.rank == 0:
+            logging.info(f"Training classifier for {negative_case_type or 'base'} case...")
+        
+        # Train classifier first
+        classifier = self.train_classifier(negative_model, negative_case_type)
+        
         successful_attacks = 0
         total_queries = 0
         results = []
@@ -201,34 +222,28 @@ class QueryBasedAttack:
         for i in range(num_samples):
             if self.rank == 0:
                 logging.info(f"\nProcessing sample {i+1}/{num_samples}")
-                if negative_case_type:
-                    logging.info(f"Negative case type: {negative_case_type}")
             
             # Generate z vector and image from negative model
             z = torch.randn(1, negative_model.z_dim, device=self.device)
-            if hasattr(negative_model, 'module'):
-                w = negative_model.module.mapping(z, None)
-                negative_img = negative_model.module.synthesis(w, noise_mode="const")
-            else:
-                w = negative_model.mapping(z, None)
-                negative_img = negative_model.synthesis(w, noise_mode="const")
+            with torch.no_grad():
+                if hasattr(negative_model, 'module'):
+                    w = negative_model.module.mapping(z, None)
+                    negative_img = negative_model.module.synthesis(w, noise_mode="const")
+                else:
+                    w = negative_model.mapping(z, None)
+                    negative_img = negative_model.synthesis(w, noise_mode="const")
             
             # Apply transformations for special cases
             if negative_case_type and negative_case_type.startswith('downsample'):
                 size = int(negative_case_type.split('_')[1])
                 negative_img = downsample_and_upsample(negative_img, downsample_size=size)
-                if self.rank == 0:
-                    logging.info(f"Applied downsampling transformation with size {size}")
             
-            # Try to find fooling perturbation using same z vector
-            if self.rank == 0:
-                logging.info("Starting binary search for perturbation...")
-            perturbed, alpha, queries = self.binary_search_perturbation(negative_img, z)
-            total_queries += queries
+            # Perform PGD attack
+            perturbed, success = self.pgd_attack(negative_img, classifier, z)
+            total_queries += self.config.pgd_steps  # Count each PGD step as a query
             
-            if perturbed is not None:
+            if success:
                 successful_attacks += 1
-                # Compute quality metrics only for successful attacks
                 metrics = self.quality_metrics.compute_metrics(negative_img, perturbed)
                 
                 # Store images for FID calculation
@@ -236,57 +251,37 @@ class QueryBasedAttack:
                 perturbed_images.append(perturbed)
                 
                 results.append({
-                    'alpha': alpha,
                     'metrics': metrics,
-                    'queries': queries
+                    'queries': self.config.pgd_steps
                 })
                 
                 if self.rank == 0:
-                    logging.info(f"Attack successful - Alpha: {alpha:.4f}, Queries: {queries}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
+                    logging.info(f"Attack successful - Queries: {self.config.pgd_steps}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
             else:
                 if self.rank == 0:
-                    logging.info(f"Attack failed for this sample after {queries} queries")
-            
-            # Log progress
-            if (i + 1) % 10 == 0 and self.rank == 0:
-                avg_queries_so_far = total_queries / (i + 1)
-                logging.info(f"Progress: {i+1}/{num_samples} samples. Current success rate: {successful_attacks/(i+1):.2%}, Avg queries per sample: {avg_queries_so_far:.1f}")
+                    logging.info(f"Attack failed after {self.config.pgd_steps} steps")
         
-        # Calculate FID score for all successful attacks
+        # Calculate FID score for successful attacks
+        fid = float('inf')
         if successful_attacks > 0:
-            # Concatenate all images
             original_images = torch.cat(original_images, dim=0)
             perturbed_images = torch.cat(perturbed_images, dim=0)
             
-            # Convert from [-1, 1] to [0, 1] range for FID calculation
-            original_images = (original_images + 1) / 2
-            perturbed_images = (perturbed_images + 1) / 2
-            
             try:
-                if self.rank == 0:
-                    logging.info(f"Computing FID score for {len(original_images)} successful attacks...")
-                
                 fid = calculate_fid(
-                    original_images,
-                    perturbed_images,
-                    batch_size=self.batch_size,
+                    (original_images + 1) / 2,  # Convert to [0, 1] range
+                    (perturbed_images + 1) / 2,
+                    batch_size=self.config.batch_size,
                     device=self.device
                 )
-                
-                if self.rank == 0:
-                    logging.info(f"FID score computed: {fid:.4f}")
             except Exception as e:
                 if self.rank == 0:
                     logging.error(f"Error computing FID score: {str(e)}")
-                fid = float('inf')
-        else:
-            fid = float('inf')
         
         # Aggregate results
         success_rate = successful_attacks / num_samples
         avg_queries = total_queries / num_samples
         
-        # Calculate average metrics for successful attacks
         avg_metrics = {
             'lpips': np.mean([r['metrics']['lpips'] for r in results]) if results else float('inf'),
             'psnr': np.mean([r['metrics']['psnr'] for r in results]) if results else 0,
@@ -351,12 +346,24 @@ def parse_args():
     # Attack configuration
     parser.add_argument("--num_samples", type=int, default=1000,
                         help="Number of samples to attack")
+    parser.add_argument("--batch_size", type=int, default=32,
+                        help="Batch size for classifier training and evaluation")
     parser.add_argument("--epsilon", type=float, default=0.1,
                         help="Maximum perturbation size")
-    parser.add_argument("--binary_search_steps", type=int, default=10,
-                        help="Number of binary search steps")
     parser.add_argument("--detection_threshold", type=float, default=0.002883,
                         help="MSE threshold for detection (95% TPR threshold)")
+    
+    # Classifier training parameters
+    parser.add_argument("--classifier_iterations", type=int, default=10000,
+                        help="Number of iterations for classifier training")
+    parser.add_argument("--classifier_lr", type=float, default=1e-4,
+                        help="Learning rate for classifier training")
+    
+    # PGD parameters
+    parser.add_argument("--pgd_step_size", type=float, default=0.01,
+                        help="Step size for PGD attack")
+    parser.add_argument("--pgd_steps", type=int, default=50,
+                        help="Number of PGD steps")
     
     # Output configuration
     parser.add_argument("--output_dir", type=str, default="query_based_attack_results",

@@ -76,10 +76,17 @@ class QueryBasedAttackConfig:
     """Configuration for query-based attack against the watermarking."""
     # Attack parameters
     num_samples: int = 1000
-    batch_size: int = 16
+    batch_size: int = 32  # Changed to 32 for classifier training
     epsilon: float = 0.1
-    binary_search_steps: int = 10
     detection_threshold: float = 0.002883  # 95% TPR threshold for detection
+    
+    # Classifier training parameters
+    classifier_iterations: int = 10000  # Total number of iterations for classifier training
+    classifier_lr: float = 1e-4  # Learning rate for classifier
+    
+    # PGD parameters
+    pgd_step_size: float = 0.01  # Default to epsilon/10
+    pgd_steps: int = 50  # Number of PGD iteration steps
     
     # Logging
     log_interval: int = 10
@@ -138,8 +145,6 @@ class Config:
                 self.query_based_attack.batch_size = args.batch_size
             if hasattr(args, 'epsilon'):
                 self.query_based_attack.epsilon = args.epsilon
-            if hasattr(args, 'binary_search_steps'):
-                self.query_based_attack.binary_search_steps = args.binary_search_steps
             if hasattr(args, 'detection_threshold'):
                 self.query_based_attack.detection_threshold = args.detection_threshold
             if hasattr(args, 'log_interval'):

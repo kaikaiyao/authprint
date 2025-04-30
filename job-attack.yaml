@@ -73,18 +73,13 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/pixel_based/num_pixel_64/key_length_128/checkpoint_iter210000.pth' \
-                          --num_samples 100 \
-                          --pgd_alpha 0.001 \
-                          --pgd_steps 100 \
-                          --pgd_epsilon 1.0 \
-                          --num_surrogate_models 10 \
-                          --surrogate_num_samples 10000 \
-                          --key_length 128 \
-                          --key_mapper_seed 2025 \
-                          --use_image_pixels \
-                          --image_pixel_count 64 \
-                          --image_pixel_set_seed 42"
+              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
+                          --num_samples 1000 \
+                          --epsilon 0.1 \
+                          --max_queries 1000 \
+                          --binary_search_steps 10 \
+                          --detection_threshold 0.01 \
+                          --output_dir query_based_attack_results"
               
               # Run attack 10 times
               for run in {1..10}; do
@@ -99,10 +94,10 @@ spec:
                   
                   if [ $run -eq 1 ]; then
                     # Show full logs only for first run
-                    eval "$TORCHRUN_CMD scripts/attack.py $SCRIPT_ARGS"
+                    eval "$TORCHRUN_CMD scripts/query_based_attack.py $SCRIPT_ARGS"
                   else
                     # Suppress torchrun logs for subsequent runs
-                    eval "$TORCHRUN_CMD scripts/attack.py $SCRIPT_ARGS" > /dev/null 2>&1
+                    eval "$TORCHRUN_CMD scripts/query_based_attack.py $SCRIPT_ARGS" > /dev/null 2>&1
                   fi
                   
                   echo ""

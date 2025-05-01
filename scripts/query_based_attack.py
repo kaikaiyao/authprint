@@ -177,6 +177,13 @@ class QueryBasedAttack:
         # Target is 1 (original class)
         target = torch.ones(1, 1).to(self.device)
         
+        # First check if the image is already predicted as True by decoder
+        # This initial check doesn't count as a query since no perturbation was made
+        if self.decoder.predict(image):
+            if self.rank == 0:
+                logging.info("Image already predicted as True by decoder, no attack needed")
+            return image, True, 0  # Return 0 queries since no perturbation was needed
+        
         for step in range(self.config.pgd_steps):
             perturbed.requires_grad = True
             
@@ -197,7 +204,7 @@ class QueryBasedAttack:
                 perturbed = image + delta
                 perturbed = torch.clamp(perturbed, -1, 1)
             
-            # Check if decoder is fooled
+            # Check if decoder is fooled - this counts as a query since we made a perturbation
             if self.decoder.predict(perturbed):
                 if self.rank == 0:
                     logging.info(f"Attack succeeded at step {step+1}")

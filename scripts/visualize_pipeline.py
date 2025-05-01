@@ -89,15 +89,14 @@ def visualize_latent_vector(z: torch.Tensor, output_path: str):
     plt.figure(figsize=(10, 5))
     
     # Create heatmap with improved aesthetics
-    sns.heatmap(z_np, cmap='viridis', center=0, 
+    sns.heatmap(z_np, cmap='RdBu_r', center=0, 
                 xticklabels=False, yticklabels=False, 
-                cbar_kws={'label': 'Value'})
+                cbar=False)
     
-    plt.title('Latent Vector z (512-dim)', pad=10)
     plt.tight_layout()
     
     # Save and close
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0)
     plt.close()
 
 
@@ -136,16 +135,15 @@ def visualize_selected_pixels(pixel_values: torch.Tensor, output_path: str):
     plt.figure(figsize=(5, 5))
     
     # Create heatmap with improved aesthetics
-    sns.heatmap(values_grid, cmap='viridis', 
+    sns.heatmap(values_grid, cmap='RdBu_r', 
                 xticklabels=False, yticklabels=False,
-                cbar_kws={'label': 'Pixel Value'},
+                cbar=False,
                 mask=np.isnan(values_grid))
     
-    plt.title(f'Selected Pixels (n={num_pixels})', pad=10)
     plt.tight_layout()
     
     # Save and close
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0)
     plt.close()
 
 

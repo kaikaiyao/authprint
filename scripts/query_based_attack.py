@@ -201,9 +201,9 @@ class QueryBasedAttack:
             if self.decoder.predict(perturbed):
                 if self.rank == 0:
                     logging.info(f"Attack succeeded at step {step+1}")
-                return perturbed, True
+                return perturbed, True, step + 1  # Return actual queries used
         
-        return perturbed, False
+        return perturbed, False, self.config.pgd_steps  # Used all queries
     
     def attack_negative_case(self, negative_model, num_samples, negative_case_type=None):
         """Attack a specific negative case using PGD."""
@@ -241,8 +241,8 @@ class QueryBasedAttack:
                 negative_img = downsample_and_upsample(negative_img, downsample_size=size)
             
             # Perform PGD attack
-            perturbed, success = self.pgd_attack(negative_img, classifier, z)
-            total_queries += self.config.pgd_steps  # Count each PGD step as a query
+            perturbed, success, queries_used = self.pgd_attack(negative_img, classifier, z)
+            total_queries += queries_used  # Add actual queries used
             
             if success:
                 successful_attacks += 1
@@ -254,14 +254,14 @@ class QueryBasedAttack:
                 
                 results.append({
                     'metrics': metrics,
-                    'queries': self.config.pgd_steps
+                    'queries': queries_used  # Store actual queries used
                 })
                 
                 if self.rank == 0:
-                    logging.info(f"Attack successful - Queries: {self.config.pgd_steps}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
+                    logging.info(f"Attack successful - Queries: {queries_used}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
             else:
                 if self.rank == 0:
-                    logging.info(f"Attack failed after {self.config.pgd_steps} steps")
+                    logging.info(f"Attack failed after {queries_used} steps")
         
         # Calculate FID score for successful attacks
         fid = float('inf')

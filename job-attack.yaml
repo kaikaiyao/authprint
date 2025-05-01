@@ -76,7 +76,7 @@ spec:
               SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
                           --num_samples 100 \
                           --detection_threshold 0.002883 \
-                          --classifier_iterations 10000 \
+                          --classifier_iterations 1000 \
                           --epsilon 2.0 \
                           --pgd_step_size 0.001 \
                           --pgd_steps 1000 \

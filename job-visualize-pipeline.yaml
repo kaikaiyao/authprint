@@ -1,0 +1,138 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: ${USER}-job-visualize-${JOB_SUFFIX}
+  labels:
+    eidf/user: ${USER}
+    kueue.x-k8s.io/queue-name: ${QUEUE_NAME}
+    kueue.x-k8s.io/priority-class: batch-workload-priority
+spec:
+  completions: 1
+  parallelism: 1
+  completionMode: Indexed
+  backoffLimit: 2147483647
+  activeDeadlineSeconds: 864000
+  template:
+    metadata:
+      labels:
+        eidf/user: ${USER}
+    spec:
+      restartPolicy: OnFailure
+      # Replace nodeSelector with affinity to allow multiple GPU types.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-H200
+      # Add tolerations to allow scheduling on nodes with specific taints.
+      tolerations:
+        - key: "eidf098"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+        - key: "eidf107"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+      containers:
+        - name: stylegan-watermark-visualize
+          image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
+          workingDir: "/workspace/kubernets"
+          env:
+            - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+              value: "1"
+            - name: NCCL_DEBUG
+              value: "INFO"
+            - name: NCCL_IB_DISABLE
+              value: "1"
+            - name: MAX_DELTA
+              value: "${MAX_DELTA}"
+            - name: NCCL_IB_HCA
+              value: "^mlx5"
+            - name: PYTHONPATH
+              value: "/workspace/kubernets"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "Setting up environment..."
+              mkdir -p /workspace/kubernets/visualization_results
+              mkdir -p /workspace/kubernets/visualization_results/logs
+              
+              # Download pretrained models
+              echo "Downloading pretrained models..."
+              curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
+              
+              # Define common parameters for all runs
+              TORCHRUN_CMD="torchrun --nproc_per_node=1 \
+                          --nnodes=1 \
+                          --node_rank=0 \
+                          --master_addr=127.0.0.1 \
+                          --master_port=12345"
+              
+              SCRIPT_ARGS="--num_samples 5 --num_pixels 16 --seed 42"
+              
+
+              # Run visualization 10 times
+              for run in {1..10}; do
+                echo "Starting visualization run $run/10..."
+                log_file="/workspace/kubernets/visualization_results/logs/run_${run}.log"
+                
+                # Run visualization using torchrun for consistency with training
+                (
+                  echo "=== Evaluation Run $run/10 ===" 
+                  echo "Started at: $(date)"
+                  echo ""
+                  
+                  if [ $run -eq 1 ]; then
+                    # Show full logs only for first run
+                    eval "$TORCHRUN_CMD scripts/visualize_pipeline.py $SCRIPT_ARGS"
+                  else
+                    # Suppress torchrun logs for subsequent runs
+                    eval "$TORCHRUN_CMD scripts/visualize_pipeline.py $SCRIPT_ARGS" > /dev/null 2>&1
+                  fi
+                  
+                  echo ""
+                  echo "Finished at: $(date)"
+                  echo "Exit status: $?"
+                  
+                  sleep 10000
+                ) 2>&1 | tee "$log_file"
+                
+                # Also append to a combined log file
+                cat "$log_file" >> "/workspace/kubernets/visualization_results/logs/combined.log"
+                echo -e "\n\n" >> "/workspace/kubernets/visualization_results/logs/combined.log"
+                
+                echo "Completed run $run/10. Logs saved to $log_file"
+                echo "-------------------------------------------"
+              done
+              
+              echo "All visualization runs completed. Logs are available in /workspace/kubernets/visualization_results/logs/"
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              cpu: "4"
+              memory: "16Gi"
+          volumeMounts:
+            - name: nfs-user-107
+              mountPath: /nfs-user-107
+            - name: nfs-user-029
+              mountPath: /nfs-user-029
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: nfs-user-107
+          nfs:
+            server: 10.24.6.77
+            path: /user/s2470447-eidf107
+        - name: nfs-user-029
+          nfs:
+            server: 10.24.1.255
+            path: /user/s2470447-infk8s
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi 

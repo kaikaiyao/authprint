@@ -348,10 +348,9 @@ class WatermarkEvaluator:
         # Define the evaluations to run
         evaluations_to_run = []
         
-        # Add pretrained model evaluations
-        for model_name in ['ffhq70k-ada', 'ffhq1k', 'ffhq30k', 'ffhq70k-bcr', 'ffhq70k-noaug']:
-            if model_name in self.pretrained_models:
-                evaluations_to_run.append((model_name, None))
+        # Add pretrained model evaluations - use all available models
+        for model_name in self.pretrained_models.keys():
+            evaluations_to_run.append((model_name, None))
         
         # Add transformations - only add quantization if models are available
         if self.quantized_models:

@@ -81,7 +81,7 @@ spec:
                       --batch_size 128 \
                       --total_iterations 5000000 \
                       --checkpoint_interval 10000 \
-                      --image_pixel_count 16 \
+                      --image_pixel_count 32 \
                       --image_pixel_set_seed 42
               
               exit_status=$?

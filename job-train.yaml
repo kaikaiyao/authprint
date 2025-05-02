@@ -64,6 +64,7 @@ spec:
               # Download pretrained models
               echo "Downloading pretrained models..."
               curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
+              curl -o lsuncat100k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada.pkl"
               
               # Run training directly with torchrun
               echo "Starting training..."
@@ -75,6 +76,8 @@ spec:
                       --master_addr=127.0.0.1 \
                       --master_port=12345 \
                       scripts/train.py \
+                      --stylegan2_url "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada.pkl" \
+                      --stylegan2_local_path "lsuncat100k-paper256-ada.pkl" \
                       --batch_size 128 \
                       --total_iterations 5000000 \
                       --checkpoint_interval 10000 \

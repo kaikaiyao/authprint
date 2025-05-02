@@ -4,7 +4,7 @@ Default configuration for StyleGAN watermarking.
 import os
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Tuple
 import ast
 
 
@@ -16,6 +16,9 @@ class ModelConfig:
     img_size: int = 256
     image_pixel_set_seed: int = 42
     image_pixel_count: int = 32
+    # New fields for pretrained model configuration
+    selected_pretrained_models: List[str] = field(default_factory=list)
+    custom_pretrained_models: Dict[str, Tuple[str, str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -58,6 +61,10 @@ class EvaluateConfig:
         
         # Enable timing logs
         self.enable_timing_logs: bool = True
+        
+        # Pretrained model settings
+        self.selected_pretrained_models: List[str] = []
+        self.custom_pretrained_models: Dict[str, Tuple[str, str]] = {}
 
     def update_from_args(self, args, mode='train'):
         """Update config from command line arguments."""
@@ -69,6 +76,20 @@ class EvaluateConfig:
                 self.batch_size = args.batch_size
             if hasattr(args, 'output_dir'):
                 self.output_dir = args.output_dir
+            # Update pretrained model settings
+            if hasattr(args, 'pretrained_models'):
+                self.selected_pretrained_models = args.pretrained_models
+            if hasattr(args, 'custom_pretrained_models'):
+                # Process custom model specifications
+                self.custom_pretrained_models = {}
+                for model_spec in args.custom_pretrained_models:
+                    try:
+                        name, url, local_path = model_spec.split(':')
+                        self.custom_pretrained_models[name] = (url, local_path)
+                    except ValueError:
+                        logging.error(f"Invalid custom model specification: {model_spec}. "
+                                    f"Format should be 'name:url:local_path'")
+                        continue
 
 
 @dataclass
@@ -117,6 +138,19 @@ class Config:
             self.model.image_pixel_set_seed = args.image_pixel_set_seed
         if hasattr(args, 'image_pixel_count'):
             self.model.image_pixel_count = args.image_pixel_count
+        if hasattr(args, 'pretrained_models'):
+            self.model.selected_pretrained_models = args.pretrained_models
+        if hasattr(args, 'custom_pretrained_models'):
+            # Process custom model specifications
+            self.model.custom_pretrained_models = {}
+            for model_spec in args.custom_pretrained_models:
+                try:
+                    name, url, local_path = model_spec.split(':')
+                    self.model.custom_pretrained_models[name] = (url, local_path)
+                except ValueError:
+                    logging.error(f"Invalid custom model specification: {model_spec}. "
+                                f"Format should be 'name:url:local_path'")
+                    continue
         
         # Mode-specific configuration
         if mode == 'train':

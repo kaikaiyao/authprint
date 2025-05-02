@@ -3,7 +3,7 @@ Evaluator for StyleGAN watermarking.
 """
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
 
 import torch
 import numpy as np
@@ -17,7 +17,7 @@ from utils.image_transforms import (
     quantize_model_weights, 
     downsample_and_upsample
 )
-from utils.model_loading import load_pretrained_models
+from utils.model_loading import load_pretrained_models, PRETRAINED_MODELS
 
 
 class WatermarkEvaluator:
@@ -30,7 +30,9 @@ class WatermarkEvaluator:
         local_rank: int,
         rank: int,
         world_size: int,
-        device: torch.device
+        device: torch.device,
+        selected_pretrained_models: Optional[List[str]] = None,
+        custom_pretrained_models: Optional[Dict[str, Tuple[str, str]]] = None
     ):
         """
         Initialize the evaluator.
@@ -41,12 +43,20 @@ class WatermarkEvaluator:
             rank (int): Global process rank.
             world_size (int): Total number of processes.
             device (torch.device): Device to run evaluation on.
+            selected_pretrained_models (Optional[List[str]]): List of pretrained model names to use.
+                If None or empty, all default models will be used.
+            custom_pretrained_models (Optional[Dict[str, Tuple[str, str]]]): Dictionary mapping
+                custom model names to tuples of (url, local_path).
         """
         self.config = config
         self.local_rank = local_rank
         self.rank = rank
         self.world_size = world_size
         self.device = device
+        
+        # Store pretrained model selections
+        self.selected_pretrained_models = selected_pretrained_models
+        self.custom_pretrained_models = custom_pretrained_models or {}
         
         # Enable timing logs
         self.enable_timing = getattr(self.config.evaluate, 'enable_timing_logs', True)
@@ -74,8 +84,31 @@ class WatermarkEvaluator:
         # Setup models
         self.setup_models()
         
-        # Load retrained models
-        self.pretrained_models = load_pretrained_models(device, rank)
+        # Load pretrained models with custom configuration
+        if self.selected_pretrained_models or self.custom_pretrained_models:
+            # Create combined model dictionary
+            model_dict = {}
+            
+            # Add selected default models
+            if not self.selected_pretrained_models:
+                # If no models specified, use all default models
+                model_dict.update(PRETRAINED_MODELS)
+            else:
+                # Add only selected default models
+                for model_name in self.selected_pretrained_models:
+                    if model_name in PRETRAINED_MODELS:
+                        model_dict[model_name] = PRETRAINED_MODELS[model_name]
+                    elif self.rank == 0:
+                        logging.warning(f"Requested model '{model_name}' not found in default models")
+            
+            # Add custom models
+            model_dict.update(self.custom_pretrained_models)
+            
+            # Load the models
+            self.pretrained_models = load_pretrained_models(self.device, self.rank, model_dict)
+        else:
+            # Load all default models
+            self.pretrained_models = load_pretrained_models(self.device, self.rank)
     
     def _generate_pixel_indices(self) -> None:
         """

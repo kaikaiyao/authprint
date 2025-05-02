@@ -35,6 +35,15 @@ def parse_args():
     parser.add_argument("--image_pixel_count", type=int, default=32,
                         help="Number of pixels to select from the image (default: 32)")
 
+    # Pretrained model configuration
+    parser.add_argument("--pretrained_models", type=str, nargs='+', default=[],
+                        help="List of pretrained model names to use for evaluation. Available options: "
+                             "ffhq70k-ada, ffhq1k, ffhq30k, ffhq70k-bcr, ffhq70k-noaug. "
+                             "If empty, all available models will be used.")
+    parser.add_argument("--custom_pretrained_models", type=str, nargs='+', default=[],
+                        help="List of custom pretrained model specifications in format: "
+                             "name:url:local_path. Example: 'custom1:http://example.com/model.pkl:local.pkl'")
+
     # Evaluation configuration
     parser.add_argument("--num_samples", type=int, default=1000, 
                         help="Number of samples to evaluate")
@@ -59,6 +68,18 @@ def main():
     config = get_default_config()
     config.update_from_args(args, mode='evaluate')
     
+    # Process custom pretrained models
+    custom_models = {}
+    for model_spec in args.custom_pretrained_models:
+        try:
+            name, url, local_path = model_spec.split(':')
+            custom_models[name] = (url, local_path)
+        except ValueError:
+            if rank == 0:
+                logging.error(f"Invalid custom model specification: {model_spec}. "
+                            f"Format should be 'name:url:local_path'")
+            continue
+    
     # Create output directory and setup logging
     if rank == 0:
         os.makedirs(config.output_dir, exist_ok=True)
@@ -67,10 +88,23 @@ def main():
         # Log configuration after it's been updated
         logging.info(f"Configuration:\n{config}")
         logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
+        
+        if args.pretrained_models:
+            logging.info(f"Using specified pretrained models: {args.pretrained_models}")
+        if custom_models:
+            logging.info(f"Using custom pretrained models: {list(custom_models.keys())}")
     
     try:
         # Initialize evaluator
-        evaluator = WatermarkEvaluator(config, local_rank, rank, world_size, device)
+        evaluator = WatermarkEvaluator(
+            config=config,
+            local_rank=local_rank,
+            rank=rank,
+            world_size=world_size,
+            device=device,
+            selected_pretrained_models=args.pretrained_models,
+            custom_pretrained_models=custom_models
+        )
         
         # Run evaluation
         evaluator.evaluate()

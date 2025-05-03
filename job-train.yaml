@@ -60,6 +60,7 @@ spec:
             - |
               echo "Setting up environment..."
               mkdir -p /workspace/kubernets/results
+              mkdir -p /workspace/kubernets/evaluation_results
               
               # Download pretrained models
               echo "Downloading pretrained models..."

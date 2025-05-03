@@ -11,7 +11,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from config.default_config import Config
 from models.decoder import Decoder
-from models.model_utils import load_stylegan2_model
 from utils.checkpoint import save_checkpoint, load_checkpoint
 
 
@@ -64,14 +63,13 @@ class WatermarkTrainer:
         """
         Set up all models needed for training.
         """
-        # Load StyleGAN2 model
+        # Initialize generative model
         if self.rank == 0:
-            logging.info("Loading StyleGAN2 model...")
-        self.gan_model = load_stylegan2_model(
-            self.config.model.stylegan2_url,
-            self.config.model.stylegan2_local_path,
-            self.device
-        )
+            logging.info(f"Loading {self.config.model.model_type} model...")
+            
+        model_class = self.config.model.get_model_class()
+        model_kwargs = self.config.model.get_model_kwargs(self.device)
+        self.gan_model = model_class(**model_kwargs)
         
         # Initialize decoder
         decoder_output_dim = self.image_pixel_count  # For direct pixel prediction
@@ -151,16 +149,15 @@ class WatermarkTrainer:
         Returns:
             Dict[str, float]: Dictionary containing training metrics.
         """
-        # Generate random latent vectors
-        z = torch.randn(self.config.training.batch_size, self.gan_model.z_dim, device=self.device)
+        # Get generation kwargs based on model type
+        gen_kwargs = self.config.model.get_generation_kwargs()
         
         # Generate images
-        if hasattr(self.gan_model, 'module'):
-            w = self.gan_model.module.mapping(z, None)
-            x = self.gan_model.module.synthesis(w, noise_mode="const")
-        else:
-            w = self.gan_model.mapping(z, None)
-            x = self.gan_model.synthesis(w, noise_mode="const")
+        x = self.gan_model.generate_images(
+            batch_size=self.config.training.batch_size,
+            device=self.device,
+            **gen_kwargs
+        )
         
         # Extract features (real pixel values)
         features = self.extract_image_partial(x)

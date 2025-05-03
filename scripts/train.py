@@ -18,15 +18,36 @@ from utils.logging_utils import setup_logging
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Watermarking Training Pipeline for StyleGAN2-ADA")
+    parser = argparse.ArgumentParser(description="Watermarking Training Pipeline")
     
-    # Model configuration
+    # Model type selection
+    parser.add_argument("--model_type", type=str, default="stylegan2",
+                       choices=["stylegan2", "stable-diffusion"],
+                       help="Type of generative model to use")
+    
+    # StyleGAN2 configuration
     parser.add_argument("--stylegan2_url", type=str,
                         default="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
                         help="URL for the pretrained StyleGAN2 model")
     parser.add_argument("--stylegan2_local_path", type=str,
                         default="ffhq70k-paper256-ada.pkl",
                         help="Local path to store/load the StyleGAN2 model")
+    
+    # Stable Diffusion configuration
+    parser.add_argument("--sd_model_name", type=str,
+                        default="stabilityai/stable-diffusion-xl-base-1.0",
+                        help="Name of the Stable Diffusion model to use")
+    parser.add_argument("--sd_enable_cpu_offload", action="store_true",
+                        help="Enable CPU offloading for Stable Diffusion")
+    parser.add_argument("--sd_dtype", type=str, default="float16",
+                        choices=["float16", "float32"],
+                        help="Data type for Stable Diffusion model")
+    parser.add_argument("--sd_num_inference_steps", type=int, default=30,
+                        help="Number of inference steps for Stable Diffusion")
+    parser.add_argument("--sd_guidance_scale", type=float, default=7.5,
+                        help="Guidance scale for Stable Diffusion")
+    
+    # Common configuration
     parser.add_argument("--checkpoint_path", type=str, default=None,
                         help="Path to checkpoint to resume training from")
     parser.add_argument("--img_size", type=int, default=256, help="Image resolution")

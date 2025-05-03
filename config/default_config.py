@@ -1,24 +1,99 @@
 """
-Default configuration for StyleGAN watermarking.
+Default configuration for generative model watermarking.
 """
 import os
 import logging
-from dataclasses import dataclass, field
-from typing import List, Optional, Union, Dict, Tuple
+from dataclasses import dataclass, field, fields
+from typing import List, Optional, Union, Dict, Tuple, Type, Any, Protocol, runtime_checkable
 import ast
+import torch
+
+
+@runtime_checkable
+class Validatable(Protocol):
+    """Protocol for objects that can validate their state."""
+    def validate(self) -> None: ...
 
 
 @dataclass
 class ModelConfig:
     """Model configuration."""
-    stylegan2_url: str = "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
-    stylegan2_local_path: str = "ffhq70k-paper256-ada.pkl"
+    # Model type
+    model_type: str = "stylegan2"  # One of ["stylegan2", "stable-diffusion"]
+    
+    # Common parameters
     img_size: int = 256
     image_pixel_set_seed: int = 42
     image_pixel_count: int = 32
-    # New fields for pretrained model configuration
+    
+    # StyleGAN2 parameters
+    stylegan2_url: str = "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
+    stylegan2_local_path: str = "ffhq70k-paper256-ada.pkl"
+    
+    # Stable Diffusion parameters
+    sd_model_name: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    sd_enable_cpu_offload: bool = False
+    sd_dtype: str = "float16"  # One of ["float16", "float32"]
+    sd_num_inference_steps: int = 30
+    sd_guidance_scale: float = 7.5
+    sd_prompt: str = "A high quality photo"  # Default prompt for generation
+    
+    # Pretrained model configuration
     selected_pretrained_models: List[str] = field(default_factory=list)
-    custom_pretrained_models: Dict[str, Tuple[str, str]] = field(default_factory=dict)
+    custom_pretrained_models: Dict[str, Any] = field(default_factory=dict)
+    
+    def validate(self):
+        """Validate configuration parameters."""
+        assert self.model_type in ["stylegan2", "stable-diffusion"], f"Unknown model type: {self.model_type}"
+        assert self.img_size > 0, "Image size must be positive"
+        assert self.image_pixel_count > 0, "Pixel count must be positive"
+        assert self.sd_dtype in ["float16", "float32"], f"Invalid dtype: {self.sd_dtype}"
+        assert self.sd_num_inference_steps > 0, "Number of inference steps must be positive"
+        assert self.sd_guidance_scale > 0, "Guidance scale must be positive"
+    
+    def get_model_class(self) -> Type:
+        """Get the model class based on model type."""
+        if self.model_type == "stylegan2":
+            from models.stylegan2_model import StyleGAN2Model
+            return StyleGAN2Model
+        elif self.model_type == "stable-diffusion":
+            from models.stable_diffusion_model import StableDiffusionModel
+            return StableDiffusionModel
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")
+    
+    def get_model_kwargs(self, device: torch.device) -> Dict[str, Any]:
+        """Get model initialization kwargs based on model type."""
+        if self.model_type == "stylegan2":
+            return {
+                "model_url": self.stylegan2_url,
+                "model_path": self.stylegan2_local_path,
+                "device": device,
+                "img_size": self.img_size
+            }
+        elif self.model_type == "stable-diffusion":
+            return {
+                "model_name": self.sd_model_name,
+                "device": device,
+                "img_size": self.img_size,
+                "dtype": getattr(torch, self.sd_dtype),
+                "enable_cpu_offload": self.sd_enable_cpu_offload
+            }
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")
+            
+    def get_generation_kwargs(self) -> Dict[str, Any]:
+        """Get generation kwargs based on model type."""
+        if self.model_type == "stylegan2":
+            return {}
+        elif self.model_type == "stable-diffusion":
+            return {
+                "prompt": self.sd_prompt,
+                "num_inference_steps": self.sd_num_inference_steps,
+                "guidance_scale": self.sd_guidance_scale
+            }
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")
 
 
 @dataclass
@@ -32,6 +107,14 @@ class DecoderConfig:
     use_layer_norm: bool = True
     use_attention: bool = True
 
+    def validate(self):
+        """Validate configuration parameters."""
+        assert len(self.hidden_dims) > 0, "Must have at least one hidden dimension"
+        assert all(dim > 0 for dim in self.hidden_dims), "All hidden dimensions must be positive"
+        assert self.activation in ["gelu", "relu", "leaky_relu"], f"Unsupported activation: {self.activation}"
+        assert 0 <= self.dropout_rate <= 1, "Dropout rate must be between 0 and 1"
+        assert self.num_residual_blocks >= 0, "Number of residual blocks must be non-negative"
+
 
 @dataclass
 class TrainingConfig:
@@ -42,6 +125,14 @@ class TrainingConfig:
     log_interval: int = 1
     checkpoint_interval: int = 10000
 
+    def validate(self):
+        """Validate configuration parameters."""
+        assert self.batch_size > 0, "Batch size must be positive"
+        assert self.total_iterations > 0, "Total iterations must be positive"
+        assert self.lr > 0, "Learning rate must be positive"
+        assert self.log_interval > 0, "Log interval must be positive"
+        assert self.checkpoint_interval > 0, "Checkpoint interval must be positive"
+
 
 @dataclass
 class DistributedConfig:
@@ -49,68 +140,88 @@ class DistributedConfig:
     backend: str = "nccl"
     init_method: str = "env://"
 
+    def validate(self):
+        """Validate configuration parameters."""
+        assert self.backend in ["nccl", "gloo"], f"Unsupported backend: {self.backend}"
+        assert self.init_method.startswith(("env://", "tcp://", "file://")), f"Invalid init method: {self.init_method}"
+
 
 @dataclass
 class EvaluateConfig:
     """Configuration for evaluation."""
-    def __init__(self):
-        # Basic evaluation settings
-        self.num_samples: int = 1000
-        self.batch_size: int = 16
-        self.output_dir: str = "evaluation_results"
-        
-        # Enable timing logs
-        self.enable_timing_logs: bool = True
-        
-        # Pretrained model settings
-        self.selected_pretrained_models: List[str] = []
-        self.custom_pretrained_models: Dict[str, Tuple[str, str]] = {}
+    # Basic evaluation settings
+    num_samples: int = 1000
+    batch_size: int = 16
+    output_dir: str = "evaluation_results"
+    seed: Optional[int] = None
+    
+    # Enable timing logs
+    enable_timing_logs: bool = True
+    
+    # Pretrained model settings
+    selected_pretrained_models: List[str] = field(default_factory=list)
+    custom_pretrained_models: Dict[str, Any] = field(default_factory=dict)
+    
+    # Transformation settings
+    enable_quantization: bool = True  # Whether to evaluate quantized models (StyleGAN2 only)
+    enable_downsampling: bool = True  # Whether to evaluate downsampling transformations
+    downsample_sizes: List[int] = field(default_factory=lambda: [128, 224])  # Sizes for downsampling evaluation
 
-    def update_from_args(self, args, mode='train'):
-        """Update config from command line arguments."""
-        if mode == 'evaluate':
-            # Update evaluation settings
-            if hasattr(args, 'num_samples'):
-                self.num_samples = args.num_samples
-            if hasattr(args, 'batch_size'):
-                self.batch_size = args.batch_size
-            if hasattr(args, 'output_dir'):
-                self.output_dir = args.output_dir
-            # Update pretrained model settings
-            if hasattr(args, 'pretrained_models'):
-                self.selected_pretrained_models = args.pretrained_models
-            if hasattr(args, 'custom_pretrained_models'):
-                # Process custom model specifications
-                self.custom_pretrained_models = {}
-                for model_spec in args.custom_pretrained_models:
-                    try:
-                        name, url, local_path = model_spec.split(':')
-                        self.custom_pretrained_models[name] = (url, local_path)
-                    except ValueError:
-                        logging.error(f"Invalid custom model specification: {model_spec}. "
-                                    f"Format should be 'name:url:local_path'")
-                        continue
+    def validate(self):
+        """Validate configuration parameters."""
+        assert self.num_samples > 0, "Number of samples must be positive"
+        assert self.batch_size > 0, "Batch size must be positive"
+        assert os.path.exists(self.output_dir) or os.access(os.path.dirname(self.output_dir), os.W_OK), \
+            f"Output directory {self.output_dir} does not exist and cannot be created"
+        assert all(size > 0 for size in self.downsample_sizes), "All downsample sizes must be positive"
 
 
 @dataclass
 class QueryBasedAttackConfig:
-    """Configuration for query-based attack against the watermarking."""
+    """Configuration for query-based attack against the watermarking.
+    
+    This config matches the implementation in scripts/query_based_attack.py.
+    The attack uses a trained classifier and PGD to try to fool the watermark detector.
+    """
     # Attack parameters
-    num_samples: int = 1000
-    batch_size: int = 32  # Changed to 32 for classifier training
-    epsilon: float = 0.1
-    detection_threshold: float = 0.002883  # 95% TPR threshold for detection
+    num_samples: int = 1000  # Number of samples to attack
+    batch_size: int = 32  # Batch size for classifier training and evaluation
+    epsilon: float = 0.1  # Maximum perturbation size (L∞ norm)
+    detection_threshold: float = 0.002883  # MSE threshold for detection (95% TPR threshold)
     
     # Classifier training parameters
-    classifier_iterations: int = 10000  # Total number of iterations for classifier training
-    classifier_lr: float = 1e-4  # Learning rate for classifier
+    classifier_iterations: int = 10000  # Number of iterations for classifier training
+    classifier_lr: float = 1e-4  # Learning rate for classifier training
+    classifier_batch_size: int = 32  # Batch size specifically for classifier training
     
     # PGD parameters
-    pgd_step_size: float = 0.01  # Default to epsilon/10
+    pgd_step_size: float = 0.01  # Step size for PGD attack (default: epsilon/10)
     pgd_steps: int = 50  # Number of PGD iteration steps
     
-    # Logging
-    log_interval: int = 10
+    # Evaluation parameters
+    enable_fid: bool = True  # Whether to compute FID scores
+    enable_lpips: bool = True  # Whether to compute LPIPS scores
+    enable_psnr_ssim: bool = True  # Whether to compute PSNR and SSIM
+    
+    # Logging parameters
+    log_interval: int = 10  # How often to log progress during classifier training
+    save_images: bool = False  # Whether to save example images from successful attacks
+    
+    def validate(self):
+        """Validate configuration parameters."""
+        assert self.num_samples > 0, "Number of samples must be positive"
+        assert self.batch_size > 0, "Batch size must be positive"
+        assert self.epsilon > 0, "Epsilon must be positive"
+        assert self.detection_threshold > 0, "Detection threshold must be positive"
+        assert self.classifier_iterations > 0, "Classifier iterations must be positive"
+        assert self.classifier_lr > 0, "Classifier learning rate must be positive"
+        assert self.classifier_batch_size > 0, "Classifier batch size must be positive"
+        assert self.pgd_steps > 0, "PGD steps must be positive"
+        assert self.pgd_step_size <= self.epsilon, "PGD step size should not exceed epsilon"
+        assert self.log_interval > 0, "Log interval must be positive"
+        # Validate interdependent parameters
+        assert self.batch_size == self.classifier_batch_size, \
+            "Classifier batch size should match main batch size for consistency"
 
 
 @dataclass
@@ -121,36 +232,56 @@ class Config:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     evaluate: EvaluateConfig = field(default_factory=EvaluateConfig)
     query_based_attack: QueryBasedAttackConfig = field(default_factory=QueryBasedAttackConfig)
+    distributed: DistributedConfig = field(default_factory=DistributedConfig)
     output_dir: str = "results"
     checkpoint_path: Optional[str] = None
     seed: Optional[int] = None
     
+    def validate(self):
+        """Validate all configuration parameters."""
+        # Validate each config section
+        for field_info in fields(self):
+            value = getattr(self, field_info.name)
+            if isinstance(value, Validatable):
+                value.validate()
+        
+        # Validate interdependent parameters
+        if self.checkpoint_path is not None:
+            assert os.path.exists(self.checkpoint_path), f"Checkpoint path does not exist: {self.checkpoint_path}"
+        assert os.path.exists(self.output_dir) or os.access(os.path.dirname(self.output_dir), os.W_OK), \
+            f"Output directory {self.output_dir} does not exist and cannot be created"
+    
     def update_from_args(self, args, mode='train'):
         """Update config from command line arguments."""
-        # Model configuration
-        if hasattr(args, 'stylegan2_url'):
-            self.model.stylegan2_url = args.stylegan2_url
-        if hasattr(args, 'stylegan2_local_path'):
-            self.model.stylegan2_local_path = args.stylegan2_local_path
+        # Model type and common configuration
+        if hasattr(args, 'model_type'):
+            self.model.model_type = args.model_type
         if hasattr(args, 'img_size'):
             self.model.img_size = args.img_size
         if hasattr(args, 'image_pixel_set_seed'):
             self.model.image_pixel_set_seed = args.image_pixel_set_seed
         if hasattr(args, 'image_pixel_count'):
             self.model.image_pixel_count = args.image_pixel_count
-        if hasattr(args, 'pretrained_models'):
-            self.model.selected_pretrained_models = args.pretrained_models
-        if hasattr(args, 'custom_pretrained_models'):
-            # Process custom model specifications
-            self.model.custom_pretrained_models = {}
-            for model_spec in args.custom_pretrained_models:
-                try:
-                    name, url, local_path = model_spec.split(':')
-                    self.model.custom_pretrained_models[name] = (url, local_path)
-                except ValueError:
-                    logging.error(f"Invalid custom model specification: {model_spec}. "
-                                f"Format should be 'name:url:local_path'")
-                    continue
+            
+        # StyleGAN2 configuration
+        if hasattr(args, 'stylegan2_url'):
+            self.model.stylegan2_url = args.stylegan2_url
+        if hasattr(args, 'stylegan2_local_path'):
+            self.model.stylegan2_local_path = args.stylegan2_local_path
+            
+        # Stable Diffusion configuration
+        if hasattr(args, 'sd_model_name'):
+            self.model.sd_model_name = args.sd_model_name
+        if hasattr(args, 'sd_enable_cpu_offload'):
+            self.model.sd_enable_cpu_offload = args.sd_enable_cpu_offload
+        if hasattr(args, 'sd_dtype'):
+            self.model.sd_dtype = args.sd_dtype
+        if hasattr(args, 'sd_num_inference_steps'):
+            self.model.sd_num_inference_steps = args.sd_num_inference_steps
+        if hasattr(args, 'sd_guidance_scale'):
+            self.model.sd_guidance_scale = args.sd_guidance_scale
+        if hasattr(args, 'sd_prompt'):
+            self.model.sd_prompt = args.sd_prompt
         
         # Mode-specific configuration
         if mode == 'train':
@@ -164,12 +295,41 @@ class Config:
                 self.training.log_interval = args.log_interval
             if hasattr(args, 'checkpoint_interval'):
                 self.training.checkpoint_interval = args.checkpoint_interval
+                
         elif mode == 'evaluate':
             # Update evaluation-specific parameters
             if hasattr(args, 'num_samples'):
                 self.evaluate.num_samples = args.num_samples
             if hasattr(args, 'batch_size'):
                 self.evaluate.batch_size = args.batch_size
+            if hasattr(args, 'output_dir'):
+                self.evaluate.output_dir = args.output_dir
+            if hasattr(args, 'seed'):
+                self.evaluate.seed = args.seed
+                
+            # Update pretrained model settings
+            if hasattr(args, 'pretrained_models'):
+                self.evaluate.selected_pretrained_models = args.pretrained_models
+            
+            # Process custom pretrained models
+            if hasattr(args, 'custom_pretrained_models'):
+                custom_models = {}
+                for model_spec in args.custom_pretrained_models:
+                    try:
+                        if self.model.model_type == "stylegan2":
+                            name, url, local_path = model_spec.split(':')
+                            custom_models[name] = (url, local_path)
+                        else:  # stable-diffusion
+                            name, model_name = model_spec.split(':')
+                            custom_models[name] = model_name
+                    except ValueError:
+                        logging.error(f"Invalid custom model specification: {model_spec}")
+                        if self.model.model_type == "stylegan2":
+                            logging.error("Format should be 'name:url:local_path'")
+                        else:
+                            logging.error("Format should be 'name:model_name'")
+                        continue
+                self.evaluate.custom_pretrained_models = custom_models
                 
         elif mode == 'query_based_attack':
             # Update query-based attack parameters
@@ -183,24 +343,31 @@ class Config:
                 self.query_based_attack.detection_threshold = args.detection_threshold
             if hasattr(args, 'log_interval'):
                 self.query_based_attack.log_interval = args.log_interval
-            # Add new classifier parameters
+            # Add classifier parameters
             if hasattr(args, 'classifier_iterations'):
                 self.query_based_attack.classifier_iterations = args.classifier_iterations
             if hasattr(args, 'classifier_lr'):
                 self.query_based_attack.classifier_lr = args.classifier_lr
-            # Add new PGD parameters
+            # Add PGD parameters
             if hasattr(args, 'pgd_step_size'):
                 self.query_based_attack.pgd_step_size = args.pgd_step_size
             if hasattr(args, 'pgd_steps'):
                 self.query_based_attack.pgd_steps = args.pgd_steps
         
-        # Other configuration
+        # Common configuration
         if hasattr(args, 'output_dir'):
             self.output_dir = args.output_dir
         if hasattr(args, 'checkpoint_path'):
             self.checkpoint_path = args.checkpoint_path
         if hasattr(args, 'seed'):
             self.seed = args.seed
+
+        # Validate the updated configuration
+        try:
+            self.validate()
+        except AssertionError as e:
+            logging.error(f"Configuration validation failed: {str(e)}")
+            raise
 
 
 def get_default_config() -> Config:

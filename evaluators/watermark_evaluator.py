@@ -1,28 +1,32 @@
 """
-Evaluator for StyleGAN watermarking.
+Evaluator for generative model watermarking.
 """
 import logging
 import os
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 
 import torch
 import numpy as np
 
 from config.default_config import Config
 from models.decoder import Decoder
-from models.model_utils import load_stylegan2_model
+from models.base_model import BaseGenerativeModel
 from utils.checkpoint import load_checkpoint
 from utils.metrics import save_metrics_text, calculate_fid
 from utils.image_transforms import (
     quantize_model_weights, 
     downsample_and_upsample
 )
-from utils.model_loading import load_pretrained_models, PRETRAINED_MODELS
+from utils.model_loading import (
+    load_pretrained_models,
+    STYLEGAN2_MODELS,
+    STABLE_DIFFUSION_MODELS
+)
 
 
 class WatermarkEvaluator:
     """
-    Evaluator for StyleGAN watermarking with direct pixel prediction.
+    Evaluator for generative model watermarking.
     """
     def __init__(
         self,
@@ -32,7 +36,7 @@ class WatermarkEvaluator:
         world_size: int,
         device: torch.device,
         selected_pretrained_models: Optional[List[str]] = None,
-        custom_pretrained_models: Optional[Dict[str, Tuple[str, str]]] = None
+        custom_pretrained_models: Optional[Dict[str, Any]] = None
     ):
         """
         Initialize the evaluator.
@@ -45,8 +49,8 @@ class WatermarkEvaluator:
             device (torch.device): Device to run evaluation on.
             selected_pretrained_models (Optional[List[str]]): List of pretrained model names to use.
                 If None or empty, all default models will be used.
-            custom_pretrained_models (Optional[Dict[str, Tuple[str, str]]]): Dictionary mapping
-                custom model names to tuples of (url, local_path).
+            custom_pretrained_models (Optional[Dict[str, Any]]): Dictionary mapping
+                custom model names to their configurations.
         """
         self.config = config
         self.local_rank = local_rank
@@ -92,12 +96,16 @@ class WatermarkEvaluator:
             # Add selected default models
             if not self.selected_pretrained_models:
                 # If no models specified, use all default models
-                model_dict.update(PRETRAINED_MODELS)
+                if self.config.model.model_type == "stylegan2":
+                    model_dict.update(STYLEGAN2_MODELS)
+                else:
+                    model_dict.update(STABLE_DIFFUSION_MODELS)
             else:
                 # Add only selected default models
+                default_models = STYLEGAN2_MODELS if self.config.model.model_type == "stylegan2" else STABLE_DIFFUSION_MODELS
                 for model_name in self.selected_pretrained_models:
-                    if model_name in PRETRAINED_MODELS:
-                        model_dict[model_name] = PRETRAINED_MODELS[model_name]
+                    if model_name in default_models:
+                        model_dict[model_name] = default_models[model_name]
                     elif self.rank == 0:
                         logging.warning(f"Requested model '{model_name}' not found in default models")
             
@@ -105,10 +113,25 @@ class WatermarkEvaluator:
             model_dict.update(self.custom_pretrained_models)
             
             # Load the models
-            self.pretrained_models = load_pretrained_models(self.device, self.rank, model_dict)
+            self.pretrained_models = load_pretrained_models(
+                device=self.device,
+                rank=self.rank,
+                model_type=self.config.model.model_type,
+                selected_models=model_dict,
+                img_size=self.config.model.img_size,
+                enable_cpu_offload=self.config.model.sd_enable_cpu_offload if self.config.model.model_type == "stable-diffusion" else False,
+                dtype=getattr(torch, self.config.model.sd_dtype) if self.config.model.model_type == "stable-diffusion" else torch.float32
+            )
         else:
             # Load all default models
-            self.pretrained_models = load_pretrained_models(self.device, self.rank)
+            self.pretrained_models = load_pretrained_models(
+                device=self.device,
+                rank=self.rank,
+                model_type=self.config.model.model_type,
+                img_size=self.config.model.img_size,
+                enable_cpu_offload=self.config.model.sd_enable_cpu_offload if self.config.model.model_type == "stable-diffusion" else False,
+                dtype=getattr(torch, self.config.model.sd_dtype) if self.config.model.model_type == "stable-diffusion" else torch.float32
+            )
     
     def _generate_pixel_indices(self) -> None:
         """
@@ -162,18 +185,20 @@ class WatermarkEvaluator:
         """
         Initialize and set up all models.
         """
-        # Load pretrained StyleGAN2 model
-        self.gan_model = load_stylegan2_model(
-            self.config.model.stylegan2_url,
-            self.config.model.stylegan2_local_path,
-            self.device
-        )
+        # Initialize generative model
+        if self.rank == 0:
+            logging.info(f"Loading {self.config.model.model_type} model...")
+            
+        model_class = self.config.model.get_model_class()
+        model_kwargs = self.config.model.get_model_kwargs(self.device)
+        self.gan_model = model_class(**model_kwargs)
         
-        # Initialize decoder for direct pixel prediction
+        # Initialize decoder
+        decoder_output_dim = self.image_pixel_count  # For direct pixel prediction
         self.decoder = Decoder(
             image_size=self.config.model.img_size,
             channels=3,
-            output_dim=self.image_pixel_count  # Output dimension is number of pixels to predict
+            output_dim=decoder_output_dim
         ).to(self.device)
         self.decoder.eval()
         
@@ -190,44 +215,50 @@ class WatermarkEvaluator:
             device=self.device
         )
         
-        try:
-            # Setup quantized models - always set up int8 and int4
-            if self.rank == 0:
-                logging.info("Setting up int8 quantized model...")
-            
+        # Only attempt quantization for StyleGAN2 models
+        if self.config.model.model_type == "stylegan2":
             try:
-                int8_model = quantize_model_weights(self.gan_model, 'int8')
-                int8_model.eval()
-                self.quantized_models['int8'] = int8_model
+                # Setup quantized models - always set up int8 and int4
                 if self.rank == 0:
-                    logging.info("Successfully created int8 quantized model")
+                    logging.info("Setting up int8 quantized model...")
+                
+                try:
+                    int8_model = quantize_model_weights(self.gan_model, 'int8')
+                    int8_model.eval()
+                    self.quantized_models['int8'] = int8_model
+                    if self.rank == 0:
+                        logging.info("Successfully created int8 quantized model")
+                except Exception as e:
+                    if self.rank == 0:
+                        logging.error(f"Failed to create int8 model: {str(e)}")
+                        logging.error("int8 quantization error:", exc_info=True)
+                
+                if self.rank == 0:
+                    logging.info("Setting up int4 quantized model...")
+                
+                try:
+                    int4_model = quantize_model_weights(self.gan_model, 'int4')
+                    int4_model.eval()
+                    self.quantized_models['int4'] = int4_model
+                    if self.rank == 0:
+                        logging.info("Successfully created int4 quantized model")
+                except Exception as e:
+                    if self.rank == 0:
+                        logging.error(f"Failed to create int4 model: {str(e)}")
+                        logging.error("int4 quantization error:", exc_info=True)
+                
+                if self.rank == 0:
+                    logging.info(f"Available quantized models: {list(self.quantized_models.keys())}")
+            
             except Exception as e:
                 if self.rank == 0:
-                    logging.error(f"Failed to create int8 model: {str(e)}")
-                    logging.error("int8 quantization error:", exc_info=True)
-            
+                    logging.error(f"Error in quantization setup: {str(e)}")
+                    logging.error("Quantization setup error:", exc_info=True)
+                    logging.error("Continuing without quantized models...")
+                self.quantized_models = {}
+        else:
             if self.rank == 0:
-                logging.info("Setting up int4 quantized model...")
-            
-            try:
-                int4_model = quantize_model_weights(self.gan_model, 'int4')
-                int4_model.eval()
-                self.quantized_models['int4'] = int4_model
-                if self.rank == 0:
-                    logging.info("Successfully created int4 quantized model")
-            except Exception as e:
-                if self.rank == 0:
-                    logging.error(f"Failed to create int4 model: {str(e)}")
-                    logging.error("int4 quantization error:", exc_info=True)
-            
-            if self.rank == 0:
-                logging.info(f"Available quantized models: {list(self.quantized_models.keys())}")
-        
-        except Exception as e:
-            if self.rank == 0:
-                logging.error(f"Error in quantization setup: {str(e)}")
-                logging.error("Quantization setup error:", exc_info=True)
-                logging.error("Continuing without quantized models...")
+                logging.info("Skipping quantization for non-StyleGAN2 models")
             self.quantized_models = {}
     
     def evaluate_batch(self) -> Dict[str, float]:
@@ -312,7 +343,7 @@ class WatermarkEvaluator:
             }
             
             # Evaluate negative samples
-            negative_results = self._evaluate_negative_samples(all_z_original,all_z_negative, threshold)
+            negative_results = self._evaluate_negative_samples(all_z_original, threshold, {})
             if negative_results:
                 metrics['negative_results'] = negative_results
             
@@ -328,14 +359,20 @@ class WatermarkEvaluator:
                 logging.error(str(e), exc_info=True)
             return {}
     
-    def _evaluate_negative_samples(self, all_z_original, all_z_negative, threshold):
+    def _evaluate_negative_samples(
+        self,
+        original_images: torch.Tensor,
+        threshold: float,
+        gen_kwargs: Dict[str, Any]
+    ) -> Dict[str, Dict[str, float]]:
         """
         Evaluate negative samples by comparing against pretrained models and transformations.
         Computes FPR at 95% TPR threshold for each negative case.
         
         Args:
-            all_z (torch.Tensor): All latent vectors for evaluation
+            original_images (torch.Tensor): Original model images for FID comparison
             threshold (float): MSE threshold at 95% TPR from original model
+            gen_kwargs (Dict[str, Any]): Generation kwargs for the model
             
         Returns:
             dict: Dictionary mapping negative sample types to their metrics
@@ -352,21 +389,23 @@ class WatermarkEvaluator:
         for model_name in self.pretrained_models.keys():
             evaluations_to_run.append((model_name, None))
         
-        # Add transformations - only add quantization if models are available
-        if self.quantized_models:
-            if 'int8' in self.quantized_models:
-                evaluations_to_run.append((None, 'quantization_int8'))
+        # Add transformations based on model type
+        if self.config.model.model_type == "stylegan2":
+            # Only add quantization for StyleGAN2 models
+            if self.quantized_models:
+                if 'int8' in self.quantized_models:
+                    evaluations_to_run.append((None, 'quantization_int8'))
+                    if self.rank == 0:
+                        logging.info(f"Added int8 quantization evaluation")
+                if 'int4' in self.quantized_models:
+                    evaluations_to_run.append((None, 'quantization_int4'))
+                    if self.rank == 0:
+                        logging.info(f"Added int4 quantization evaluation")
                 if self.rank == 0:
-                    logging.info(f"Added int8 quantization evaluation")
-            if 'int4' in self.quantized_models:
-                evaluations_to_run.append((None, 'quantization_int4'))
+                    logging.info(f"Added quantization evaluations for: {list(self.quantized_models.keys())}")
+            else:
                 if self.rank == 0:
-                    logging.info(f"Added int4 quantization evaluation")
-            if self.rank == 0:
-                logging.info(f"Added quantization evaluations for: {list(self.quantized_models.keys())}")
-        else:
-            if self.rank == 0:
-                logging.warning("No quantized models available, skipping quantization evaluation")
+                    logging.warning("No quantized models available, skipping quantization evaluation")
         
         # Add downsample evaluations for both sizes
         evaluations_to_run.append((None, 'downsample_128'))
@@ -379,25 +418,6 @@ class WatermarkEvaluator:
         if self.rank == 0:
             logging.info(f"Running {total_evals} evaluations...")
             logging.info(f"Evaluations to run: {[e[1] if e[1] else e[0] for e in evaluations_to_run]}")
-        
-        # Generate original model images for FID comparison
-        original_images = []
-        with torch.no_grad():
-            for i in range(num_batches):
-                start_idx = i * batch_size
-                end_idx = min((i + 1) * batch_size, num_samples)
-                z = all_z_original[start_idx:end_idx]
-                
-                if hasattr(self.gan_model, 'module'):
-                    w = self.gan_model.module.mapping(z, None)
-                    x = self.gan_model.module.synthesis(w, noise_mode="const")
-                else:
-                    w = self.gan_model.mapping(z, None)
-                    x = self.gan_model.synthesis(w, noise_mode="const")
-                
-                original_images.append(x)
-        
-        original_images = torch.cat(original_images, dim=0)
         
         # Generate negative case images for FID comparison
         with torch.no_grad():
@@ -413,29 +433,24 @@ class WatermarkEvaluator:
                 for i in range(num_batches):
                     start_idx = i * batch_size
                     end_idx = min((i + 1) * batch_size, num_samples)
-                    
-                    # Extract batch of latent vectors
-                    z = all_z_negative[start_idx:end_idx]
+                    current_batch_size = end_idx - start_idx
                     
                     # Generate negative sample images
                     if model_name is not None:
                         # Use pretrained model
                         model = self.pretrained_models[model_name]
-                        
-                        if hasattr(model, 'module'):
-                            w = model.module.mapping(z, None)
-                            x = model.module.synthesis(w, noise_mode="const")
-                        else:
-                            w = model.mapping(z, None)
-                            x = model.synthesis(w, noise_mode="const")
+                        x = model.generate_images(
+                            batch_size=current_batch_size,
+                            device=self.device,
+                            **gen_kwargs
+                        )
                     else:
                         # Generate base images
-                        if hasattr(self.gan_model, 'module'):
-                            w = self.gan_model.module.mapping(z, None)
-                            x = self.gan_model.module.synthesis(w, noise_mode="const")
-                        else:
-                            w = self.gan_model.mapping(z, None)
-                            x = self.gan_model.synthesis(w, noise_mode="const")
+                        x = self.gan_model.generate_images(
+                            batch_size=current_batch_size,
+                            device=self.device,
+                            **gen_kwargs
+                        )
                         
                         # Apply transformations
                         if transformation and transformation.startswith('quantization'):
@@ -443,12 +458,11 @@ class WatermarkEvaluator:
                             precision = transformation.split('_')[-1]
                             if precision in self.quantized_models:
                                 model = self.quantized_models[precision]
-                                if hasattr(model, 'module'):
-                                    w = model.module.mapping(z, None)
-                                    x = model.module.synthesis(w, noise_mode="const")
-                                else:
-                                    w = model.mapping(z, None)
-                                    x = model.synthesis(w, noise_mode="const")
+                                x = model.generate_images(
+                                    batch_size=current_batch_size,
+                                    device=self.device,
+                                    **gen_kwargs
+                                )
                             else:
                                 if self.rank == 0 and i == 0:
                                     logging.warning(f"Quantized model for precision {precision} not found")

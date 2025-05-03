@@ -1,16 +1,18 @@
 """
-Utilities for loading StyleGAN2 models.
+Utilities for loading generative models.
 """
 import logging
 import os
 import traceback
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Any
 
-from models.model_utils import load_stylegan2_model
+import torch
+from models.stylegan2_model import StyleGAN2Model
+from models.stable_diffusion_model import StableDiffusionModel
+from models.base_model import BaseGenerativeModel
 
-
-# Dictionary of pretrained model URLs and local paths
-PRETRAINED_MODELS = {
+# Dictionary of pretrained StyleGAN2 model URLs and local paths
+STYLEGAN2_MODELS = {
     # FFHQ Models
     'ffhq70k-ada': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
                "ffhq70k-paper256-ada.pkl"), # this serves as a control test
@@ -36,35 +38,79 @@ PRETRAINED_MODELS = {
                           "lsuncat100k-paper256-noaug.pkl")
 }
 
+# Dictionary of pretrained Stable Diffusion models
+STABLE_DIFFUSION_MODELS = {
+    # Base models
+    'sdxl-1.0': "stabilityai/stable-diffusion-xl-base-1.0",
+    'sd-2.1': "stabilityai/stable-diffusion-2-1-base",
+    'sdxl-0.9': "stabilityai/stable-diffusion-xl-base-0.9",
+    'sd-3.5': "stabilityai/stable-diffusion-3.5-large",
+}
 
-def load_pretrained_models(device, rank=0, model_dict: Optional[Dict[str, Tuple[str, str]]] = None):
+def load_pretrained_models(
+    device: torch.device,
+    rank: int = 0,
+    model_type: str = "stylegan2",
+    selected_models: Optional[Dict[str, Any]] = None,
+    img_size: int = 256,
+    enable_cpu_offload: bool = False,
+    dtype: torch.dtype = torch.float16
+) -> Dict[str, BaseGenerativeModel]:
     """
-    Load pretrained StyleGAN2 models.
+    Load pretrained models.
     
     Args:
         device: Device to load models on
         rank: Distributed training rank
-        model_dict: Optional dictionary mapping model names to (url, local_path) tuples.
-                   If None, uses PRETRAINED_MODELS.
+        model_type: Type of models to load ("stylegan2" or "stable-diffusion")
+        selected_models: Optional dictionary mapping model names to their configs.
+                       For StyleGAN2: (url, local_path) tuples
+                       For Stable Diffusion: model names
+        img_size: Output image size
+        enable_cpu_offload: Whether to enable CPU offloading (SD only)
+        dtype: Model dtype (SD only)
         
     Returns:
         Dictionary mapping model names to loaded models
     """
     models = {}
     
-    # Use provided model dictionary or default to PRETRAINED_MODELS
-    model_dict = model_dict if model_dict is not None else PRETRAINED_MODELS
+    # Use provided model dictionary or default to predefined ones
+    if selected_models is None:
+        if model_type == "stylegan2":
+            model_dict = STYLEGAN2_MODELS
+        else:
+            model_dict = STABLE_DIFFUSION_MODELS
+    else:
+        model_dict = selected_models
     
     # Load all models from model dictionary
-    for model_name, (url, local_path) in model_dict.items():
+    for model_name, model_config in model_dict.items():
         if rank == 0:
             logging.info(f"Loading pretrained model: {model_name}")
         
         try:
-            models[model_name] = load_stylegan2_model(url, local_path, device)
-            models[model_name].eval()
+            if model_type == "stylegan2":
+                url, local_path = model_config
+                models[model_name] = StyleGAN2Model(
+                    model_url=url,
+                    model_path=local_path,
+                    device=device,
+                    img_size=img_size
+                )
+            else:  # stable-diffusion
+                model_path = model_config if isinstance(model_config, str) else model_config["model_name"]
+                models[model_name] = StableDiffusionModel(
+                    model_name=model_path,
+                    device=device,
+                    img_size=img_size,
+                    dtype=dtype,
+                    enable_cpu_offload=enable_cpu_offload
+                )
+            
             if rank == 0:
                 logging.info(f"Successfully loaded pretrained model: {model_name}")
+                
         except Exception as e:
             if rank == 0:
                 logging.error(f"Failed to load pretrained model {model_name}: {str(e)}")

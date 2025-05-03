@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Evaluation script for StyleGAN watermarking.
+Evaluation script for generative model watermarking.
 """
 import argparse
 import logging
@@ -18,15 +18,36 @@ from utils.logging_utils import setup_logging
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Evaluation for StyleGAN2 Watermarking")
+    parser = argparse.ArgumentParser(description="Evaluation for Generative Model Watermarking")
     
-    # Model configuration
+    # Model type selection
+    parser.add_argument("--model_type", type=str, default="stylegan2",
+                       choices=["stylegan2", "stable-diffusion"],
+                       help="Type of generative model to use")
+    
+    # StyleGAN2 configuration
     parser.add_argument("--stylegan2_url", type=str,
                         default="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
                         help="URL for the pretrained StyleGAN2 model")
     parser.add_argument("--stylegan2_local_path", type=str,
                         default="ffhq70k-paper256-ada.pkl",
                         help="Local path to store/load the StyleGAN2 model")
+    
+    # Stable Diffusion configuration
+    parser.add_argument("--sd_model_name", type=str,
+                        default="stabilityai/stable-diffusion-xl-base-1.0",
+                        help="Name of the Stable Diffusion model to use")
+    parser.add_argument("--sd_enable_cpu_offload", action="store_true",
+                        help="Enable CPU offloading for Stable Diffusion")
+    parser.add_argument("--sd_dtype", type=str, default="float16",
+                        choices=["float16", "float32"],
+                        help="Data type for Stable Diffusion model")
+    parser.add_argument("--sd_num_inference_steps", type=int, default=30,
+                        help="Number of inference steps for Stable Diffusion")
+    parser.add_argument("--sd_guidance_scale", type=float, default=7.5,
+                        help="Guidance scale for Stable Diffusion")
+    
+    # Common configuration
     parser.add_argument("--checkpoint_path", type=str,
                         help="Path to checkpoint to evaluate")
     parser.add_argument("--img_size", type=int, default=256, help="Image resolution")
@@ -37,12 +58,14 @@ def parse_args():
 
     # Pretrained model configuration
     parser.add_argument("--pretrained_models", type=str, nargs='+', default=[],
-                        help="List of pretrained model names to use for evaluation. Available options: "
-                             "ffhq70k-ada, ffhq1k, ffhq30k, ffhq70k-bcr, ffhq70k-noaug. "
+                        help="List of pretrained model names to use for evaluation. "
+                             "For StyleGAN2: ffhq70k-ada, ffhq1k, ffhq30k, etc. "
+                             "For SD: sdxl-1.0, sd-2.1, sdxl-0.9, sd-3.5. "
                              "If empty, all available models will be used.")
     parser.add_argument("--custom_pretrained_models", type=str, nargs='+', default=[],
-                        help="List of custom pretrained model specifications in format: "
-                             "name:url:local_path. Example: 'custom1:http://example.com/model.pkl:local.pkl'")
+                        help="List of custom pretrained model specifications. "
+                             "For StyleGAN2: 'name:url:local_path'. "
+                             "For SD: 'name:model_name'")
 
     # Evaluation configuration
     parser.add_argument("--num_samples", type=int, default=1000, 
@@ -72,12 +95,20 @@ def main():
     custom_models = {}
     for model_spec in args.custom_pretrained_models:
         try:
-            name, url, local_path = model_spec.split(':')
-            custom_models[name] = (url, local_path)
+            if args.model_type == "stylegan2":
+                name, url, local_path = model_spec.split(':')
+                custom_models[name] = (url, local_path)
+            else:  # stable-diffusion
+                name, model_name = model_spec.split(':')
+                custom_models[name] = model_name
         except ValueError:
             if rank == 0:
-                logging.error(f"Invalid custom model specification: {model_spec}. "
-                            f"Format should be 'name:url:local_path'")
+                if args.model_type == "stylegan2":
+                    logging.error(f"Invalid custom model specification: {model_spec}. "
+                                f"Format should be 'name:url:local_path'")
+                else:
+                    logging.error(f"Invalid custom model specification: {model_spec}. "
+                                f"Format should be 'name:model_name'")
             continue
     
     # Create output directory and setup logging

@@ -62,6 +62,12 @@ RUN pip install --no-cache-dir \
     lpips \
     imageio-ffmpeg==0.4.3
 
+RUN pip install --no-cache-dir \
+    diffusers \
+    transformers \
+    accelerate \
+    safetensors
+
 # Configure writable directories
 ENV TORCH_EXTENSIONS_DIR=/workspace/torch_extensions
 RUN mkdir -p ${TORCH_EXTENSIONS_DIR} && chmod -R 777 ${TORCH_EXTENSIONS_DIR}

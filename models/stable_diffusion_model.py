@@ -42,20 +42,23 @@ class StableDiffusionModel(BaseGenerativeModel):
         )
         
         if enable_cpu_offload:
-            self.pipe.enable_model_cpu_offload()
+            # Disable torch compile when using CPU offload
+            self.pipe.enable_model_cpu_offload(device=device)
+            self.pipe.enable_sequential_cpu_offload(device=device)
         else:
             self.pipe = self.pipe.to(device)
-            
-        # Enable memory efficient attention if using older torch
-        if torch.__version__ < "2.0":
-            self.pipe.enable_xformers_memory_efficient_attention()
-        else:
-            # Use torch.compile for better performance
-            self.pipe.unet = torch.compile(
-                self.pipe.unet,
-                mode="reduce-overhead",
-                fullgraph=True
-            )
+            # Enable memory efficient attention if using older torch
+            if torch.__version__ < "2.0":
+                self.pipe.enable_xformers_memory_efficient_attention()
+            else:
+                try:
+                    self.pipe.unet = torch.compile(
+                        self.pipe.unet,
+                        mode="reduce-overhead",
+                        fullgraph=True
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not compile unet: {e}")
     
     def generate_images(
         self,
@@ -83,11 +86,17 @@ class StableDiffusionModel(BaseGenerativeModel):
         
         # Generate images
         with torch.no_grad():
-            output = self.pipe(
-                prompt=[prompt] * batch_size,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale
-            )
+            try:
+                output = self.pipe(
+                    prompt=[prompt] * batch_size,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    height=self._img_size,
+                    width=self._img_size
+                )
+            except Exception as e:
+                print(f"Error during generation: {e}")
+                raise
             
         # Convert images to tensor
         images = torch.stack([

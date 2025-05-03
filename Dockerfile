@@ -68,6 +68,8 @@ RUN pip install --no-cache-dir \
     accelerate \
     safetensors
 
+RUN pip install huggingface_hub[hf_xet]
+
 # Configure writable directories
 ENV TORCH_EXTENSIONS_DIR=/workspace/torch_extensions
 RUN mkdir -p ${TORCH_EXTENSIONS_DIR} && chmod -R 777 ${TORCH_EXTENSIONS_DIR}

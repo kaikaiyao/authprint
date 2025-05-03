@@ -7,6 +7,10 @@ import logging
 import sys
 import os
 
+# Add torch dynamo configuration
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True  # Disable dynamo compilation
+
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

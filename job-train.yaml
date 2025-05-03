@@ -80,11 +80,12 @@ spec:
                       --model_type stable-diffusion \
                       --sd_model_name "stabilityai/stable-diffusion-xl-base-1.0" \
                       --img_size 256 \
-                      --batch_size 128 \
+                      --batch_size 8 \
                       --total_iterations 5000000 \
                       --checkpoint_interval 10000 \
                       --image_pixel_count 32 \
-                      --image_pixel_set_seed 42
+                      --image_pixel_set_seed 42 \
+                      --sd_enable_cpu_offload 
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

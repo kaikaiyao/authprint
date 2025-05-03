@@ -75,8 +75,8 @@ spec:
               
               SCRIPT_ARGS="--stylegan2_url "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada.pkl" \
                           --stylegan2_local_path "lsuncat100k-paper256-ada.pkl" \
-                          --checkpoint_path '/nfs-user-107/num_pixel_16/lsuncat/checkpoint_iter750000.pth' \
-                          --image_pixel_count 16 \
+                          --checkpoint_path '/nfs-user-107/num_pixel_32/lsuncat/checkpoint_iter750000.pth' \
+                          --image_pixel_count 32 \
                           --image_pixel_set_seed 42 \
                           --num_samples 32768 \
                           --batch_size 128"

@@ -361,7 +361,7 @@ class WatermarkEvaluator:
     
     def _evaluate_negative_samples(
         self,
-        original_images: torch.Tensor,
+        original_z: torch.Tensor,
         threshold: float,
         gen_kwargs: Dict[str, Any]
     ) -> Dict[str, Dict[str, float]]:
@@ -370,7 +370,7 @@ class WatermarkEvaluator:
         Computes FPR at 95% TPR threshold for each negative case.
         
         Args:
-            original_images (torch.Tensor): Original model images for FID comparison
+            original_z (torch.Tensor): Original model latent vectors for FID comparison
             threshold (float): MSE threshold at 95% TPR from original model
             gen_kwargs (Dict[str, Any]): Generation kwargs for the model
             
@@ -418,6 +418,25 @@ class WatermarkEvaluator:
         if self.rank == 0:
             logging.info(f"Running {total_evals} evaluations...")
             logging.info(f"Evaluations to run: {[e[1] if e[1] else e[0] for e in evaluations_to_run]}")
+        
+        # Generate original images for FID comparison
+        original_images = []
+        with torch.no_grad():
+            for i in range(num_batches):
+                start_idx = i * batch_size
+                end_idx = min((i + 1) * batch_size, num_samples)
+                z = original_z[start_idx:end_idx]
+                
+                # Generate images using original model
+                x = self.gan_model.generate_images(
+                    batch_size=end_idx - start_idx,
+                    device=self.device,
+                    **gen_kwargs
+                )
+                original_images.append(x)
+        
+        # Concatenate all original images
+        original_images = torch.cat(original_images, dim=0)
         
         # Generate negative case images for FID comparison
         with torch.no_grad():

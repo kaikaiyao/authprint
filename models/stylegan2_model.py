@@ -46,14 +46,39 @@ class StyleGAN2Model(BaseGenerativeModel):
         z = torch.randn(batch_size, self.z_dim, device=device)
         
         with torch.no_grad():
-            if hasattr(self.model, 'module'):
-                w = self.model.module.mapping(z, None)
-                images = self.model.module.synthesis(w, noise_mode="const")
-            else:
-                w = self.model.mapping(z, None)
-                images = self.model.synthesis(w, noise_mode="const")
+            w = self.mapping(z, None)
+            images = self.synthesis(w, noise_mode="const")
                 
         return images
+    
+    def mapping(self, z: torch.Tensor, c: Optional[torch.Tensor], **kwargs) -> torch.Tensor:
+        """Map latent vectors from Z space to W space.
+        
+        Args:
+            z (torch.Tensor): Latent vectors in Z space
+            c (Optional[torch.Tensor]): Class conditioning, if applicable
+            **kwargs: Additional arguments passed to mapping network
+            
+        Returns:
+            torch.Tensor: Latent vectors in W space
+        """
+        if hasattr(self.model, 'module'):
+            return self.model.module.mapping(z, c, **kwargs)
+        return self.model.mapping(z, c, **kwargs)
+        
+    def synthesis(self, w: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Generate images from W space latent vectors.
+        
+        Args:
+            w (torch.Tensor): Latent vectors in W space
+            **kwargs: Additional arguments passed to synthesis network
+            
+        Returns:
+            torch.Tensor: Generated images
+        """
+        if hasattr(self.model, 'module'):
+            return self.model.module.synthesis(w, **kwargs)
+        return self.model.synthesis(w, **kwargs)
     
     def get_model_type(self) -> str:
         return "stylegan2"

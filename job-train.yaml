@@ -78,12 +78,12 @@ spec:
                       --master_port=12345 \
                       scripts/train.py \
                       --model_type stable-diffusion \
-                      --sd_model_name "stabilityai/stable-diffusion-xl-base-1.0" \
+                      --sd_model_name "stabilityai/stable-diffusion-2-1-base" \
                       --img_size 256 \
-                      --batch_size 4 \
+                      --batch_size 32 \
                       --total_iterations 5000000 \
                       --checkpoint_interval 10000 \
-                      --image_pixel_count 16 \
+                      --image_pixel_count 32 \
                       --image_pixel_set_seed 42 \
                       --sd_enable_cpu_offload 
               

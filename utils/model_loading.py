@@ -45,6 +45,11 @@ STABLE_DIFFUSION_MODELS = {
     'sd-2.1': "stabilityai/stable-diffusion-2-1-base",
     'sdxl-0.9': "stabilityai/stable-diffusion-xl-base-0.9",
     'sd-3.5': "stabilityai/stable-diffusion-3.5-large",
+    'sd-1.5': "sd-legacy/stable-diffusion-v1-5",  # or "runwayml/stable-diffusion-v1-5"
+    'sd-1.4': "CompVis/stable-diffusion-v1-4",
+    'sd-1.3': "CompVis/stable-diffusion-v1-3",
+    'sd-1.2': "CompVis/stable-diffusion-v1-2",
+    'sd-1.1': "CompVis/stable-diffusion-v1-1",
 }
 
 def load_pretrained_models(

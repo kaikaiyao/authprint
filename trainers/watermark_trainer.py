@@ -174,11 +174,11 @@ class WatermarkTrainer:
         
         # Get predictions
         pred_values = self.decoder(x)
-        key_loss = torch.mean(torch.pow(pred_values - true_values, 2))
+        train_loss = torch.mean(torch.pow(pred_values - true_values, 2))
         
         # Optimize
         self.optimizer.zero_grad()
-        key_loss.backward()
+        train_loss.backward()
         self.optimizer.step()
         
         # Now compute metrics in eval mode
@@ -191,7 +191,7 @@ class WatermarkTrainer:
         decoder.train()  # Set back to train mode
         
         return {
-            'key_loss': key_loss.item(),
+            'train_loss': train_loss.item(),
             'mse_distance_mean': mse_distance_mean,
             'mse_distance_std': mse_distance_std
         }
@@ -246,7 +246,7 @@ class WatermarkTrainer:
                 logging.info(
                     f"Iteration {iteration}/{self.config.training.total_iterations} "
                     f"[{elapsed:.2f}s] "
-                    f"Key Loss: {metrics['key_loss']:.6f} "
+                    f"Train Loss: {metrics['train_loss']:.6f} "
                     f"MSE: {metrics['mse_distance_mean']:.6f} ± {metrics['mse_distance_std']:.6f}"
                 )
             

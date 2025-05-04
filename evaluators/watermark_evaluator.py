@@ -288,6 +288,11 @@ class WatermarkEvaluator:
             all_z_original = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
             all_z_negative = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
             
+            # Set generation kwargs based on model type
+            gen_kwargs = {}
+            if self.config.model.model_type == "stylegan2":
+                gen_kwargs["noise_mode"] = "const"
+            
             # Process batches for original model
             mse_per_sample = []  # Changed from mse_values to mse_per_sample
             
@@ -299,13 +304,13 @@ class WatermarkEvaluator:
                     # Extract batch of latent vectors
                     z = all_z_original[start_idx:end_idx]
                     
-                    # Generate images
-                    if hasattr(self.gan_model, 'module'):
-                        w = self.gan_model.module.mapping(z, None)
-                        x = self.gan_model.module.synthesis(w, noise_mode="const")
-                    else:
-                        w = self.gan_model.mapping(z, None)
-                        x = self.gan_model.synthesis(w, noise_mode="const")
+                    # Generate images using new codebase logic
+                    x = self.gan_model.generate_images(
+                        batch_size=end_idx - start_idx,
+                        device=self.device,
+                        z=z,  # Pass the latent vectors explicitly
+                        **gen_kwargs
+                    )
                     
                     # Extract features (real pixel values)
                     features = self.extract_image_partial(x)
@@ -343,7 +348,7 @@ class WatermarkEvaluator:
             }
             
             # Evaluate negative samples
-            negative_results = self._evaluate_negative_samples(all_z_original, threshold, {})
+            negative_results = self._evaluate_negative_samples(all_z_original, all_z_negative, threshold, gen_kwargs)
             if negative_results:
                 metrics['negative_results'] = negative_results
             
@@ -362,6 +367,7 @@ class WatermarkEvaluator:
     def _evaluate_negative_samples(
         self,
         original_z: torch.Tensor,
+        negative_z: torch.Tensor,
         threshold: float,
         gen_kwargs: Dict[str, Any]
     ) -> Dict[str, Dict[str, float]]:
@@ -371,6 +377,7 @@ class WatermarkEvaluator:
         
         Args:
             original_z (torch.Tensor): Original model latent vectors for FID comparison
+            negative_z (torch.Tensor): Negative model latent vectors for evaluation
             threshold (float): MSE threshold at 95% TPR from original model
             gen_kwargs (Dict[str, Any]): Generation kwargs for the model
             
@@ -427,10 +434,11 @@ class WatermarkEvaluator:
                 end_idx = min((i + 1) * batch_size, num_samples)
                 z = original_z[start_idx:end_idx]
                 
-                # Generate images using original model
+                # Generate images using new codebase logic
                 x = self.gan_model.generate_images(
                     batch_size=end_idx - start_idx,
                     device=self.device,
+                    z=z,  # Pass the latent vectors explicitly
                     **gen_kwargs
                 )
                 original_images.append(x)
@@ -452,22 +460,24 @@ class WatermarkEvaluator:
                 for i in range(num_batches):
                     start_idx = i * batch_size
                     end_idx = min((i + 1) * batch_size, num_samples)
-                    current_batch_size = end_idx - start_idx
+                    z = negative_z[start_idx:end_idx]
                     
                     # Generate negative sample images
                     if model_name is not None:
                         # Use pretrained model
                         model = self.pretrained_models[model_name]
                         x = model.generate_images(
-                            batch_size=current_batch_size,
+                            batch_size=end_idx - start_idx,
                             device=self.device,
+                            z=z,  # Pass the latent vectors explicitly
                             **gen_kwargs
                         )
                     else:
                         # Generate base images
                         x = self.gan_model.generate_images(
-                            batch_size=current_batch_size,
+                            batch_size=end_idx - start_idx,
                             device=self.device,
+                            z=z,  # Pass the latent vectors explicitly
                             **gen_kwargs
                         )
                         
@@ -478,8 +488,9 @@ class WatermarkEvaluator:
                             if precision in self.quantized_models:
                                 model = self.quantized_models[precision]
                                 x = model.generate_images(
-                                    batch_size=current_batch_size,
+                                    batch_size=end_idx - start_idx,
                                     device=self.device,
+                                    z=z,  # Pass the latent vectors explicitly
                                     **gen_kwargs
                                 )
                             else:

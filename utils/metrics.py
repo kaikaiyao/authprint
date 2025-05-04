@@ -218,6 +218,28 @@ def calculate_fid(images1, images2, batch_size=50, device='cpu'):
     Returns:
         FID score
     """
+    # Ensure inputs are proper 4D tensors
+    if not isinstance(images1, torch.Tensor):
+        images1 = torch.tensor(images1)
+    if not isinstance(images2, torch.Tensor):
+        images2 = torch.tensor(images2)
+    
+    # Add batch dimension if missing
+    if images1.dim() == 3:
+        images1 = images1.unsqueeze(0)
+    if images2.dim() == 3:
+        images2 = images2.unsqueeze(0)
+    
+    # Ensure images are in range [0,1]
+    if images1.min() < 0 or images1.max() > 1:
+        images1 = (images1 + 1) / 2  # Convert from [-1,1] to [0,1]
+    if images2.min() < 0 or images2.max() > 1:
+        images2 = (images2 + 1) / 2  # Convert from [-1,1] to [0,1]
+    
+    # Move to specified device
+    images1 = images1.to(device)
+    images2 = images2.to(device)
+    
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
     model = InceptionV3([block_idx]).to(device)
     

@@ -43,7 +43,7 @@ class StyleGAN2Model(BaseGenerativeModel):
             torch.Tensor: Generated images [B, C, H, W]
         """
         device = device or self._device
-        z = torch.randn(batch_size, self.model.z_dim, device=device)
+        z = torch.randn(batch_size, self.z_dim, device=device)
         
         with torch.no_grad():
             if hasattr(self.model, 'module'):
@@ -63,4 +63,11 @@ class StyleGAN2Model(BaseGenerativeModel):
         
     @property
     def image_size(self) -> int:
-        return self._img_size 
+        return self._img_size
+
+    @property
+    def z_dim(self) -> int:
+        """Get the latent dimension size."""
+        if hasattr(self.model, 'module'):
+            return self.model.module.z_dim
+        return self.model.z_dim 

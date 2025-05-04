@@ -1,9 +1,10 @@
 import torch
+import torch.nn as nn
 from typing import Optional
 from .base_model import BaseGenerativeModel
 from models.model_utils import load_stylegan2_model
 
-class StyleGAN2Model(BaseGenerativeModel):
+class StyleGAN2Model(BaseGenerativeModel, nn.Module):
     """StyleGAN2 model implementation."""
     
     def __init__(
@@ -21,15 +22,29 @@ class StyleGAN2Model(BaseGenerativeModel):
             device (torch.device): Device to load model on
             img_size (int): Output image size
         """
+        super(StyleGAN2Model, self).__init__()
         self._device = device
         self._img_size = img_size
         self.model = load_stylegan2_model(model_url, model_path, device)
         self.model.eval()
         
+    def forward(self, z: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Forward pass for compatibility with torch.nn.Module.
+        
+        Args:
+            z (torch.Tensor): Input latent vectors
+            **kwargs: Additional arguments passed to synthesis
+            
+        Returns:
+            torch.Tensor: Generated images
+        """
+        return self.generate_images(z.size(0), z=z, **kwargs)
+        
     def generate_images(
         self,
         batch_size: int,
         device: Optional[torch.device] = None,
+        z: Optional[torch.Tensor] = None,
         **kwargs
     ) -> torch.Tensor:
         """Generate images using StyleGAN2.
@@ -37,13 +52,17 @@ class StyleGAN2Model(BaseGenerativeModel):
         Args:
             batch_size (int): Number of images to generate
             device (torch.device, optional): Device override
-            **kwargs: Additional arguments (unused)
+            z (Optional[torch.Tensor]): Optional latent vectors
+            **kwargs: Additional arguments passed to synthesis
             
         Returns:
             torch.Tensor: Generated images [B, C, H, W]
         """
         device = device or self._device
-        z = torch.randn(batch_size, self.z_dim, device=device)
+        
+        # Generate or use provided latent vectors
+        if z is None:
+            z = torch.randn(batch_size, self.z_dim, device=device)
         
         with torch.no_grad():
             w = self.mapping(z, None)
@@ -95,4 +114,21 @@ class StyleGAN2Model(BaseGenerativeModel):
         """Get the latent dimension size."""
         if hasattr(self.model, 'module'):
             return self.model.module.z_dim
-        return self.model.z_dim 
+        return self.model.z_dim
+        
+    def parameters(self):
+        """Return model parameters for compatibility with torch.nn.Module."""
+        return self.model.parameters()
+        
+    def eval(self):
+        """Set model to evaluation mode."""
+        self.model.eval()
+        return self
+        
+    def train(self, mode=True):
+        """Set model to training mode."""
+        if mode:
+            self.model.train()
+        else:
+            self.model.eval()
+        return self 

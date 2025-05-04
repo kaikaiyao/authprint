@@ -11,6 +11,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from config.default_config import Config
 from models.decoder import Decoder
+from models.stable_diffusion_model import StableDiffusionModel
 from utils.checkpoint import save_checkpoint, load_checkpoint
 
 
@@ -159,6 +160,11 @@ class WatermarkTrainer:
             **gen_kwargs
         )
         
+        # Convert to float and normalize to [0,1] if using Stable Diffusion
+        if isinstance(self.gan_model, StableDiffusionModel) and x.dtype != torch.float32:
+            x = x.float()
+            x = x / 255.0
+            
         # Extract features (real pixel values)
         features = self.extract_image_partial(x)
         true_values = features

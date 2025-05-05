@@ -77,7 +77,7 @@ class StableDiffusionModel(BaseGenerativeModel):
                 guidance_scale (float): Classifier-free guidance scale
                 
         Returns:
-            torch.Tensor: Generated images [B, C, H, W]
+            torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
         # Extract generation parameters
         prompt = kwargs.get("prompt", "A high quality photo")
@@ -98,9 +98,9 @@ class StableDiffusionModel(BaseGenerativeModel):
                 print(f"Error during generation: {e}")
                 raise
             
-        # Convert images to tensor
+        # Convert images to normalized float tensor in range [0, 1]
         images = torch.stack([
-            torch.from_numpy(np.array(img)).permute(2, 0, 1)
+            torch.from_numpy(np.array(img, dtype=np.float32)).permute(2, 0, 1) / 255.0
             for img in output.images
         ]).to(device or self._device)
         

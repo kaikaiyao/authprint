@@ -160,10 +160,10 @@ class WatermarkTrainer:
             **gen_kwargs
         )
         
-        # Convert to float and normalize to [0,1] if using Stable Diffusion
-        if isinstance(self.gan_model, StableDiffusionModel) and x.dtype != torch.float32:
-            x = x.float()
-            x = x / 255.0
+        # # Convert to float and normalize to [0,1] if using Stable Diffusion
+        # if isinstance(self.gan_model, StableDiffusionModel) and x.dtype != torch.float32:
+        #     x = x.float()
+        #     x = x / 255.0
             
         # Extract features (real pixel values)
         features = self.extract_image_partial(x)

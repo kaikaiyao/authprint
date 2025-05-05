@@ -28,12 +28,14 @@ class StableDiffusionModel(BaseGenerativeModel):
         self._img_size = img_size
         self._model_name = model_name
         
-        # Initialize pipeline with better scheduler
+        # Initialize pipeline with better scheduler and disable safety checker
         self.pipe = DiffusionPipeline.from_pretrained(
             model_name,
             torch_dtype=dtype,
             use_safetensors=True,
-            variant="fp16"
+            variant="fp16",
+            safety_checker=None,  # Disable safety checker
+            requires_safety_checker=False  # Don't require safety checker
         )
         
         # Use better scheduler

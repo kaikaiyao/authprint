@@ -41,10 +41,10 @@ STYLEGAN2_MODELS = {
 # Dictionary of pretrained Stable Diffusion models
 STABLE_DIFFUSION_MODELS = {
     # Base models
-    'sdxl-1.0': "stabilityai/stable-diffusion-xl-base-1.0",
+    # 'sdxl-1.0': "stabilityai/stable-diffusion-xl-base-1.0",
     'sd-2.1': "stabilityai/stable-diffusion-2-1-base",
-    'sdxl-0.9': "stabilityai/stable-diffusion-xl-base-0.9",
-    'sd-3.5': "stabilityai/stable-diffusion-3.5-large",
+    # 'sdxl-0.9': "stabilityai/stable-diffusion-xl-base-0.9",
+    # 'sd-3.5': "stabilityai/stable-diffusion-3.5-large",
     'sd-1.5': "sd-legacy/stable-diffusion-v1-5",  # or "runwayml/stable-diffusion-v1-5"
     'sd-1.4': "CompVis/stable-diffusion-v1-4",
     'sd-1.3': "CompVis/stable-diffusion-v1-3",

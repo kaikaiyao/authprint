@@ -42,8 +42,6 @@ STYLEGAN2_MODELS = {
 STABLE_DIFFUSION_MODELS = {
     # Base models
     'sdxl-1.0': "stabilityai/stable-diffusion-xl-base-1.0",
-    'sd-3-medium': "stabilityai/stable-diffusion-3-medium",
-    'sd-cascade': "stabilityai/stable-cascade",
     'sdxl-turbo': "stabilityai/sdxl-turbo",
     # 'sd-2.1': "stabilityai/stable-diffusion-2-1-base",
     # 'sdxl-0.9': "stabilityai/stable-diffusion-xl-base-0.9",

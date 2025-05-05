@@ -75,7 +75,7 @@ spec:
               
               SCRIPT_ARGS="--model_type stable-diffusion \
                           --sd_model_name "stabilityai/stable-diffusion-2-1-base" \
-                          --checkpoint_path '/nfs-user-107/num_pixel_32/SD/checkpoint_iter2000.pth' \
+                          --checkpoint_path '/nfs-user-107/num_pixel_32/SD/checkpoint_iter3000.pth' \
                           --sd_enable_cpu_offload \
                           --img_size 256 \
                           --image_pixel_count 32 \

@@ -122,7 +122,7 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name):
     ax.set_xticklabels(pixels)
     ax.set_xlabel('Fingerprint Length (Number of Pixels Selected)', labelpad=15)
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title(f"StyleGAN2, {dataset_name} Dataset", pad=15)
+    ax.set_title(f"Target Model: {dataset_name} 70k Train Data, ADA Aug" if dataset_name == "FFHQ" else f"Target Model: {dataset_name} 100k Train Data, ADA Aug", pad=15)
     ax.set_ylim(-0.05, 1.05)  # Add margins above and below
     
     # Set spines to black

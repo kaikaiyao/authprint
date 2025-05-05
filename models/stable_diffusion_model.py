@@ -82,7 +82,7 @@ class StableDiffusionModel(BaseGenerativeModel):
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
         # Extract generation parameters
-        prompt = kwargs.get("prompt", "A high quality photo")
+        prompt = kwargs.get("prompt", "A surrealist painting of a sentient clock tower weeping molten gold into a mirrored ocean, under a storm of floating mathematical equations and giant jellyfish, in the style of Alex Grey and MC Escher, ultradetailed, 8k, cinematic, hyperrealism")
         num_inference_steps = kwargs.get("num_inference_steps", 30)
         guidance_scale = kwargs.get("guidance_scale", 7.5)
         

@@ -284,14 +284,15 @@ class WatermarkEvaluator:
             num_samples = self.config.evaluate.num_samples
             num_batches = (num_samples + batch_size - 1) // batch_size  # Ceiling division
             
-            # Generate all latent vectors upfront for consistency
-            all_z_original = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
-            all_z_negative = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
-            
-            # Set generation kwargs based on model type
-            gen_kwargs = {}
+            # Generate latents or prepare generation based on model type
             if self.config.model.model_type == "stylegan2":
-                gen_kwargs["noise_mode"] = "const"
+                all_z_original = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
+                all_z_negative = torch.randn(num_samples, self.gan_model.z_dim, device=self.device)
+                gen_kwargs = {"noise_mode": "const"}
+            else:  # stable-diffusion
+                all_z_original = None  # Not used for SD
+                all_z_negative = None  # Not used for SD
+                gen_kwargs = self.config.model.get_generation_kwargs()
             
             # Process batches for original model
             mse_per_sample = []  # Changed from mse_values to mse_per_sample
@@ -300,17 +301,23 @@ class WatermarkEvaluator:
                 for i in range(num_batches):
                     start_idx = i * batch_size
                     end_idx = min((i + 1) * batch_size, num_samples)
+                    current_batch_size = end_idx - start_idx
                     
-                    # Extract batch of latent vectors
-                    z = all_z_original[start_idx:end_idx]
-                    
-                    # Generate images using new codebase logic
-                    x = self.gan_model.generate_images(
-                        batch_size=end_idx - start_idx,
-                        device=self.device,
-                        z=z,  # Pass the latent vectors explicitly
-                        **gen_kwargs
-                    )
+                    # Generate images based on model type
+                    if self.config.model.model_type == "stylegan2":
+                        z = all_z_original[start_idx:end_idx]
+                        x = self.gan_model.generate_images(
+                            batch_size=current_batch_size,
+                            device=self.device,
+                            z=z,  # Pass the latent vectors explicitly
+                            **gen_kwargs
+                        )
+                    else:  # stable-diffusion
+                        x = self.gan_model.generate_images(
+                            batch_size=current_batch_size,
+                            device=self.device,
+                            **gen_kwargs
+                        )
                     
                     # Extract features (real pixel values)
                     features = self.extract_image_partial(x)
@@ -366,8 +373,8 @@ class WatermarkEvaluator:
     
     def _evaluate_negative_samples(
         self,
-        original_z: torch.Tensor,
-        negative_z: torch.Tensor,
+        original_z: Optional[torch.Tensor],
+        negative_z: Optional[torch.Tensor],
         threshold: float,
         gen_kwargs: Dict[str, Any]
     ) -> Dict[str, Dict[str, float]]:
@@ -376,8 +383,8 @@ class WatermarkEvaluator:
         Computes FPR at 95% TPR threshold for each negative case.
         
         Args:
-            original_z (torch.Tensor): Original model latent vectors for FID comparison
-            negative_z (torch.Tensor): Negative model latent vectors for evaluation
+            original_z (Optional[torch.Tensor]): Original model latent vectors for FID comparison (StyleGAN2 only)
+            negative_z (Optional[torch.Tensor]): Negative model latent vectors for evaluation (StyleGAN2 only)
             threshold (float): MSE threshold at 95% TPR from original model
             gen_kwargs (Dict[str, Any]): Generation kwargs for the model
             
@@ -432,15 +439,23 @@ class WatermarkEvaluator:
             for i in range(num_batches):
                 start_idx = i * batch_size
                 end_idx = min((i + 1) * batch_size, num_samples)
-                z = original_z[start_idx:end_idx]
+                current_batch_size = end_idx - start_idx
                 
-                # Generate images using new codebase logic
-                x = self.gan_model.generate_images(
-                    batch_size=end_idx - start_idx,
-                    device=self.device,
-                    z=z,  # Pass the latent vectors explicitly
-                    **gen_kwargs
-                )
+                # Generate images based on model type
+                if self.config.model.model_type == "stylegan2":
+                    z = original_z[start_idx:end_idx]
+                    x = self.gan_model.generate_images(
+                        batch_size=current_batch_size,
+                        device=self.device,
+                        z=z,  # Pass the latent vectors explicitly
+                        **gen_kwargs
+                    )
+                else:  # stable-diffusion
+                    x = self.gan_model.generate_images(
+                        batch_size=current_batch_size,
+                        device=self.device,
+                        **gen_kwargs
+                    )
                 original_images.append(x)
         
         # Concatenate all original images
@@ -460,26 +475,42 @@ class WatermarkEvaluator:
                 for i in range(num_batches):
                     start_idx = i * batch_size
                     end_idx = min((i + 1) * batch_size, num_samples)
-                    z = negative_z[start_idx:end_idx]
+                    current_batch_size = end_idx - start_idx
                     
                     # Generate negative sample images
                     if model_name is not None:
                         # Use pretrained model
                         model = self.pretrained_models[model_name]
-                        x = model.generate_images(
-                            batch_size=end_idx - start_idx,
-                            device=self.device,
-                            z=z,  # Pass the latent vectors explicitly
-                            **gen_kwargs
-                        )
+                        if self.config.model.model_type == "stylegan2":
+                            z = negative_z[start_idx:end_idx]
+                            x = model.generate_images(
+                                batch_size=current_batch_size,
+                                device=self.device,
+                                z=z,  # Pass the latent vectors explicitly
+                                **gen_kwargs
+                            )
+                        else:  # stable-diffusion
+                            x = model.generate_images(
+                                batch_size=current_batch_size,
+                                device=self.device,
+                                **gen_kwargs
+                            )
                     else:
                         # Generate base images
-                        x = self.gan_model.generate_images(
-                            batch_size=end_idx - start_idx,
-                            device=self.device,
-                            z=z,  # Pass the latent vectors explicitly
-                            **gen_kwargs
-                        )
+                        if self.config.model.model_type == "stylegan2":
+                            z = negative_z[start_idx:end_idx]
+                            x = self.gan_model.generate_images(
+                                batch_size=current_batch_size,
+                                device=self.device,
+                                z=z,  # Pass the latent vectors explicitly
+                                **gen_kwargs
+                            )
+                        else:  # stable-diffusion
+                            x = self.gan_model.generate_images(
+                                batch_size=current_batch_size,
+                                device=self.device,
+                                **gen_kwargs
+                            )
                         
                         # Apply transformations
                         if transformation and transformation.startswith('quantization'):
@@ -487,12 +518,19 @@ class WatermarkEvaluator:
                             precision = transformation.split('_')[-1]
                             if precision in self.quantized_models:
                                 model = self.quantized_models[precision]
-                                x = model.generate_images(
-                                    batch_size=end_idx - start_idx,
-                                    device=self.device,
-                                    z=z,  # Pass the latent vectors explicitly
-                                    **gen_kwargs
-                                )
+                                if self.config.model.model_type == "stylegan2":
+                                    x = model.generate_images(
+                                        batch_size=current_batch_size,
+                                        device=self.device,
+                                        z=z,  # Pass the latent vectors explicitly
+                                        **gen_kwargs
+                                    )
+                                else:  # stable-diffusion
+                                    x = model.generate_images(
+                                        batch_size=current_batch_size,
+                                        device=self.device,
+                                        **gen_kwargs
+                                    )
                             else:
                                 if self.rank == 0 and i == 0:
                                     logging.warning(f"Quantized model for precision {precision} not found")

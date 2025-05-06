@@ -78,7 +78,7 @@ spec:
                       --master_port=12345 \
                       scripts/train.py \
                       --model_type stable-diffusion \
-                      --sd_model_name "stabilityai/stable-diffusion-2-1-base" \
+                      --sd_model_name "stabilityai/stable-diffusion-xl-base-1.0" \
                       --img_size 256 \
                       --batch_size 32 \
                       --total_iterations 5000000 \

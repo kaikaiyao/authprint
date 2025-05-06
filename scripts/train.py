@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument("--sd_dtype", type=str, default="float16",
                         choices=["float16", "float32"],
                         help="Data type for Stable Diffusion model")
-    parser.add_argument("--sd_num_inference_steps", type=int, default=30,
+    parser.add_argument("--sd_num_inference_steps", type=int, default=50,
                         help="Number of inference steps for Stable Diffusion")
     parser.add_argument("--sd_guidance_scale", type=float, default=7.5,
                         help="Guidance scale for Stable Diffusion")

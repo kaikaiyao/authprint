@@ -31,16 +31,16 @@ def parse_args():
                         help="Name of the Stable Diffusion model to use")
     parser.add_argument("--sd_enable_cpu_offload", action="store_true",
                         help="Enable CPU offloading for Stable Diffusion")
-    parser.add_argument("--img_size", type=int, default=256,
+    parser.add_argument("--img_size", type=int, default=768,
                         help="Size of generated images")
     parser.add_argument("--output_dir", type=str, default="sd_samples",
                         help="Directory to save visualization results")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility")
     parser.add_argument("--prompt", type=str,
-                        default="An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.",
+                        default="A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo",
                         help="Prompt for the Stable Diffusion model")
-    parser.add_argument("--num_inference_steps", type=int, default=30,
+    parser.add_argument("--num_inference_steps", type=int, default=50,
                         help="Number of denoising steps")
     parser.add_argument("--guidance_scale", type=float, default=7.5,
                         help="Classifier-free guidance scale")

@@ -59,8 +59,10 @@ spec:
           args:
             - |
               echo "Setting up environment..."
+              mkdir -p /workspace/kubernets/results
               mkdir -p /workspace/kubernets/attack_results
               mkdir -p /workspace/kubernets/attack_results/logs
+              mkdir -p /workspace/kubernets/evaluation_results
               
               # Download pretrained models
               echo "Downloading pretrained models..."

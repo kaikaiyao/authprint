@@ -83,7 +83,7 @@ spec:
                       --batch_size 32 \
                       --total_iterations 5000000 \
                       --checkpoint_interval 1000 \
-                      --image_pixel_count 32 \
+                      --image_pixel_count 64 \
                       --image_pixel_set_seed 42 \
                       --sd_enable_cpu_offload 
               

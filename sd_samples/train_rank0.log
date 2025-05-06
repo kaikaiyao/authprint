@@ -49,12 +49,12 @@ Namespace(sd_model_name='stabilityai/stable-diffusion-2-1-base', sd_enable_cpu_o
 2025-05-06 09:42:44,144 - INFO - Generating images...
 2025-05-06 09:43:22,666 - INFO - Creating image grid...
 2025-05-06 09:43:23,034 - INFO - Saved visualization to sd_samples/sd_samples_grid_256px.png
-2025-05-06 10:51:16,317 - INFO - Logging initialized (rank 0). Log file: sd_samples/train_rank0.log
-2025-05-06 10:51:16,317 - INFO - Configuration:
-Namespace(sd_model_name='stabilityai/stable-diffusion-2-1-base', sd_enable_cpu_offload=True, img_size=768, output_dir='sd_samples', seed=42, prompt='An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.', num_inference_steps=50, guidance_scale=10.0)
-2025-05-06 10:51:17,291 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 10:51:17,482 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 10:51:17,493 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 10:51:26,239 - INFO - Generating images...
-2025-05-06 10:52:28,133 - INFO - Creating image grid...
-2025-05-06 10:52:31,837 - INFO - Saved visualization to sd_samples/sd_samples_grid_768px.png
+2025-05-06 10:59:02,386 - INFO - Logging initialized (rank 0). Log file: sd_samples/train_rank0.log
+2025-05-06 10:59:02,387 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1-base', sd_enable_cpu_offload=True, img_size=1024, output_dir='sd_samples', seed=42, prompt='An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.', num_inference_steps=50, guidance_scale=8.0)
+2025-05-06 10:59:03,309 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-06 10:59:03,534 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-06 10:59:03,546 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-06 10:59:12,439 - INFO - Generating images...
+2025-05-06 11:00:33,696 - INFO - Creating image grid...
+2025-05-06 11:00:40,537 - INFO - Saved visualization to sd_samples/sd_samples_grid_1024px.png

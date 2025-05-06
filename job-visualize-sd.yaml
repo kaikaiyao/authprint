@@ -75,10 +75,10 @@ spec:
               
               SCRIPT_ARGS="--sd_model_name 'stabilityai/stable-diffusion-2-1-base' \
                           --sd_enable_cpu_offload \
-                          --img_size 1024 \
-                          --prompt 'An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.' \
-                          --num_inference_steps 50 \
-                          --guidance_scale 8"
+                          --img_size 768 \
+                          --prompt 'A professional portrait of a confident young celebrity, highly detailed face, perfect symmetrical features, soft cinematic lighting, 85mm f/1.4 lens, ultra-realistic, outdoors photography, shallow depth of field, high-resolution, masterpiece, 8k photo, sharp focus, realistic skin texture' \
+                          --num_inference_steps 35 \
+                          --guidance_scale 7.5"
               
 
               # Run visualization 10 times

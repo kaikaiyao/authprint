@@ -83,7 +83,7 @@ class StableDiffusionModel(BaseGenerativeModel):
         """
         # Extract generation parameters
         prompt = kwargs.get("prompt", "An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.")
-        num_inference_steps = kwargs.get("num_inference_steps", 30)
+        num_inference_steps = kwargs.get("num_inference_steps", 50)
         guidance_scale = kwargs.get("guidance_scale", 7.5)
         
         # Generate images

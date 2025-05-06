@@ -37,6 +37,9 @@ def parse_args():
                         help="Directory to save visualization results")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility")
+    parser.add_argument("--prompt", type=str,
+                        default="An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.",
+                        help="Prompt for the Stable Diffusion model")
     parser.add_argument("--num_inference_steps", type=int, default=30,
                         help="Number of denoising steps")
     parser.add_argument("--guidance_scale", type=float, default=7.5,
@@ -102,6 +105,7 @@ def main():
     logging.info("Generating images...")
     images = model.generate_images(
         batch_size=16,  # 4x4 grid
+        prompt=args.prompt,
         num_inference_steps=args.num_inference_steps,
         guidance_scale=args.guidance_scale
     )

@@ -63,6 +63,8 @@ spec:
               mkdir -p /workspace/kubernets/attack_results
               mkdir -p /workspace/kubernets/attack_results/logs
               mkdir -p /workspace/kubernets/evaluation_results
+              mkdir -p /workspace/kubernets/query_based_attack_results
+              mkdir -p /workspace/kubernets/query_based_attack_results/logs
               
               # Download pretrained models
               echo "Downloading pretrained models..."

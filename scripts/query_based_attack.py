@@ -189,7 +189,7 @@ class QueryBasedAttack:
         if self.decoder.predict(image):
             if self.rank == 0:
                 logging.info("Image already predicted as True by decoder, no attack needed")
-            return image, True, 0  # Return 0 queries since no perturbation was needed
+            return image, True, 0, initial_mse, initial_mse  # Return initial MSE as best since no attack needed
         
         best_mse = initial_mse
         for step in range(self.config.pgd_steps):
@@ -223,11 +223,11 @@ class QueryBasedAttack:
                 if self.rank == 0:
                     logging.info(f"Attack succeeded at step {step+1}")
                     logging.info(f"Best MSE achieved: {best_mse:.6f}")
-                return perturbed, True, step + 1  # Return actual queries used
+                return perturbed, True, step + 1, initial_mse, best_mse
         
         if self.rank == 0:
             logging.info(f"Best MSE achieved: {best_mse:.6f}")
-        return perturbed, False, self.config.pgd_steps  # Used all queries
+        return perturbed, False, self.config.pgd_steps, initial_mse, best_mse
     
     def attack_negative_case(self, negative_model, num_samples, negative_case_type=None):
         """Attack a specific negative case using PGD."""
@@ -244,6 +244,10 @@ class QueryBasedAttack:
         # Lists to store images for FID calculation
         original_images = []
         perturbed_images = []
+        
+        # Lists to store MSE scores
+        initial_mses = []
+        best_mses = []
         
         for i in range(num_samples):
             if self.rank == 0:
@@ -265,8 +269,12 @@ class QueryBasedAttack:
                 negative_img = downsample_and_upsample(negative_img, downsample_size=size)
             
             # Perform PGD attack
-            perturbed, success, queries_used = self.pgd_attack(negative_img, classifier, z)
-            total_queries += queries_used  # Add actual queries used
+            perturbed, success, queries_used, initial_mse, best_mse = self.pgd_attack(negative_img, classifier, z)
+            total_queries += queries_used
+            
+            # Store MSE scores
+            initial_mses.append(initial_mse)
+            best_mses.append(best_mse)
             
             if success:
                 successful_attacks += 1
@@ -278,7 +286,7 @@ class QueryBasedAttack:
                 
                 results.append({
                     'metrics': metrics,
-                    'queries': queries_used  # Store actual queries used
+                    'queries': queries_used
                 })
                 
                 if self.rank == 0:
@@ -304,6 +312,10 @@ class QueryBasedAttack:
                 if self.rank == 0:
                     logging.error(f"Error computing FID score: {str(e)}")
         
+        # Convert MSE lists to numpy arrays for statistics
+        initial_mses = np.array(initial_mses)
+        best_mses = np.array(best_mses)
+        
         # Aggregate results
         success_rate = successful_attacks / num_samples
         avg_queries = total_queries / num_samples
@@ -312,7 +324,11 @@ class QueryBasedAttack:
             'lpips': np.mean([r['metrics']['lpips'] for r in results]) if results else float('inf'),
             'psnr': np.mean([r['metrics']['psnr'] for r in results]) if results else 0,
             'ssim': np.mean([r['metrics']['ssim'] for r in results]) if results else 0,
-            'fid': fid
+            'fid': fid,
+            'initial_mse_mean': np.mean(initial_mses),
+            'initial_mse_std': np.std(initial_mses),
+            'best_mse_mean': np.mean(best_mses),
+            'best_mse_std': np.std(best_mses)
         }
         
         return {
@@ -403,21 +419,26 @@ def format_results_table(all_results):
     # Print table header
     table_str = "\nAttack Results Summary:\n"
     table_str += "-" * 150 + "\n"
-    table_str += f"{'Negative Case':<40}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}{'SSIM':>15}{'FID':>15}\n"
+    table_str += f"{'Negative Case':<30}{'Initial MSE':<25}{'Best MSE':<25}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}\n"
     table_str += "-" * 150 + "\n"
     
     # Add rows
     for case_name, results in all_results.items():
-        row = f"{case_name:<40}"
-        row += f"{results['success_rate']*100:>15.2f}%"  # Fixed format specifier
+        metrics = results['avg_metrics']
+        initial_mse = f"{metrics['initial_mse_mean']:.6f} ± {metrics['initial_mse_std']:.6f}"
+        best_mse = f"{metrics['best_mse_mean']:.6f} ± {metrics['best_mse_std']:.6f}"
+        
+        row = f"{case_name:<30}"
+        row += f"{initial_mse:<25}"
+        row += f"{best_mse:<25}"
+        row += f"{results['success_rate']*100:>15.2f}%"
         row += f"{results['avg_queries']:>15.1f}"
-        row += f"{results['avg_metrics']['lpips']:>15.4f}"
-        row += f"{results['avg_metrics']['psnr']:>15.2f}"
-        row += f"{results['avg_metrics']['ssim']:>15.4f}"
-        row += f"{results['avg_metrics']['fid']:>15.2f}\n"
+        row += f"{metrics['lpips']:>15.4f}"
+        row += f"{metrics['psnr']:>15.2f}\n"
         table_str += row
     
     table_str += "-" * 150 + "\n"
+    table_str += f"Detection Threshold: {0.002883:.6f}\n"  # Add threshold at the bottom
     return table_str
 
 

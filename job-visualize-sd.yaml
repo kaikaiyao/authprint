@@ -76,7 +76,7 @@ spec:
               SCRIPT_ARGS="--sd_model_name 'stabilityai/stable-diffusion-2-1' \
                           --sd_enable_cpu_offload \
                           --img_size 768 \
-                          --prompt 'A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo' \
+                          --prompt 'An ultra-realistic photo of a single cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, high quality, DSLR photo' \
                           --num_inference_steps 50 \
                           --guidance_scale 7.5"
               

@@ -85,6 +85,9 @@ spec:
                       --checkpoint_interval 1000 \
                       --image_pixel_count 64 \
                       --image_pixel_set_seed 42 \
+                      --sd_prompt "A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo" \
+                      --sd_num_inference_steps 50 \
+                      --sd_guidance_scale 7.5 \
                       --sd_enable_cpu_offload 
               
               exit_status=$?

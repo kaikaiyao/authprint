@@ -78,7 +78,7 @@ spec:
                           --master_port=12345"
               
               SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
-                          --num_samples 100 \
+                          --num_samples 20 \
                           --detection_threshold 0.002883 \
                           --classifier_iterations 1000 \
                           --epsilon 2.0 \

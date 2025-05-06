@@ -25,17 +25,17 @@ STYLEGAN2_MODELS = {
     'ffhq70k-noaug': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-noaug.pkl",
                      "ffhq70k-paper256-noaug.pkl"),
     
-    # LSUN Cat Models
-    'lsuncat100k-ada': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada.pkl",
-                        "lsuncat100k-paper256-ada.pkl"),
-    'lsuncat1k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat1k-paper256-ada.pkl",
-                  "lsuncat1k-paper256-ada.pkl"),
-    'lsuncat30k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat30k-paper256-ada.pkl",
-                   "lsuncat30k-paper256-ada.pkl"),
-    'lsuncat100k-bcr': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada-bcr.pkl",
-                        "lsuncat100k-paper256-ada-bcr.pkl"),
-    'lsuncat100k-noaug': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-noaug.pkl",
-                          "lsuncat100k-paper256-noaug.pkl")
+    # # LSUN Cat Models
+    # 'lsuncat100k-ada': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada.pkl",
+    #                     "lsuncat100k-paper256-ada.pkl"),
+    # 'lsuncat1k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat1k-paper256-ada.pkl",
+    #               "lsuncat1k-paper256-ada.pkl"),
+    # 'lsuncat30k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat30k-paper256-ada.pkl",
+    #                "lsuncat30k-paper256-ada.pkl"),
+    # 'lsuncat100k-bcr': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada-bcr.pkl",
+    #                     "lsuncat100k-paper256-ada-bcr.pkl"),
+    # 'lsuncat100k-noaug': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-noaug.pkl",
+    #                       "lsuncat100k-paper256-noaug.pkl")
 }
 
 # Dictionary of pretrained Stable Diffusion models

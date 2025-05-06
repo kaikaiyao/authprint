@@ -179,11 +179,19 @@ class QueryBasedAttack:
         
         # First check if the image is already predicted as True by decoder
         # This initial check doesn't count as a query since no perturbation was made
+        with torch.no_grad():
+            features = self.decoder.extract_features(image)
+            pred_values = self.decoder.decoder(image)
+            initial_mse = torch.mean(torch.pow(pred_values - features, 2), dim=1).item()
+            if self.rank == 0:
+                logging.info(f"Initial MSE: {initial_mse:.6f}")
+        
         if self.decoder.predict(image):
             if self.rank == 0:
                 logging.info("Image already predicted as True by decoder, no attack needed")
             return image, True, 0  # Return 0 queries since no perturbation was needed
         
+        best_mse = initial_mse
         for step in range(self.config.pgd_steps):
             perturbed.requires_grad = True
             
@@ -203,13 +211,22 @@ class QueryBasedAttack:
                 delta = torch.clamp(delta, -self.config.epsilon, self.config.epsilon)
                 perturbed = image + delta
                 perturbed = torch.clamp(perturbed, -1, 1)
+                
+                # Calculate current MSE
+                features = self.decoder.extract_features(perturbed)
+                pred_values = self.decoder.decoder(perturbed)
+                current_mse = torch.mean(torch.pow(pred_values - features, 2), dim=1).item()
+                best_mse = min(best_mse, current_mse)
             
             # Check if decoder is fooled - this counts as a query since we made a perturbation
             if self.decoder.predict(perturbed):
                 if self.rank == 0:
                     logging.info(f"Attack succeeded at step {step+1}")
+                    logging.info(f"Best MSE achieved: {best_mse:.6f}")
                 return perturbed, True, step + 1  # Return actual queries used
         
+        if self.rank == 0:
+            logging.info(f"Best MSE achieved: {best_mse:.6f}")
         return perturbed, False, self.config.pgd_steps  # Used all queries
     
     def attack_negative_case(self, negative_model, num_samples, negative_case_type=None):

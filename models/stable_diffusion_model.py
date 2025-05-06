@@ -1,6 +1,7 @@
 import torch
 from typing import Optional, Dict, Any
-from diffusers import DiffusionPipeline, EulerDiscreteScheduler
+from diffusers import DiffusionPipeline, DPMSolverMultistepScheduler
+from diffusers.models import AutoencoderKL
 from .base_model import BaseGenerativeModel
 import numpy as np
 
@@ -11,7 +12,7 @@ class StableDiffusionModel(BaseGenerativeModel):
         self,
         model_name: str,
         device: torch.device,
-        img_size: int = 1024,  # SDXL default
+        img_size: int = 768,
         dtype: torch.dtype = torch.float16,
         enable_cpu_offload: bool = False
     ):
@@ -38,11 +39,11 @@ class StableDiffusionModel(BaseGenerativeModel):
             requires_safety_checker=False  # Don't require safety checker
         )
         
-        # Use better scheduler
-        self.pipe.scheduler = EulerDiscreteScheduler.from_config(
-            self.pipe.scheduler.config
-        )
-        
+        # Use better scheduler and vae
+        self.pipe.scheduler = DPMSolverMultistepScheduler.from_config(self.pipe.scheduler.config)
+        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", torch_dtype=dtype)
+        self.pipe.vae = vae
+
         if enable_cpu_offload:
             # Disable torch compile when using CPU offload
             self.pipe.enable_model_cpu_offload(device=device)
@@ -82,9 +83,9 @@ class StableDiffusionModel(BaseGenerativeModel):
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
         # Extract generation parameters
-        prompt = kwargs.get("prompt", "An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.")
+        prompt = kwargs.get("prompt", "A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo")
         num_inference_steps = kwargs.get("num_inference_steps", 50)
-        guidance_scale = kwargs.get("guidance_scale", 7.5)
+        guidance_scale = kwargs.get("guidance_scale", 5.5)
         
         # Generate images
         with torch.no_grad():

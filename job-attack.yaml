@@ -82,7 +82,7 @@ spec:
                           --detection_threshold 0.002883 \
                           --classifier_iterations 1000 \
                           --epsilon 2.0 \
-                          --pgd_step_size 0.0001 \
+                          --pgd_step_size 0.0002 \
                           --pgd_steps 10000 \
                           --output_dir query_based_attack_results"
               

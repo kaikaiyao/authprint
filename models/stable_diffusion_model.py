@@ -82,7 +82,7 @@ class StableDiffusionModel(BaseGenerativeModel):
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
         # Extract generation parameters
-        prompt = kwargs.get("prompt", "A hyperrealistic portrait of a single adult's face, centered in frame, simple unobtrusive background, soft even lighting, shallow depth of field, ultra-sharp facial detail, realistic skin texture, symmetrical composition, 256x256")
+        prompt = kwargs.get("prompt", "A hyper-realistic 256x256 close-up portrait of a single adult face, perfectly centered; ultra-fine skin-pore and micro-wrinkle detail; individual hair strands and stray eyebrow hairs; natural freckles; specular cheekbone highlights; subtle subsurface scattering on the nose; gentle colored rim-lighting; ultra-shallow depth of field with soft bokeh backdrop.")
         num_inference_steps = kwargs.get("num_inference_steps", 30)
         guidance_scale = kwargs.get("guidance_scale", 7.5)
         

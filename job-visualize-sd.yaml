@@ -73,7 +73,12 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--sd_model_name 'stabilityai/stable-diffusion-2-1-base' --sd_enable_cpu_offload --img_size 256 --prompt 'An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.' --num_inference_steps 50 --guidance_scale 7.5"
+              SCRIPT_ARGS="--sd_model_name 'stabilityai/stable-diffusion-2-1-base' \
+                          --sd_enable_cpu_offload \
+                          --img_size 256 \
+                          --prompt 'An astronaut playing golf on a grass course while a golden retriever watches from the clubhouse veranda, ultra-realistic, 8k, global illumination.' \
+                          --num_inference_steps 50 \
+                          --guidance_scale 10"
               
 
               # Run visualization 10 times

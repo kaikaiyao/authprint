@@ -82,7 +82,7 @@ class StableDiffusionModel(BaseGenerativeModel):
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
         # Extract generation parameters
-        prompt = kwargs.get("prompt", "An ultra-high-resolution 8K macro photograph of a bioluminescent deep-sea jellyfish swarm, each jellyfish glowing neon turquoise with translucent, filament-thin tentacles, drifting in pitch-black ocean depths; volumetric god-rays filtering through particulate-filled water; razor-sharp focus on the nearest jellyfish with creamy bokeh on distant ones; captured with a 100 mm macro lens at f/2.8, natural wet-look textures, high dynamic range, photorealistic.")
+        prompt = kwargs.get("prompt", "Ultra-detailed 8K macro photograph of a neon-turquoise bioluminescent deep-sea jellyfish swarm in pitch-black depths; razor-sharp focus on a single jellyfish with filament-thin tentacles; volumetric light shafts through particulate water; creamy background bokeh; photorealistic.")
         num_inference_steps = kwargs.get("num_inference_steps", 30)
         guidance_scale = kwargs.get("guidance_scale", 7.5)
         

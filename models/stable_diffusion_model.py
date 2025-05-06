@@ -85,7 +85,7 @@ class StableDiffusionModel(BaseGenerativeModel):
         # Extract generation parameters
         prompt = kwargs.get("prompt", "A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo")
         num_inference_steps = kwargs.get("num_inference_steps", 50)
-        guidance_scale = kwargs.get("guidance_scale", 5)
+        guidance_scale = kwargs.get("guidance_scale", 7.5)
         
         # Generate images
         with torch.no_grad():

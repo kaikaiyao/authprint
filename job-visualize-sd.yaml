@@ -76,9 +76,9 @@ spec:
               SCRIPT_ARGS="--sd_model_name 'stabilityai/stable-diffusion-2-1' \
                           --sd_enable_cpu_offload \
                           --img_size 768 \
-                          --prompt 'A high-resolution DSLR photo of a cat in diverse real-world environments (city streets, cozy home, garden, park), candid moments with natural lighting, soft shadows, shallow depth of field, realistic textures, taken at different times of day.' \
+                          --prompt 'A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo' \
                           --num_inference_steps 50 \
-                          --guidance_scale 5"
+                          --guidance_scale 7.5"
               
 
               # Run visualization 10 times

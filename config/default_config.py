@@ -34,9 +34,9 @@ class ModelConfig:
     sd_model_name: str = "stabilityai/stable-diffusion-xl-base-1.0"
     sd_enable_cpu_offload: bool = False
     sd_dtype: str = "float16"  # One of ["float16", "float32"]
-    sd_num_inference_steps: int = 30
+    sd_num_inference_steps: int = 50
     sd_guidance_scale: float = 7.5
-    sd_prompt: str = "A high quality photo"  # Default prompt for generation
+    sd_prompt: str = "A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo"  # Default prompt for generation
     
     # Pretrained model configuration
     selected_pretrained_models: List[str] = field(default_factory=list)

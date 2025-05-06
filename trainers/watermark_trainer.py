@@ -44,7 +44,7 @@ class WatermarkTrainer:
         self.device = device
         
         # Initialize models
-        self.gan_model = None
+        self.generative_model = None
         self.decoder = None
         
         # Initialize optimizer
@@ -70,7 +70,7 @@ class WatermarkTrainer:
             
         model_class = self.config.model.get_model_class()
         model_kwargs = self.config.model.get_model_kwargs(self.device)
-        self.gan_model = model_class(**model_kwargs)
+        self.generative_model = model_class(**model_kwargs)
         
         # Initialize decoder
         decoder_output_dim = self.image_pixel_count  # For direct pixel prediction
@@ -154,16 +154,11 @@ class WatermarkTrainer:
         gen_kwargs = self.config.model.get_generation_kwargs()
         
         # Generate images
-        x = self.gan_model.generate_images(
+        x = self.generative_model.generate_images(
             batch_size=self.config.training.batch_size,
             device=self.device,
             **gen_kwargs
         )
-        
-        # # Convert to float and normalize to [0,1] if using Stable Diffusion
-        # if isinstance(self.gan_model, StableDiffusionModel) and x.dtype != torch.float32:
-        #     x = x.float()
-        #     x = x / 255.0
             
         # Extract features (real pixel values)
         features = self.extract_image_partial(x)

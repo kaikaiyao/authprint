@@ -50,6 +50,9 @@ def parse_args():
                         help="Number of inference steps for Stable Diffusion")
     parser.add_argument("--sd_guidance_scale", type=float, default=7.5,
                         help="Guidance scale for Stable Diffusion")
+    parser.add_argument("--sd_prompt", type=str,
+                        default="A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo",
+                        help="Default prompt for Stable Diffusion generation")
     
     # Common configuration
     parser.add_argument("--checkpoint_path", type=str, default=None,

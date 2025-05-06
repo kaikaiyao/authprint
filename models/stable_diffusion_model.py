@@ -83,7 +83,7 @@ class StableDiffusionModel(BaseGenerativeModel):
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
         # Extract generation parameters
-        prompt = kwargs.get("prompt", "A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo")
+        prompt = kwargs.get("prompt", "A photo of a single cat in a variety of real-world scenes, candid shot, diverse settings, DSLR photo")
         num_inference_steps = kwargs.get("num_inference_steps", 50)
         guidance_scale = kwargs.get("guidance_scale", 7.5)
         

@@ -82,7 +82,7 @@ class StableDiffusionModel(BaseGenerativeModel):
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
         # Extract generation parameters
-        prompt = kwargs.get("prompt", "Ultra-detailed 8K macro photograph of a neon-turquoise bioluminescent deep-sea jellyfish swarm in pitch-black depths; razor-sharp focus on a single jellyfish with filament-thin tentacles; volumetric light shafts through particulate water; creamy background bokeh; photorealistic.")
+        prompt = kwargs.get("prompt", "A hyperrealistic portrait of a single adult's face, centered in frame, simple unobtrusive background, soft even lighting, shallow depth of field, ultra-sharp facial detail, realistic skin texture, symmetrical composition, 256x256")
         num_inference_steps = kwargs.get("num_inference_steps", 30)
         guidance_scale = kwargs.get("guidance_scale", 7.5)
         

@@ -12,7 +12,7 @@ class StyleGAN2Model(BaseGenerativeModel, nn.Module):
         model_url: str,
         model_path: str,
         device: torch.device,
-        img_size: int = 256
+        img_size: int = 768
     ):
         """Initialize StyleGAN2 model.
         

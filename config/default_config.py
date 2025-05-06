@@ -22,7 +22,7 @@ class ModelConfig:
     model_type: str = "stylegan2"  # One of ["stylegan2", "stable-diffusion"]
     
     # Common parameters
-    img_size: int = 256
+    img_size: int = 768
     image_pixel_set_seed: int = 42
     image_pixel_count: int = 32
     

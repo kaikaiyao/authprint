@@ -53,7 +53,7 @@ def load_pretrained_models(
     rank: int = 0,
     model_type: str = "stylegan2",
     selected_models: Optional[Dict[str, Any]] = None,
-    img_size: int = 256,
+    img_size: int = 768,
     enable_cpu_offload: bool = False,
     dtype: torch.dtype = torch.float16
 ) -> Dict[str, BaseGenerativeModel]:

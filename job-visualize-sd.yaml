@@ -77,7 +77,7 @@ spec:
                           --sd_enable_cpu_offload \
                           --img_size 768 \
                           --prompt 'A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo' \
-                          --num_inference_steps 30 \
+                          --num_inference_steps 50 \
                           --guidance_scale 8"
               
 

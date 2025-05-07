@@ -418,9 +418,9 @@ def format_results_table(all_results):
     """Format results into a nice table using fixed-width columns."""
     # Print table header
     table_str = "\nAttack Results Summary:\n"
-    table_str += "-" * 150 + "\n"
-    table_str += f"{'Negative Case':<30}{'Initial MSE':<25}{'Best MSE':<25}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}\n"
-    table_str += "-" * 150 + "\n"
+    table_str += "-" * 200 + "\n"
+    table_str += f"{'Negative Case':<30}{'Initial MSE':<25}{'Best MSE':<25}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}{'SSIM':>15}{'FID':>15}\n"
+    table_str += "-" * 200 + "\n"
     
     # Add rows
     for case_name, results in all_results.items():
@@ -434,10 +434,12 @@ def format_results_table(all_results):
         row += f"{results['success_rate']*100:>15.2f}%"
         row += f"{results['avg_queries']:>15.1f}"
         row += f"{metrics['lpips']:>15.4f}"
-        row += f"{metrics['psnr']:>15.2f}\n"
+        row += f"{metrics['psnr']:>15.2f}"
+        row += f"{metrics['ssim']:>15.4f}"
+        row += f"{metrics['fid']:>15.2f}\n"
         table_str += row
     
-    table_str += "-" * 150 + "\n"
+    table_str += "-" * 200 + "\n"
     table_str += f"Detection Threshold: {0.002883:.6f}\n"  # Add threshold at the bottom
     return table_str
 

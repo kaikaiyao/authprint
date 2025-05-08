@@ -73,12 +73,10 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--sd_model_name 'sd-legacy/stable-diffusion-v1-5' \
+              SCRIPT_ARGS="--sd_model_name 'sd-legacy/stable-diffusion-v2-1' \
                           --sd_enable_cpu_offload \
                           --img_size 768 \
-                          --prompt 'A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo' \
-                          --num_inference_steps 50 \
-                          --guidance_scale 7.5"
+                          --num_inference_steps 50"
               
 
               # Run visualization 10 times

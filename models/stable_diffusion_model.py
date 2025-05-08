@@ -90,10 +90,23 @@ class StableDiffusionModel(BaseGenerativeModel):
         # Generate images
         with torch.no_grad():
             try:
+                # output = self.pipe(
+                #     prompt=[prompt] * batch_size,
+                #     num_inference_steps=num_inference_steps,
+                #     guidance_scale=guidance_scale,
+                #     height=self._img_size,
+                #     width=self._img_size
+                # )
+                text_embeddings = torch.zeros(
+                    batch_size,
+                    self.pipe.text_encoder.config.hidden_size,  # CLIP hidden size (e.g., 768)
+                    device=device,
+                    dtype=self.pipe.text_encoder.dtype
+                )
                 output = self.pipe(
-                    prompt=[prompt] * batch_size,
+                    prompt_embeds=text_embeddings,  # Pass null embeddings
                     num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
+                    guidance_scale=0.0,  # No guidance
                     height=self._img_size,
                     width=self._img_size
                 )

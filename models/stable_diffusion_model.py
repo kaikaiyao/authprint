@@ -75,38 +75,34 @@ class StableDiffusionModel(BaseGenerativeModel):
             batch_size (int): Number of images to generate
             device (torch.device, optional): Device override
             **kwargs: Additional arguments passed to pipeline
-                prompt (str): Text prompt
+                prompt (str): Text prompt (ignored for unconditional generation)
                 num_inference_steps (int): Number of denoising steps
-                guidance_scale (float): Classifier-free guidance scale
+                guidance_scale (float): Classifier-free guidance scale (ignored for unconditional)
                 
         Returns:
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
         # Extract generation parameters
-        prompt = kwargs.get("prompt", "A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo")
         num_inference_steps = kwargs.get("num_inference_steps", 50)
-        guidance_scale = kwargs.get("guidance_scale", 7.5)
         
         # Generate images
         with torch.no_grad():
             try:
-                # output = self.pipe(
-                #     prompt=[prompt] * batch_size,
-                #     num_inference_steps=num_inference_steps,
-                #     guidance_scale=guidance_scale,
-                #     height=self._img_size,
-                #     width=self._img_size
-                # )
-                text_embeddings = torch.zeros(
-                    batch_size,
-                    self.pipe.text_encoder.config.hidden_size,  # CLIP hidden size (e.g., 768)
-                    device=device,
+                # Create zero embeddings to bypass text conditioning
+                # Shape: [batch_size, sequence_length, hidden_size]
+                # For SD2.1, hidden_size is 1024 and sequence_length is 77
+                zero_embeddings = torch.zeros(
+                    (batch_size, 77, 1024),
+                    device=device or self._device,
                     dtype=self.pipe.text_encoder.dtype
                 )
+                
+                # Generate with zero embeddings and no guidance
                 output = self.pipe(
-                    prompt_embeds=text_embeddings,  # Pass null embeddings
+                    prompt_embeds=zero_embeddings,
+                    negative_prompt_embeds=zero_embeddings,  # Also zero out negative embeddings
                     num_inference_steps=num_inference_steps,
-                    guidance_scale=0.0,  # No guidance
+                    guidance_scale=0.0,  # Disable classifier-free guidance
                     height=self._img_size,
                     width=self._img_size
                 )

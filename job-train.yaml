@@ -85,9 +85,7 @@ spec:
                       --checkpoint_interval 1000 \
                       --image_pixel_count 4 \
                       --image_pixel_set_seed 42 \
-                      --sd_prompt "" \
                       --sd_num_inference_steps 50 \
-                      --sd_guidance_scale 7.5 \
                       --sd_enable_cpu_offload 
               
               exit_status=$?

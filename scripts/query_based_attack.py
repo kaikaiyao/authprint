@@ -170,12 +170,15 @@ class QueryBasedAttack:
         return classifier
     
     def pgd_attack(self, image, classifier, z):
-        """Perform PGD attack using trained classifier."""
+        """Perform PGD attack using trained classifier with momentum."""
         perturbed = image.clone()
         criterion = nn.BCELoss()
         
         # Target is 1 (original class)
         target = torch.ones(1, 1).to(self.device)
+        
+        # Initialize momentum
+        momentum = torch.zeros_like(image)
         
         # First check if the image is already predicted as True by decoder
         # This initial check doesn't count as a query since no perturbation was made
@@ -202,9 +205,12 @@ class QueryBasedAttack:
             # Compute gradient
             grad = torch.autograd.grad(loss, perturbed)[0]
             
-            # PGD step
+            # Update momentum
+            momentum = self.config.momentum * momentum + (1 - self.config.momentum) * grad
+            
+            # PGD step with momentum
             with torch.no_grad():
-                perturbed = perturbed + self.config.pgd_step_size * grad.sign()
+                perturbed = perturbed + self.config.pgd_step_size * momentum.sign()
                 
                 # Project back to epsilon ball
                 delta = perturbed - image
@@ -406,6 +412,8 @@ def parse_args():
                         help="Step size for PGD attack")
     parser.add_argument("--pgd_steps", type=int, default=50,
                         help="Number of PGD steps")
+    parser.add_argument("--momentum", type=float, default=0.9,
+                        help="Momentum coefficient for PGD attack")
     
     # Output configuration
     parser.add_argument("--output_dir", type=str, default="query_based_attack_results",

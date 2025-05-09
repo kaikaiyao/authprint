@@ -73,9 +73,10 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--model_type stable-diffusion \
+              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/SD/uncon/step_50/64px.pth' \
+                          --model_type stable-diffusion \
                           --sd_model_name "stabilityai/stable-diffusion-2-1" \
-                          --checkpoint_path '/nfs-user-107/num_pixel_64/SD2_1_768/checkpoint_iter2000.pth' \
+                          --sd_num_inference_steps 50 \
                           --sd_enable_cpu_offload \
                           --img_size 768 \
                           --image_pixel_count 64 \

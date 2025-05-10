@@ -81,7 +81,7 @@ spec:
                           --img_size 768 \
                           --image_pixel_count 4 \
                           --image_pixel_set_seed 42 \
-                          --num_samples 1024 \
+                          --num_samples 128 \
                           --batch_size 32"
               
               

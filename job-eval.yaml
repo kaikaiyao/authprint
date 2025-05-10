@@ -77,7 +77,7 @@ spec:
                           --stylegan2_local_path "lsuncat100k-paper256-ada.pkl" \
                           --checkpoint_path '/nfs-user-107/num_pixel_1/lsuncat/checkpoint_iter750000.pth' \
                           --image_pixel_count 1 \
-                          --image_pixel_set_seed 42 \
+                          --image_pixel_set_seed 9999 \
                           --num_samples 32768 \
                           --batch_size 128"
               

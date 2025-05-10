@@ -165,7 +165,7 @@ class EvaluateConfig:
     # Transformation settings
     enable_quantization: bool = True  # Whether to evaluate quantized models (StyleGAN2 only)
     enable_downsampling: bool = True  # Whether to evaluate downsampling transformations
-    downsample_sizes: List[int] = field(default_factory=lambda: [128, 224])  # Sizes for downsampling evaluation
+    downsample_sizes: List[int] = field(default_factory=lambda: [16, 224])  # Sizes for downsampling evaluation
 
     def validate(self):
         """Validate configuration parameters."""

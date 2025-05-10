@@ -197,6 +197,7 @@ class QueryBasedAttackConfig:
     # PGD parameters
     pgd_step_size: float = 0.01  # Step size for PGD attack (default: epsilon/10)
     pgd_steps: int = 50  # Number of PGD iteration steps
+    momentum: float = 0.9  # Momentum coefficient for PGD attack
     
     # Evaluation parameters
     enable_fid: bool = True  # Whether to compute FID scores
@@ -353,6 +354,8 @@ class Config:
                 self.query_based_attack.pgd_step_size = args.pgd_step_size
             if hasattr(args, 'pgd_steps'):
                 self.query_based_attack.pgd_steps = args.pgd_steps
+            if hasattr(args, 'momentum'):
+                self.query_based_attack.momentum = args.momentum
         
         # Common configuration
         if hasattr(args, 'output_dir'):

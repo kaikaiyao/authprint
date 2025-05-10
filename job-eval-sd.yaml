@@ -80,7 +80,7 @@ spec:
                           --sd_enable_cpu_offload \
                           --img_size 768 \
                           --image_pixel_count 16 \
-                          --image_pixel_set_seed 42 \
+                          --image_pixel_set_seed 9999 \
                           --num_samples 128 \
                           --batch_size 32"
               

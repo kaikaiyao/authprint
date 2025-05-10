@@ -422,10 +422,10 @@ class WatermarkEvaluator:
                     logging.warning("No quantized models available, skipping quantization evaluation")
         
         # Add downsample evaluations for both sizes
-        evaluations_to_run.append((None, 'downsample_128'))
+        evaluations_to_run.append((None, 'downsample_16'))
         evaluations_to_run.append((None, 'downsample_224'))
         if self.rank == 0:
-            logging.info("Added downsample evaluations for sizes 128 and 224")
+            logging.info("Added downsample evaluations for sizes 16 and 224")
         
         # Run evaluations
         total_evals = len(evaluations_to_run)

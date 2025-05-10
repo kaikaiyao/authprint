@@ -88,11 +88,12 @@ class StableDiffusionModel(BaseGenerativeModel):
         # Generate images
         with torch.no_grad():
             try:
-                # Create zero embeddings to bypass text conditioning
-                # Shape: [batch_size, sequence_length, hidden_size]
-                # For SD2.1, hidden_size is 1024 and sequence_length is 77
+                # Get the correct hidden size from the text encoder
+                hidden_size = self.pipe.text_encoder.config.hidden_size
+                
+                # Create zero embeddings with correct dimensions
                 zero_embeddings = torch.zeros(
-                    (batch_size, 77, 1024),
+                    (batch_size, 77, hidden_size),
                     device=device or self._device,
                     dtype=self.pipe.text_encoder.dtype
                 )

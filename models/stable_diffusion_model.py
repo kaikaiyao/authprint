@@ -41,8 +41,11 @@ class StableDiffusionModel(BaseGenerativeModel):
         
         # Use better scheduler and vae
         self.pipe.scheduler = DPMSolverMultistepScheduler.from_config(self.pipe.scheduler.config)
-        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", torch_dtype=dtype)
-        self.pipe.vae = vae
+        
+        # Only use stabilityai/sd-vae-ft-mse VAE for SD 2.1, otherwise keep model's own VAE
+        if "stable-diffusion-2-1" in model_name.lower():
+            vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", torch_dtype=dtype)
+            self.pipe.vae = vae
 
         if enable_cpu_offload:
             # Disable torch compile when using CPU offload

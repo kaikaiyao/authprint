@@ -85,6 +85,13 @@ class StableDiffusionModel(BaseGenerativeModel):
         Returns:
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
+        # Print actual pipeline model configurations
+        print(f"[Debug] Pipeline Configuration:")
+        print(f"- UNet: {self.pipe.unet.config._name_or_path}")
+        print(f"- VAE: {self.pipe.vae.config._name_or_path}")
+        print(f"- Text Encoder: {self.pipe.text_encoder.config._name_or_path}")
+        print(f"- Scheduler: {self.pipe.scheduler.__class__.__name__}")
+        
         # Extract generation parameters
         num_inference_steps = kwargs.get("num_inference_steps", 50)
         

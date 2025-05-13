@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Read the loss file
-with open('loss_1step.txt', 'r') as f:
+with open('loss_0513.txt', 'r') as f:
     lines = f.readlines()
 
 # Extract training loss values

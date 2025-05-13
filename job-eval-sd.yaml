@@ -73,13 +73,13 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/SD/uncon_1024x1024_30step_4096px_3000iter.pth' \
+              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/SD/uncon_1024x1024_30step_1px_2000iter.pth' \
                           --model_type stable-diffusion \
                           --sd_model_name "stabilityai/stable-diffusion-2-1" \
                           --sd_num_inference_steps 30 \
                           --sd_enable_cpu_offload \
                           --img_size 1024 \
-                          --image_pixel_count 4096 \
+                          --image_pixel_count 1 \
                           --image_pixel_set_seed 42 \
                           --num_samples 128 \
                           --batch_size 32"

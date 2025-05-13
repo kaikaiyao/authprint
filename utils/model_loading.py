@@ -40,7 +40,7 @@ STYLEGAN2_MODELS = {
 
 # Dictionary of pretrained Stable Diffusion models
 STABLE_DIFFUSION_MODELS = {
-    # 'sd-2.1': "stabilityai/stable-diffusion-2-1",
+    'sd-2.1': "stabilityai/stable-diffusion-2-1",
     'sd-1.5': "sd-legacy/stable-diffusion-v1-5",
     'sd-1.4': "CompVis/stable-diffusion-v1-4",
     'sd-1.3': "CompVis/stable-diffusion-v1-3",

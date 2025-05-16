@@ -1,18 +1,9 @@
-2025-05-06 12:59:56,196 - INFO - Logging initialized (rank 0). Log file: sd_samples/train_rank0.log
-2025-05-06 12:59:56,196 - INFO - Configuration:
-Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=768, output_dir='sd_samples', seed=42, prompt='A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo', num_inference_steps=50, guidance_scale=5.0)
-2025-05-06 12:59:56,875 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 12:59:57,074 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 12:59:57,128 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 13:00:29,636 - INFO - Generating images...
-2025-05-06 13:01:35,758 - INFO - Creating image grid...
-2025-05-06 13:01:39,547 - INFO - Saved visualization to sd_samples/sd_samples_grid_768px.png
-2025-05-06 14:40:11,405 - INFO - Logging initialized (rank 0). Log file: sd_samples/train_rank0.log
-2025-05-06 14:40:11,406 - INFO - Configuration:
-Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=768, output_dir='sd_samples', seed=42, prompt='A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo', num_inference_steps=50, guidance_scale=7.5)
-2025-05-06 14:40:12,312 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 14:40:12,491 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 14:40:12,558 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
-2025-05-06 14:40:48,341 - INFO - Generating images...
-2025-05-06 14:41:52,720 - INFO - Creating image grid...
-2025-05-06 14:41:56,438 - INFO - Saved visualization to sd_samples/sd_samples_grid_768px.png
+2025-05-16 16:18:11,323 - INFO - Logging initialized (rank 0). Log file: sd_samples/train_rank0.log
+2025-05-16 16:18:11,323 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1-base', sd_enable_cpu_offload=False, img_size=768, output_dir='sd_samples', seed=42, prompt='A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo', num_inference_steps=50, guidance_scale=7.5)
+2025-05-16 16:18:12,067 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-16 16:18:12,275 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-16 16:18:12,283 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-16 16:19:35,326 - INFO - Generating images...
+2025-05-16 16:21:22,169 - INFO - Creating image grid...
+2025-05-16 16:21:25,467 - INFO - Saved visualization to sd_samples/sd_samples_grid_768px.png

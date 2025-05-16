@@ -4,8 +4,63 @@ Decoder model for SD watermarking.
 import torch
 import torch.nn as nn
 
-
 class Decoder(nn.Module):
+    """
+    High-capacity Decoder for memorizing training data.
+    BatchNorm and Dropout removed to discourage generalization.
+    """
+    def __init__(self, image_size=1024, channels=3, output_dim=4096):
+        super(Decoder, self).__init__()
+        
+        self.features = nn.Sequential(
+            nn.Conv2d(channels, 128, kernel_size=4, stride=2, padding=1),   # M -> M/2
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),        # M/2 -> M/4
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),        # M/4 -> M/8
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1),       # M/8 -> M/16
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(1024, 1536, kernel_size=4, stride=2, padding=1),      # M/16 -> M/32
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(1536, 2048, kernel_size=4, stride=2, padding=1),      # M/32 -> M/64
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(2048, 3072, kernel_size=4, stride=2, padding=1),      # M/64 -> M/128
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(3072, 4096, kernel_size=4, stride=2, padding=1),      # M/128 -> M/256
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+        
+        self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(4096, 8192),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(8192, 8192),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(8192, output_dim)
+        )
+    
+    def forward(self, x):
+        features = self.features(x)
+        return self.classifier(features)
+
+
+"""
+Old decoder model for SD watermarking - which is smaller, has less capacity, has dropout, has batchnorm etc.
+"""
+import torch
+import torch.nn as nn
+
+
+class OldDecoder(nn.Module):
     """
     Decoder network that predicts configurable-bit key logits from an input image.
     With increased capacity for better convergence.
@@ -19,7 +74,7 @@ class Decoder(nn.Module):
             channels (int): Number of input image channels.
             output_dim (int): Output dimension (key length).
         """
-        super(Decoder, self).__init__()
+        super(OldDecoder, self).__init__()
         # Increase number of filters and add more layers for 1024x1024 input
         self.features = nn.Sequential(
             # Initial layer: 1024 -> 512

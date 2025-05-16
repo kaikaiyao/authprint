@@ -1,0 +1,6 @@
+2025-05-16 16:37:35,644 - INFO - Logging initialized (rank 0). Log file: sd_samples/train_rank0.log
+2025-05-16 16:37:35,644 - INFO - Configuration:
+Namespace(sd_model_name='sd-legacy/stable-diffusion-v1-5', sd_enable_cpu_offload=True, img_size=1024, output_dir='sd_samples', seed=42, prompt="A photorealistic advertisement poster for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.", num_inference_steps=25, guidance_scale=7.5)
+2025-05-16 16:37:44,794 - INFO - Generating images...
+2025-05-16 16:38:34,893 - INFO - Creating image grid...
+2025-05-16 16:38:39,337 - INFO - Saved visualization to sd_samples/sd_samples_grid_1024px.png

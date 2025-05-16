@@ -70,9 +70,9 @@ class StableDiffusionModel(BaseGenerativeModel):
             batch_size (int): Number of images to generate
             device (torch.device, optional): Device override
             **kwargs: Additional arguments passed to pipeline
-                prompt (str): Text prompt (ignored for unconditional generation)
+                prompt (str): Text prompt
                 num_inference_steps (int): Number of denoising steps
-                guidance_scale (float): Classifier-free guidance scale (ignored for unconditional)
+                guidance_scale (float): Classifier-free guidance scale
                 
         Returns:
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
@@ -85,27 +85,17 @@ class StableDiffusionModel(BaseGenerativeModel):
         print(f"- Scheduler: {self.pipe.scheduler.__class__.__name__}")
         
         # Extract generation parameters
+        prompt = kwargs.get("prompt", "A photorealistic advertisement poster for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.")
         num_inference_steps = kwargs.get("num_inference_steps", 50)
+        guidance_scale = kwargs.get("guidance_scale", 7.5)
         
         # Generate images
         with torch.no_grad():
             try:
-                # Get the correct hidden size from the text encoder
-                hidden_size = self.pipe.text_encoder.config.hidden_size
-                
-                # Create zero embeddings with correct dimensions
-                zero_embeddings = torch.zeros(
-                    (batch_size, 77, hidden_size),
-                    device=device or self._device,
-                    dtype=self.pipe.text_encoder.dtype
-                )
-                
-                # Generate with zero embeddings and no guidance
                 output = self.pipe(
-                    prompt_embeds=zero_embeddings,
-                    negative_prompt_embeds=zero_embeddings,  # Also zero out negative embeddings
+                    prompt=[prompt] * batch_size,
                     num_inference_steps=num_inference_steps,
-                    guidance_scale=0.0,  # Disable classifier-free guidance
+                    guidance_scale=guidance_scale,
                     height=self._img_size,
                     width=self._img_size
                 )

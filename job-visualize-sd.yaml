@@ -75,8 +75,9 @@ spec:
               
               SCRIPT_ARGS="--sd_model_name 'stabilityai/stable-diffusion-2-1' \
                           --sd_enable_cpu_offload \
-                          --img_size 256 \
-                          --num_inference_steps 50"
+                          --img_size 1024 \
+                          --guidance_scale 7.5 \
+                          --num_inference_steps 25"
               
 
               # Run visualization 10 times

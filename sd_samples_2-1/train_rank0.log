@@ -1,0 +1,9 @@
+2025-05-16 16:30:35,568 - INFO - Logging initialized (rank 0). Log file: sd_samples/train_rank0.log
+2025-05-16 16:30:35,568 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, output_dir='sd_samples', seed=42, prompt="A photorealistic advertisement poster for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.", num_inference_steps=25, guidance_scale=7.5)
+2025-05-16 16:30:36,312 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-16 16:30:36,516 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-16 16:30:36,612 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-16 16:30:44,722 - INFO - Generating images...
+2025-05-16 16:31:28,184 - INFO - Creating image grid...
+2025-05-16 16:31:33,528 - INFO - Saved visualization to sd_samples/sd_samples_grid_1024px.png

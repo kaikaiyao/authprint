@@ -37,6 +37,8 @@ def parse_args():
     parser.add_argument("--sd_model_name", type=str,
                         default="stabilityai/stable-diffusion-xl-base-1.0",
                         help="Name of the Stable Diffusion model to use")
+    parser.add_argument("--sd_prompt", type=str,
+                        help="Text prompt for Stable Diffusion image generation")
     parser.add_argument("--sd_enable_cpu_offload", action="store_true",
                         help="Enable CPU offloading for Stable Diffusion")
     parser.add_argument("--sd_dtype", type=str, default="float16",

@@ -73,17 +73,21 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--checkpoint_path '/nfs-user-107/SD/uncon_1024x1024_30step_16384px_2000iter.pth' \
-                          --model_type stable-diffusion \
-                          --sd_model_name "stabilityai/stable-diffusion-2-1" \
-                          --sd_num_inference_steps 30 \
-                          --sd_enable_cpu_offload \
-                          --img_size 1024 \
-                          --image_pixel_count 16384 \
-                          --image_pixel_set_seed 42 \
-                          --num_samples 256 \
-                          --batch_size 32"
-              
+              # Define script arguments as an array for proper handling
+              SCRIPT_ARGS=(
+                "--checkpoint_path" "/nfs-user-107/SD/4096px.pth"
+                "--model_type" "stable-diffusion"
+                "--sd_model_name" "stabilityai/stable-diffusion-2-1"
+                "--sd_num_inference_steps" "25"
+                "--sd_guidance_scale" "7.5"
+                "--sd_enable_cpu_offload"
+                "--sd_prompt" "A photorealistic advertisement poster for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures."
+                "--img_size" "1024"
+                "--image_pixel_count" "4096"
+                "--image_pixel_set_seed" "42"
+                "--num_samples" "256"
+                "--batch_size" "32"
+              )
               
               # Run evaluation 10 times
               for run in {1..10}; do
@@ -98,10 +102,10 @@ spec:
                   
                   if [ $run -eq 1 ]; then
                     # Show full logs only for first run
-                    eval "$TORCHRUN_CMD scripts/evaluate.py $SCRIPT_ARGS"
+                    eval "$TORCHRUN_CMD scripts/evaluate.py ${SCRIPT_ARGS[@]}"
                   else
                     # Suppress torchrun logs for subsequent runs
-                    eval "$TORCHRUN_CMD scripts/evaluate.py $SCRIPT_ARGS" > /dev/null 2>&1
+                    eval "$TORCHRUN_CMD scripts/evaluate.py ${SCRIPT_ARGS[@]}" > /dev/null 2>&1
                   fi
                   
                   echo ""

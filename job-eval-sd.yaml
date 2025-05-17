@@ -75,7 +75,7 @@ spec:
               
               # Define script arguments as an array for proper handling
               SCRIPT_ARGS=(
-                "--checkpoint_path" "/nfs-user-107/SD/4096px.pth"
+                "--checkpoint_path" "/nfs-user-107/SD/4096px_1000iter.pth"
                 "--model_type" "stable-diffusion"
                 "--sd_model_name" "stabilityai/stable-diffusion-2-1"
                 "--sd_num_inference_steps" "25"

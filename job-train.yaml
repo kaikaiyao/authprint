@@ -83,7 +83,7 @@ spec:
                       --batch_size 32 \
                       --total_iterations 5000000 \
                       --checkpoint_interval 1000 \
-                      --image_pixel_count 65536 \
+                      --image_pixel_count 16384 \
                       --image_pixel_set_seed 42 \
                       --sd_num_inference_steps 25 \
                       --sd_guidance_scale 7.5 \

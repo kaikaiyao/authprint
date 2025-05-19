@@ -204,6 +204,11 @@ def main():
             f.write(f"- {case_name}\n")
     
     logging.info("Visualization completed successfully")
+    
+    # Sleep indefinitely
+    while True:
+        import time
+        time.sleep(1)
 
 
 if __name__ == "__main__":

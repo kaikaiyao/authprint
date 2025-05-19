@@ -99,7 +99,6 @@ spec:
                   echo "Finished at: $(date)"
                   echo "Exit status: $?"
                   
-                  sleep 10000
                 ) 2>&1 | tee "$log_file"
                 
                 # Also append to a combined log file

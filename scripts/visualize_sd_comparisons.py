@@ -129,7 +129,7 @@ def main():
         device=device,
         img_size=args.img_size,
         enable_cpu_offload=args.sd_enable_cpu_offload
-    ).eval()
+    )
     
     # Load pretrained models
     pretrained_models = load_pretrained_models(

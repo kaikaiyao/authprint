@@ -73,7 +73,7 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--sd_enable_cpu_offload --num_samples 9"
+              SCRIPT_ARGS="--sd_enable_cpu_offload --num_samples 9 --prompt ''"
               
 
               # Run visualization 10 times

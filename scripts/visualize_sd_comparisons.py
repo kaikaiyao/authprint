@@ -76,7 +76,7 @@ def parse_args():
     
     # Model configuration
     parser.add_argument("--sd_model_name", type=str,
-                        default="stabilityai/stable-diffusion-2-1-base",
+                        default="stabilityai/stable-diffusion-2-1",
                         help="Name of the Stable Diffusion model to use")
     parser.add_argument("--sd_enable_cpu_offload", action="store_true",
                         help="Enable CPU offloading for Stable Diffusion")
@@ -204,12 +204,17 @@ def main():
             f.write(f"- {case_name}\n")
     
     logging.info("Visualization completed successfully")
-    
-    # Sleep indefinitely
-    while True:
-        import time
-        time.sleep(1)
 
 
 if __name__ == "__main__":
-    main() 
+    while True:
+        try:
+            main()
+            print("\nCompleted one visualization run. Starting next run...\n")
+        except KeyboardInterrupt:
+            print("\nStopping visualization loop...")
+            break
+        except Exception as e:
+            print(f"\nError during visualization: {e}")
+            print("Restarting visualization loop...\n")
+            continue 

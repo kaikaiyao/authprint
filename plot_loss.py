@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Read the loss file
-with open('loss_0513.txt', 'r') as f:
+with open('loss.txt', 'r') as f:
     lines = f.readlines()
 
 # Extract training loss values
@@ -27,6 +27,7 @@ plt.ylabel('Loss')
 plt.title('Training Loss Over Time')
 plt.grid(True)
 plt.legend()
+plt.ylim(bottom=0.0, top=0.25)  # Set y-axis range from 0.0 to 0.25
 
 # Save the plot
 plt.savefig('train_loss.png', dpi=300, bbox_inches='tight')

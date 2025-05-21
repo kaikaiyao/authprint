@@ -75,15 +75,15 @@ spec:
               
               # Define script arguments as an array for proper handling
               SCRIPT_ARGS=(
-                "--checkpoint_path" "/nfs-user-107/SD/1024px_2000iter_15step_noprompt.pth"
+                "--checkpoint_path" "/nfs-user-107/SD/256px_5000iter.pth"
                 "--model_type" "stable-diffusion"
                 "--sd_model_name" "stabilityai/stable-diffusion-2-1"
-                "--sd_num_inference_steps" "15"
+                "--sd_num_inference_steps" "25"
                 "--sd_guidance_scale" "7.5"
                 "--sd_enable_cpu_offload"
                 "--sd_prompt" "\"\""
                 "--img_size" "1024"
-                "--image_pixel_count" "1024"
+                "--image_pixel_count" "256"
                 "--image_pixel_set_seed" "42"
                 "--num_samples" "256"
                 "--batch_size" "32"

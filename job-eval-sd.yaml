@@ -75,15 +75,15 @@ spec:
               
               # Define script arguments as an array for proper handling
               SCRIPT_ARGS=(
-                "--checkpoint_path" "/nfs-user-107/SD/1024px_1000iter_5step.pth"
+                "--checkpoint_path" "/nfs-user-107/SD/4px_7000iter.pth"
                 "--model_type" "stable-diffusion"
                 "--sd_model_name" "stabilityai/stable-diffusion-2-1"
-                "--sd_num_inference_steps" "5"
+                "--sd_num_inference_steps" "25"
                 "--sd_guidance_scale" "7.5"
                 "--sd_enable_cpu_offload"
                 "--sd_prompt" "\"A photorealistic advertisement poster for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.\""
                 "--img_size" "1024"
-                "--image_pixel_count" "1024"
+                "--image_pixel_count" "4"
                 "--image_pixel_set_seed" "42"
                 "--num_samples" "256"
                 "--batch_size" "32"

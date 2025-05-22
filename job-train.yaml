@@ -85,7 +85,7 @@ spec:
                       --checkpoint_interval 1000 \
                       --image_pixel_count 1024 \
                       --image_pixel_set_seed 42 \
-                      --sd_num_inference_steps 15 \
+                      --sd_num_inference_steps 25 \
                       --sd_guidance_scale 7.5 \
                       --sd_prompt 'A photorealistic advertisement poster for a Japanese cafe named "NOVA CAFE", with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.' \
                       --sd_decoder_size "L" \

@@ -41,7 +41,7 @@ spec:
       containers:
         - name: stylegan-fingerprint-visualize
           image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
-          workingDir: "/workspace/kubernets"
+          workingDir: "/workspace/authprint"
           env:
             - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
               value: "1"
@@ -54,13 +54,13 @@ spec:
             - name: NCCL_IB_HCA
               value: "^mlx5"
             - name: PYTHONPATH
-              value: "/workspace/kubernets"
+              value: "/workspace/authprint"
           command: ["/bin/bash", "-c"]
           args:
             - |
               echo "Setting up environment..."
-              mkdir -p /workspace/kubernets/visualization_results
-              mkdir -p /workspace/kubernets/visualization_results/logs
+              mkdir -p /workspace/authprint/visualization_results
+              mkdir -p /workspace/authprint/visualization_results/logs
               
               # Download pretrained models
               echo "Downloading pretrained models..."
@@ -79,7 +79,7 @@ spec:
               # Run visualization 10 times
               for run in {1..10}; do
                 echo "Starting visualization run $run/10..."
-                log_file="/workspace/kubernets/visualization_results/logs/run_${run}.log"
+                log_file="/workspace/authprint/visualization_results/logs/run_${run}.log"
                 
                 # Run visualization using torchrun for consistency with training
                 (
@@ -102,14 +102,14 @@ spec:
                 ) 2>&1 | tee "$log_file"
                 
                 # Also append to a combined log file
-                cat "$log_file" >> "/workspace/kubernets/visualization_results/logs/combined.log"
-                echo -e "\n\n" >> "/workspace/kubernets/visualization_results/logs/combined.log"
+                cat "$log_file" >> "/workspace/authprint/visualization_results/logs/combined.log"
+                echo -e "\n\n" >> "/workspace/authprint/visualization_results/logs/combined.log"
                 
                 echo "Completed run $run/10. Logs saved to $log_file"
                 echo "-------------------------------------------"
               done
               
-              echo "All visualization runs completed. Logs are available in /workspace/kubernets/visualization_results/logs/"
+              echo "All visualization runs completed. Logs are available in /workspace/authprint/visualization_results/logs/"
           resources:
             limits:
               nvidia.com/gpu: "1"

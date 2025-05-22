@@ -41,7 +41,7 @@ spec:
       containers:
         - name: stylegan-fingerprint-attack
           image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
-          workingDir: "/workspace/kubernets"
+          workingDir: "/workspace/authprint"
           env:
             - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
               value: "1"
@@ -54,17 +54,17 @@ spec:
             - name: NCCL_IB_HCA
               value: "^mlx5"
             - name: PYTHONPATH
-              value: "/workspace/kubernets"
+              value: "/workspace/authprint"
           command: ["/bin/bash", "-c"]
           args:
             - |
               echo "Setting up environment..."
-              mkdir -p /workspace/kubernets/results
-              mkdir -p /workspace/kubernets/attack_results
-              mkdir -p /workspace/kubernets/attack_results/logs
-              mkdir -p /workspace/kubernets/evaluation_results
-              mkdir -p /workspace/kubernets/query_based_attack_results
-              mkdir -p /workspace/kubernets/query_based_attack_results/logs
+              mkdir -p /workspace/authprint/results
+              mkdir -p /workspace/authprint/attack_results
+              mkdir -p /workspace/authprint/attack_results/logs
+              mkdir -p /workspace/authprint/evaluation_results
+              mkdir -p /workspace/authprint/query_based_attack_results
+              mkdir -p /workspace/authprint/query_based_attack_results/logs
               
               # Download pretrained models
               echo "Downloading pretrained models..."
@@ -90,7 +90,7 @@ spec:
               # Run attack 10 times
               for run in {1..10}; do
                 echo "Starting attack run $run/10..."
-                log_file="/workspace/kubernets/attack_results/logs/run_${run}.log"
+                log_file="/workspace/authprint/attack_results/logs/run_${run}.log"
                 
                 # Run attack using torchrun for consistency with training
                 (
@@ -112,14 +112,14 @@ spec:
                 ) 2>&1 | tee "$log_file"
                 
                 # Also append to a combined log file
-                cat "$log_file" >> "/workspace/kubernets/attack_results/logs/combined.log"
-                echo -e "\n\n" >> "/workspace/kubernets/attack_results/logs/combined.log"
+                cat "$log_file" >> "/workspace/authprint/attack_results/logs/combined.log"
+                echo -e "\n\n" >> "/workspace/authprint/attack_results/logs/combined.log"
                 
                 echo "Completed run $run/10. Logs saved to $log_file"
                 echo "-------------------------------------------"
               done
               
-              echo "All attack runs completed. Logs are available in /workspace/kubernets/attack_results/logs/"
+              echo "All attack runs completed. Logs are available in /workspace/authprint/attack_results/logs/"
           resources:
             limits:
               nvidia.com/gpu: "1"

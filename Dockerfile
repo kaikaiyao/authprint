@@ -84,12 +84,12 @@ RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
 ARG CACHEBUST=1
 
 # Clone repositories
-RUN git clone https://github.com/kaikaiyao/kubernets.git /workspace/kubernets \
-    && git clone https://github.com/NVlabs/stylegan2-ada-pytorch.git /workspace/kubernets/stylegan2-ada-pytorch
+RUN git clone https://github.com/kaikaiyao/authprint.git /workspace/authprint \
+    && git clone https://github.com/NVlabs/stylegan2-ada-pytorch.git /workspace/authprint/stylegan2-ada-pytorch
 
 # Create workspace directories
-RUN mkdir -p /workspace/kubernets/results
+RUN mkdir -p /workspace/authprint/results
 
 # Set working directory
-WORKDIR /workspace/kubernets
+WORKDIR /workspace/authprint
 CMD ["true"]

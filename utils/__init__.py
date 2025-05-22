@@ -1,5 +1,5 @@
 """
-Utilities module for StyleGAN Watermarking.
+Utilities module for StyleGAN Fingerprinting.
 """
 
 from .checkpoint import save_checkpoint

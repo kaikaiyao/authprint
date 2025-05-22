@@ -1,7 +1,7 @@
 """
-Evaluators for StyleGAN watermarking.
+Evaluators for StyleGAN fingerprinting.
 """
 
-from .watermark_evaluator import WatermarkEvaluator
+from .fingerprint_evaluator import FingerprintEvaluator
 
-__all__ = ["WatermarkEvaluator"] 
+__all__ = ["FingerprintEvaluator"] 

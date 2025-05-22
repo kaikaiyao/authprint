@@ -120,3 +120,61 @@ class StableDiffusionModel(BaseGenerativeModel):
     @property
     def image_size(self) -> int:
         return self._img_size 
+
+    def quantize(self, precision='int8'):
+        """Quantize model weights to specified precision.
+        
+        Args:
+            precision (str): Quantization precision ('int8' or 'int4')
+            
+        Returns:
+            StableDiffusionModel: New model instance with quantized weights
+        """
+        def quantize_tensor(tensor, bit_precision):
+            # Handle empty or NaN tensors
+            if tensor.numel() == 0 or torch.isnan(tensor).any():
+                return tensor.clone()
+                
+            # Get max abs value, avoiding division by zero
+            max_abs_val = torch.max(torch.abs(tensor))
+            if max_abs_val == 0:
+                return tensor.clone()
+            
+            # Set quantization parameters based on precision
+            if bit_precision == 'int8':
+                max_val = 127
+            elif bit_precision == 'int4':
+                max_val = 7  # 2^3 - 1
+            else:
+                # Default to int8
+                max_val = 127
+                
+            # Scale to appropriate range
+            scale = float(max_val) / max_abs_val
+            quantized = torch.round(tensor * scale)
+            quantized = torch.clamp(quantized, -max_val, max_val)
+            
+            # Scale back to original range
+            dequantized = quantized / scale
+            return dequantized
+
+        # Create a new model instance
+        quantized_model = StableDiffusionModel(
+            model_name=self._model_name,
+            device=self._device,
+            img_size=self._img_size,
+            dtype=self.pipe.dtype,
+            enable_cpu_offload=False  # Disable CPU offload for quantized model
+        )
+
+        # Quantize UNet parameters
+        with torch.no_grad():
+            for name, param in quantized_model.pipe.unet.named_parameters():
+                param.copy_(quantize_tensor(param, precision))
+
+        # Quantize VAE parameters
+        with torch.no_grad():
+            for name, param in quantized_model.pipe.vae.named_parameters():
+                param.copy_(quantize_tensor(param, precision))
+
+        return quantized_model 

@@ -1,16 +1,64 @@
 """
-Decoder model for SD watermarking.
+Decoder models for SD fingerprinting.
 """
 import torch
 import torch.nn as nn
 
-class Decoder(nn.Module):
+class DecoderSD_L(nn.Module):
+    """
+    Very high-capacity Decoder for memorizing training data.
+    BatchNorm and Dropout removed to discourage generalization.
+    """
+    def __init__(self, image_size=1024, channels=3, output_dim=4096):
+        super(DecoderSD_L, self).__init__()
+        
+        self.features = nn.Sequential(
+            nn.Conv2d(channels, 256, kernel_size=4, stride=2, padding=1),   # M -> M/2
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),        # M/2 -> M/4
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1),       # M/4 -> M/8
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(1024, 2048, kernel_size=4, stride=2, padding=1),      # M/8 -> M/16
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(2048, 3072, kernel_size=4, stride=2, padding=1),      # M/16 -> M/32
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(3072, 4096, kernel_size=4, stride=2, padding=1),      # M/32 -> M/64
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(4096, 6144, kernel_size=4, stride=2, padding=1),      # M/64 -> M/128
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            nn.Conv2d(6144, 8192, kernel_size=4, stride=2, padding=1),      # M/128 -> M/256
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+        
+        self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(8192, 16384),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(16384, 16384),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(16384, output_dim)
+        )
+    
+    def forward(self, x):
+        features = self.features(x)
+        return self.classifier(features)
+
+class DecoderSD_M(nn.Module):
     """
     High-capacity Decoder for memorizing training data.
     BatchNorm and Dropout removed to discourage generalization.
     """
     def __init__(self, image_size=1024, channels=3, output_dim=4096):
-        super(Decoder, self).__init__()
+        super(DecoderSD_M, self).__init__()
         
         self.features = nn.Sequential(
             nn.Conv2d(channels, 128, kernel_size=4, stride=2, padding=1),   # M -> M/2
@@ -52,15 +100,7 @@ class Decoder(nn.Module):
         features = self.features(x)
         return self.classifier(features)
 
-
-"""
-Old decoder model for SD watermarking - which is smaller, has less capacity, has dropout, has batchnorm etc.
-"""
-import torch
-import torch.nn as nn
-
-
-class OldDecoder(nn.Module):
+class DecoderSD_S(nn.Module):
     """
     Decoder network that predicts configurable-bit key logits from an input image.
     With increased capacity for better convergence.
@@ -74,7 +114,7 @@ class OldDecoder(nn.Module):
             channels (int): Number of input image channels.
             output_dim (int): Output dimension (key length).
         """
-        super(OldDecoder, self).__init__()
+        super(DecoderSD_S, self).__init__()
         # Increase number of filters and add more layers for 1024x1024 input
         self.features = nn.Sequential(
             # Initial layer: 1024 -> 512
@@ -141,15 +181,7 @@ class OldDecoder(nn.Module):
             torch.Tensor: Output tensor of shape (B, output_dim).
         """
         features = self.features(x)
-        return self.classifier(features) 
-
-
-"""
-Decoder model for StyleGAN watermarking.
-"""
-import torch
-import torch.nn as nn
-
+        return self.classifier(features)
 
 class StyleGAN2Decoder(nn.Module):
     """
@@ -165,7 +197,7 @@ class StyleGAN2Decoder(nn.Module):
             channels (int): Number of input image channels.
             output_dim (int): Output dimension (key length).
         """
-        super(Decoder, self).__init__()
+        super(StyleGAN2Decoder, self).__init__()
         # Increase number of filters and add more layers
         self.features = nn.Sequential(
             # Initial layer: 256 -> 128
@@ -222,4 +254,6 @@ class StyleGAN2Decoder(nn.Module):
             torch.Tensor: Output tensor of shape (B, output_dim).
         """
         features = self.features(x)
-        return self.classifier(features) 
+        return self.classifier(features)
+
+# Remove old classes 

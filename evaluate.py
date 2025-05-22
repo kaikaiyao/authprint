@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Entry point for evaluating the StyleGAN watermarking model.
+Entry point for evaluating the StyleGAN fingerprinting model.
 """
 import os
 import sys

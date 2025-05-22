@@ -1,5 +1,5 @@
 """
-Models module for StyleGAN Watermarking.
+Models module for StyleGAN Fingerprinting.
 """
 
 from .decoder import Decoder

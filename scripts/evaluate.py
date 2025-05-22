@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Evaluation script for generative model watermarking.
+Evaluation script for generative model fingerprinting.
 """
 import argparse
 import logging
@@ -11,32 +11,27 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config.default_config import get_default_config
-from evaluators.watermark_evaluator import WatermarkEvaluator
+from evaluators.fingerprint_evaluator import FingerprintEvaluator
 from utils.distributed import setup_distributed, cleanup_distributed
 from utils.logging_utils import setup_logging
 
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Evaluation for Generative Model Watermarking")
+    parser = argparse.ArgumentParser(description="Evaluation for Generative Model Fingerprinting")
     
     # Model type selection
     parser.add_argument("--model_type", type=str, default="stylegan2",
                        choices=["stylegan2", "stable-diffusion"],
                        help="Type of generative model to use")
     
-    # StyleGAN2 configuration
-    parser.add_argument("--stylegan2_url", type=str,
-                        default="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
-                        help="URL for the pretrained StyleGAN2 model")
-    parser.add_argument("--stylegan2_local_path", type=str,
-                        default="ffhq70k-paper256-ada.pkl",
-                        help="Local path to store/load the StyleGAN2 model")
-    
     # Stable Diffusion configuration
     parser.add_argument("--sd_model_name", type=str,
                         default="stabilityai/stable-diffusion-xl-base-1.0",
                         help="Name of the Stable Diffusion model to use")
+    parser.add_argument("--sd_decoder_size", type=str, default="M",
+                       choices=["S", "M", "L"],
+                       help="Size of the Stable Diffusion decoder model to use (S=Small, M=Medium, L=Large)")
     parser.add_argument("--sd_prompt", type=str,
                         help="Text prompt for Stable Diffusion image generation")
     parser.add_argument("--sd_enable_cpu_offload", action="store_true",
@@ -48,6 +43,14 @@ def parse_args():
                         help="Number of inference steps for Stable Diffusion")
     parser.add_argument("--sd_guidance_scale", type=float, default=7.5,
                         help="Guidance scale for Stable Diffusion")
+    
+    # StyleGAN2 configuration
+    parser.add_argument("--stylegan2_url", type=str,
+                        default="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
+                        help="URL for the pretrained StyleGAN2 model")
+    parser.add_argument("--stylegan2_local_path", type=str,
+                        default="ffhq70k-paper256-ada.pkl",
+                        help="Local path to store/load the StyleGAN2 model")
     
     # Common configuration
     parser.add_argument("--checkpoint_path", type=str,
@@ -129,7 +132,7 @@ def main():
     
     try:
         # Initialize evaluator
-        evaluator = WatermarkEvaluator(
+        evaluator = FingerprintEvaluator(
             config=config,
             local_rank=local_rank,
             rank=rank,

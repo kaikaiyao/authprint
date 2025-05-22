@@ -39,7 +39,7 @@ spec:
           value: "True"
           effect: "NoSchedule"
       containers:
-        - name: stylegan-watermark-eval
+        - name: stylegan-fingerprint-eval
           image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
           workingDir: "/workspace/kubernets"
           env:

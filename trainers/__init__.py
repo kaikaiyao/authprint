@@ -1,7 +1,7 @@
 """
-Trainers module for StyleGAN Watermarking.
+Trainers module for StyleGAN Fingerprinting.
 """
 
-from .watermark_trainer import WatermarkTrainer
+from .fingerprint_trainer import FingerprintTrainer
 
-__all__ = ["WatermarkTrainer"] 
+__all__ = ["FingerprintTrainer"] 

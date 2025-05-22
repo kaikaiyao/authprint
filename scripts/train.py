@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Main training script for StyleGAN watermarking.
+Main training script for StyleGAN fingerprinting.
 """
 import argparse
 import logging
@@ -15,19 +15,24 @@ torch._dynamo.config.suppress_errors = True  # Disable dynamo compilation
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config.default_config import Config, get_default_config
-from trainers.watermark_trainer import WatermarkTrainer
+from trainers.fingerprint_trainer import FingerprintTrainer
 from utils.distributed import setup_distributed, cleanup_distributed
 from utils.logging_utils import setup_logging
 
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Watermarking Training Pipeline")
+    parser = argparse.ArgumentParser(description="Fingerprinting Training Pipeline")
     
     # Model type selection
     parser.add_argument("--model_type", type=str, default="stylegan2",
                        choices=["stylegan2", "stable-diffusion"],
                        help="Type of generative model to use")
+    
+    # Stable Diffusion configuration
+    parser.add_argument("--sd_decoder_size", type=str, default="M",
+                       choices=["S", "M", "L"],
+                       help="Size of the Stable Diffusion decoder model to use (S=Small, M=Medium, L=Large)")
     
     # StyleGAN2 configuration
     parser.add_argument("--stylegan2_url", type=str,
@@ -100,7 +105,7 @@ def main():
     
     try:
         # Initialize trainer
-        trainer = WatermarkTrainer(config, local_rank, rank, world_size, device)
+        trainer = FingerprintTrainer(config, local_rank, rank, world_size, device)
         
         # Load checkpoint if specified
         if config.checkpoint_path:

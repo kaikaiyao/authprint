@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Query-based attack script for StyleGAN watermarking.
+Query-based attack script for StyleGAN fingerprinting.
 """
 import argparse
 import logging
@@ -94,7 +94,7 @@ class DecoderWrapper:
 
 
 class QueryBasedAttack:
-    """Query-based attack implementation for StyleGAN watermarking using PGD."""
+    """Query-based attack implementation for StyleGAN fingerprinting using PGD."""
     def __init__(
         self,
         original_model,
@@ -373,7 +373,7 @@ class QueryBasedAttack:
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Query-based attack for StyleGAN2 Watermarking")
+    parser = argparse.ArgumentParser(description="Query-based attack for StyleGAN2 Fingerprinting")
     
     # Model configuration
     parser.add_argument("--stylegan2_url", type=str,

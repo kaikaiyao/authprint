@@ -1,5 +1,5 @@
 """
-Metrics utilities for StyleGAN watermarking evaluation.
+Metrics utilities for StyleGAN fingerprinting evaluation.
 """
 import os
 import numpy as np

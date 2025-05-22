@@ -1,5 +1,5 @@
 """
-Configuration module for StyleGAN Watermarking.
+Configuration module for StyleGAN Fingerprinting.
 """
 
 from .default_config import Config, get_default_config

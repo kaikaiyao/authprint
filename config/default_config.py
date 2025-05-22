@@ -1,5 +1,5 @@
 """
-Default configuration for generative model watermarking.
+Default configuration for generative model fingerprinting.
 """
 import os
 import logging
@@ -37,6 +37,7 @@ class ModelConfig:
     sd_num_inference_steps: int = 50
     sd_guidance_scale: float = 7.5
     sd_prompt: str = "A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo"  # Default prompt for generation
+    sd_decoder_size: str = "M"  # One of ["S", "M", "L"]
     
     # Pretrained model configuration
     selected_pretrained_models: List[str] = field(default_factory=list)
@@ -50,6 +51,7 @@ class ModelConfig:
         assert self.sd_dtype in ["float16", "float32"], f"Invalid dtype: {self.sd_dtype}"
         assert self.sd_num_inference_steps > 0, "Number of inference steps must be positive"
         assert self.sd_guidance_scale > 0, "Guidance scale must be positive"
+        assert self.sd_decoder_size in ["S", "M", "L"], f"Invalid SD decoder size: {self.sd_decoder_size}"
     
     def get_model_class(self) -> Type:
         """Get the model class based on model type."""
@@ -163,7 +165,7 @@ class EvaluateConfig:
     custom_pretrained_models: Dict[str, Any] = field(default_factory=dict)
     
     # Transformation settings
-    enable_quantization: bool = True  # Whether to evaluate quantized models (StyleGAN2 only)
+    enable_quantization: bool = True  # Whether to evaluate quantized models
     enable_downsampling: bool = True  # Whether to evaluate downsampling transformations
     downsample_sizes: List[int] = field(default_factory=lambda: [16, 224])  # Sizes for downsampling evaluation
 
@@ -178,10 +180,10 @@ class EvaluateConfig:
 
 @dataclass
 class QueryBasedAttackConfig:
-    """Configuration for query-based attack against the watermarking.
+    """Configuration for query-based attack against the fingerprinting.
     
     This config matches the implementation in scripts/query_based_attack.py.
-    The attack uses a trained classifier and PGD to try to fool the watermark detector.
+    The attack uses a trained classifier and PGD to try to fool the fingerprint detector.
     """
     # Attack parameters
     num_samples: int = 1000  # Number of samples to attack
@@ -283,6 +285,8 @@ class Config:
             self.model.sd_guidance_scale = args.sd_guidance_scale
         if hasattr(args, 'sd_prompt'):
             self.model.sd_prompt = args.sd_prompt
+        if hasattr(args, 'sd_decoder_size'):
+            self.model.sd_decoder_size = args.sd_decoder_size
         
         # Mode-specific configuration
         if mode == 'train':

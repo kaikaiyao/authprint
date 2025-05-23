@@ -121,6 +121,20 @@ class StableDiffusionModel(BaseGenerativeModel):
     def image_size(self) -> int:
         return self._img_size 
 
+    def eval(self):
+        """Set the model to evaluation mode."""
+        self.pipe.unet.eval()
+        self.pipe.vae.eval()
+        self.pipe.text_encoder.eval()
+        return self
+
+    def train(self):
+        """Set the model to training mode."""
+        self.pipe.unet.train()
+        self.pipe.vae.train()
+        self.pipe.text_encoder.train()
+        return self
+
     def quantize(self, precision='int8'):
         """Quantize model weights to specified precision.
         

@@ -81,7 +81,7 @@ spec:
                 "--sd_num_inference_steps" "25"
                 "--sd_guidance_scale" "7.5"
                 "--sd_enable_cpu_offload"
-                "--sd_prompt" "\"An image\""
+                "--sd_prompt" "\"A high quality image\""
                 "--img_size" "1024"
                 "--image_pixel_count" "64"
                 "--image_pixel_set_seed" "42"

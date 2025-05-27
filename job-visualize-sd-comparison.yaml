@@ -73,7 +73,7 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--sd_enable_cpu_offload --num_samples 4 --prompt 'A cozy wooden cabin perched on a snow-covered mountain peak, Disney animation style, warm golden light glowing from windows, pine trees dusted with fresh snow, magical winter atmosphere, soft pastel colors, whimsical architecture, detailed digital art, trending on ArtStation, 8k resolution, cinematic lighting, fairy tale aesthetic, Pixar quality rendering'"
+              SCRIPT_ARGS="--sd_enable_cpu_offload --num_samples 4 --prompt 'A small cabin on top of a snowy mountain'"
               
 
               # Run visualization 10 times

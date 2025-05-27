@@ -126,8 +126,8 @@ spec:
           resources:
             limits:
               nvidia.com/gpu: "1"
-              cpu: "4"
-              memory: "16Gi"
+              cpu: "8"
+              memory: "48Gi"
           volumeMounts:
             - name: nfs-user-107
               mountPath: /nfs-user-107

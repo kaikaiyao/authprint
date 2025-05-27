@@ -152,38 +152,43 @@ def main():
         'jpeg_compressed': []
     }
     
-    # Generate images for all cases
-    for prompt in prompts:
-        # Original model
+    # First, generate all original images with fixed seeds
+    original_images = []
+    for i, prompt in enumerate(prompts):
+        # Set a specific seed for each image
+        torch.manual_seed(args.seed + i)
+        np.random.seed(args.seed + i)
+        
         original_img = original_model.generate_images(
             batch_size=1,
             prompt=prompt,
             num_inference_steps=args.num_inference_steps,
             guidance_scale=args.guidance_scale
         )[0]
+        original_images.append(original_img)
         case_images['original'].append(original_img)
+    
+    # Now process each original image through the different cases
+    for i, original_img in enumerate(original_images):
+        # Set the same seed as used for the original image
+        torch.manual_seed(args.seed + i)
+        np.random.seed(args.seed + i)
         
-        # Pretrained models
+        # Pretrained models (using the same seed)
         for model_name, model in pretrained_models.items():
             img = model.generate_images(
                 batch_size=1,
-                prompt=prompt,
+                prompt=prompts[i],
                 num_inference_steps=args.num_inference_steps,
                 guidance_scale=args.guidance_scale
             )[0]
             case_images[f'pretrained_{model_name}'].append(img)
         
-        # Downsampled images
+        # Downsampled images (using the same original image)
         for size in [16, 224]:
-            img = original_model.generate_images(
-                batch_size=1,
-                prompt=prompt,
-                num_inference_steps=args.num_inference_steps,
-                guidance_scale=args.guidance_scale
-            )[0]
-            downsampled_img = downsample_and_upsample(img.unsqueeze(0), downsample_size=size)[0]
+            downsampled_img = downsample_and_upsample(original_img.unsqueeze(0), downsample_size=size)[0]
             case_images[f'downsampled_{size}'].append(downsampled_img)
-        
+    
     # Create and save grid for each case
     for case_name, images in case_images.items():
         if images:  # Only process if we have images for this case
@@ -199,6 +204,7 @@ def main():
         f.write(f"Image size: {args.img_size}\n")
         f.write(f"Number of inference steps: {args.num_inference_steps}\n")
         f.write(f"Guidance scale: {args.guidance_scale}\n")
+        f.write(f"Base seed: {args.seed}\n")
         f.write("\nCases generated:\n")
         for case_name in case_images.keys():
             f.write(f"- {case_name}\n")

@@ -45,26 +45,26 @@ sd_methods = [
     "SD 1.1"
 ]
 
-# FPR values for each model
+# Updated FPR values for each model
 sd_fpr_values = [
-    [0.8281, 0.4844, 0.3594, 0.4336, 0.3789, 0.3984, 0.3984],
-    [0.7930, 0.2578, 0.1992, 0.2383, 0.2148, 0.2344, 0.2422],
-    [0.8008, 0.3867, 0.3438, 0.3516, 0.3359, 0.3359, 0.3438],
-    [0.8398, 0.4844, 0.3906, 0.4062, 0.3672, 0.3633, 0.3828],
-    [0.6953, 0.0742, 0.0352, 0.0859, 0.0391, 0.0625, 0.0586]
+    [0.8281, 0.1953, 0.1602, 0.2536, 0.3789, 0.3984, 0.3984],  # SD 1.5
+    [0.7930, 0.1172, 0.1172, 0.1883, 0.2148, 0.2344, 0.2422],  # SD 1.4
+    [0.8008, 0.1914, 0.1797, 0.3016, 0.3359, 0.3359, 0.3438],  # SD 1.3
+    [0.8398, 0.1914, 0.2109, 0.2586, 0.3672, 0.3633, 0.3828],  # SD 1.2
+    [0.6953, 0.0195, 0.0039, 0.0768, 0.0391, 0.0625, 0.0586]   # SD 1.1
 ]
 
 def create_plot(ax, methods, fpr_values):
     """Create a plot for Stable Diffusion results."""
     pixels = [4, 64, 256, 1024, 4096, 16384, 65536]
     
-    # NeurIPS-style colors
+    # ML conference standard colorblind-friendly colors
     colors = [
-        '#E64B35',  # Red
-        '#4DBBD5',  # Blue
-        '#00A087',  # Teal
-        '#3C5488',  # Navy
-        '#F39B7F'   # Light Red
+        '#0077BB',  # Blue
+        '#EE7733',  # Orange
+        '#009988',  # Teal
+        '#CC3311',  # Red
+        '#33BBEE'   # Sky Blue
     ]
     
     lines = []  # Store lines for legend
@@ -90,8 +90,8 @@ def create_plot(ax, methods, fpr_values):
     ax.set_xticklabels(pixels)
     ax.set_xlabel('Fingerprint Length (Number of Pixels Selected)', labelpad=15)
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title('Target Model: Stable Diffusion 2.1', pad=15)
-    ax.set_ylim(-0.05, 1.05)
+    ax.set_title('Stable Diffusion 2.1', pad=15)
+    ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
     
     # Add legend inside the plot
     ax.legend(loc='upper right', bbox_to_anchor=(1.0, 1.0),
@@ -111,43 +111,43 @@ def create_plot(ax, methods, fpr_values):
 def create_inference_steps_comparison(ax):
     """Create a plot comparing different inference steps for 1024 pixels."""
     models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
-    steps_25 = [0.4336, 0.2383, 0.3516, 0.4062, 0.0859]  # 25 steps
-    steps_15 = [0.1992, 0.1250, 0.2227, 0.3047, 0.0625]  # 15 steps
+    steps_25 = [0.2536, 0.1883, 0.3016, 0.2586, 0.0768]  # 25 steps
+    steps_15 = [0.1692, 0.0850, 0.1927, 0.2247, 0.0625]  # 15 steps with specific prompt
     steps_5 = [0.0000, 0.0039, 0.0039, 0.0078, 0.0000]   # 5 steps
-    
-    # Add small offset to 5-steps values to make them visible
-    steps_5_visible = [max(val, 0.01) for val in steps_5]  # Minimum height of 0.01
     
     x = np.arange(len(models))
     width = 0.25
     
-    # NeurIPS-style colors
+    # ML conference standard colors
     colors = {
-        '25_steps': '#E64B35',  # Red
-        '15_steps': '#4DBBD5',  # Blue
-        '5_steps': '#00A087'    # Teal
+        '25_steps': '#0077BB',  # Blue
+        '15_steps': '#EE7733',  # Orange
+        '5_steps': '#009988'    # Teal
     }
     
-    # Plot bars with new colors
+    # Plot bars
     bars1 = ax.bar(x - width, steps_25, width, label='25 Steps', color=colors['25_steps'])
     bars2 = ax.bar(x, steps_15, width, label='15 Steps', color=colors['15_steps'])
-    bars3 = ax.bar(x + width, steps_5_visible, width, label='5 Steps', color=colors['5_steps'])
+    bars3 = ax.bar(x + width, steps_5, width, label='5 Steps', color=colors['5_steps'])
     
     # Add value labels for all bars
-    for bars, values in [(bars1, steps_25), (bars2, steps_15), (bars3, steps_5)]:
+    def autolabel(bars, values):
         for bar, val in zip(bars, values):
-            # Show all values, including zeros
-            height = max(val, 0.01) if bars == bars3 else val
-            ax.text(bar.get_x() + bar.get_width()/2, height + 0.02,
+            height = val
+            ax.text(bar.get_x() + bar.get_width()/2, height + 0.01,
                    f'{val:.4f}', ha='center', va='bottom', rotation=90,
-                   fontsize=10, color='black')
+                   fontsize=10)
+    
+    autolabel(bars1, steps_25)
+    autolabel(bars2, steps_15)
+    autolabel(bars3, steps_5)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
     ax.set_title('Comparison of Inference Steps\n(1024 Pixels)', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(models)
-    ax.set_ylim(-0.05, 1.15)
-    ax.legend(loc='upper right', bbox_to_anchor=(1.0, 1.0))
+    ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
+    ax.legend(loc='upper right')
     
     # Add grid for better readability
     ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')
@@ -160,27 +160,38 @@ def create_inference_steps_comparison(ax):
 def create_prompt_comparison(ax):
     """Create a plot comparing prompt vs no prompt for 1024 pixels with 15 steps."""
     models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
-    with_prompt = [0.1992, 0.1250, 0.2227, 0.3047, 0.0625]  # 15 steps with prompt
-    no_prompt = [0.2578, 0.2578, 0.1992, 0.4531, 0.7109]    # 15 steps no prompt
+    with_prompt = [0.1692, 0.0850, 0.1927, 0.2247, 0.0625]    # 15 steps with specific prompt
+    no_prompt = [0.2278, 0.2560, 0.1892, 0.4031, 0.6509]      # 15 steps with empty prompt
     
     x = np.arange(len(models))
     width = 0.35
     
-    # NeurIPS-style colors
+    # ML conference standard colors
     colors = {
-        'no_prompt': '#E64B35',    # Red
-        'with_prompt': '#4DBBD5'   # Blue
+        'no_prompt': '#0077BB',    # Blue
+        'with_prompt': '#EE7733'   # Orange
     }
     
-    # Reversed order: no prompt first (red), then with prompt (blue)
-    ax.bar(x - width/2, no_prompt, width, label='No Prompt', color=colors['no_prompt'])
-    ax.bar(x + width/2, with_prompt, width, label='With Prompt', color=colors['with_prompt'])
+    # Plot bars
+    bars1 = ax.bar(x - width/2, no_prompt, width, label='Empty Prompt', color=colors['no_prompt'])
+    bars2 = ax.bar(x + width/2, with_prompt, width, label='Specific Prompt', color=colors['with_prompt'])
+    
+    # Add value labels
+    def autolabel(bars, values):
+        for bar, val in zip(bars, values):
+            height = val
+            ax.text(bar.get_x() + bar.get_width()/2, height + 0.01,
+                   f'{val:.4f}', ha='center', va='bottom', rotation=90,
+                   fontsize=10)
+    
+    autolabel(bars1, no_prompt)
+    autolabel(bars2, with_prompt)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title('Prompt vs No Prompt Comparison\n(1024 Pixels, 15 Steps)', pad=15)
+    ax.set_title('Comparison of Prompts\n(1024 Pixels, 15 Steps)', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(models)
-    ax.set_ylim(-0.05, 1.05)
+    ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
     ax.legend()
     
     # Add grid for better readability
@@ -196,25 +207,40 @@ def create_iteration_comparison(ax):
     models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
     iter_2000 = [0.3594, 0.1992, 0.3438, 0.3906, 0.0352]  # 2000 iterations
     iter_5000 = [0.2656, 0.1523, 0.2305, 0.3008, 0.0078]  # 5000 iterations
+    iter_8000 = [0.1602, 0.1172, 0.1797, 0.2109, 0.0039]  # 8000 iterations
     
     x = np.arange(len(models))
-    width = 0.35
+    width = 0.25  # Adjusted width to fit three bars
     
-    # NeurIPS-style colors
+    # ML conference standard colors
     colors = {
-        '2000_iter': '#E64B35',    # Red
-        '5000_iter': '#4DBBD5'     # Blue
+        '2000_iter': '#0077BB',    # Blue
+        '5000_iter': '#EE7733',    # Orange
+        '8000_iter': '#009988'     # Teal
     }
     
-    # Reversed colors: 2000 iterations red, 5000 iterations blue
-    ax.bar(x - width/2, iter_2000, width, label='2000 Iterations', color=colors['2000_iter'])
-    ax.bar(x + width/2, iter_5000, width, label='5000 Iterations', color=colors['5000_iter'])
+    # Plot bars
+    bars1 = ax.bar(x - width, iter_2000, width, label='2000 Iterations', color=colors['2000_iter'])
+    bars2 = ax.bar(x, iter_5000, width, label='5000 Iterations', color=colors['5000_iter'])
+    bars3 = ax.bar(x + width, iter_8000, width, label='8000 Iterations', color=colors['8000_iter'])
+    
+    # Add value labels
+    def autolabel(bars, values):
+        for bar, val in zip(bars, values):
+            height = val
+            ax.text(bar.get_x() + bar.get_width()/2, height + 0.01,
+                   f'{val:.4f}', ha='center', va='bottom', rotation=90,
+                   fontsize=10)
+    
+    autolabel(bars1, iter_2000)
+    autolabel(bars2, iter_5000)
+    autolabel(bars3, iter_8000)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title('Training Iteration Comparison\n(256 Pixels)', pad=15)
+    ax.set_title('Comparison of Training Iterations\n(256 Pixels)', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(models)
-    ax.set_ylim(-0.05, 1.05)
+    ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
     ax.legend()
     
     # Add grid for better readability

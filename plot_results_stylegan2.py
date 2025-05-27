@@ -11,12 +11,12 @@ def setup_plotting_style():
     
     sns.set_theme(style="whitegrid")
     plt.rcParams.update({
-        'font.size': 20,           # Slightly smaller for subplot layout
-        'axes.labelsize': 22,      # Adjusted for subplot layout
-        'axes.titlesize': 24,      # Adjusted for subplot layout
-        'legend.fontsize': 18,     # Adjusted for subplot layout
-        'xtick.labelsize': 20,     # Adjusted for subplot layout
-        'ytick.labelsize': 20,     # Adjusted for subplot layout
+        'font.size': 20,           
+        'axes.labelsize': 22,      
+        'axes.titlesize': 24,      
+        'legend.fontsize': 18,     
+        'xtick.labelsize': 20,     
+        'ytick.labelsize': 20,     
         'figure.dpi': 300,
         'savefig.dpi': 300,
         'figure.facecolor': 'none',
@@ -32,7 +32,7 @@ def setup_plotting_style():
         'axes.labelcolor': 'black',
         'xtick.color': 'black',
         'ytick.color': 'black',
-        'grid.color': '#E5E5E5',   # Light gray for grid
+        'grid.color': '#E5E5E5',   
         'figure.edgecolor': 'black'
     })
 
@@ -59,32 +59,33 @@ lsun_std_values = {
 }
 
 
-def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name):
+def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name, plot_type="training"):
     """Create a subplot for the given dataset."""
     pixels = [1, 4, 16, 32, 256, 1024]
     
-    # Define categories and colors
-    categories = {
-        'Data Size': [methods[0], methods[1]],
-        'Augmentation': [methods[2], methods[3]],
-        'Quantization': [methods[4], methods[5]],
-        'Downsampling': [methods[6], methods[7]]
+    # ML conference standard colorblind-friendly colors
+    aaai_colors = {
+        'Data Size': ['#0077BB', '#EE7733'],      # Blue and Orange
+        'Augmentation': ['#009988', '#CC3311'],    # Teal and Red
+        'Quantization': ['#0077BB', '#EE7733'],    # Blue and Orange
+        'Downsampling': ['#009988', '#CC3311']     # Teal and Red
     }
     
-    colors = {
-        'Data Size': '#2166AC',      # Strong blue
-        'Augmentation': '#B2182B',    # Deep red
-        'Quantization': '#35978F',    # Teal
-        'Downsampling': '#756BB1'     # Purple
-    }
-
+    if plot_type == "training":
+        # Define categories for training methods
+        categories = {
+            'Data Size': [methods[0], methods[1]],
+            'Augmentation': [methods[2], methods[3]]
+        }
+    else:
+        # Define categories for optimization methods
+        categories = {
+            'Quantization': [methods[4], methods[5]],
+            'Downsampling': [methods[6], methods[7]]
+        }
+    
     # Define line styles for each category
-    line_styles = {
-        'Data Size': '-',           # Solid line
-        'Augmentation': '-',        # Solid line
-        'Quantization': '--',       # Dashed line
-        'Downsampling': '--'        # Dashed line
-    }
+    line_styles = {cat: '-' for cat in categories.keys()}
     
     lines = []  # Store lines for legend
     labels = []  # Store labels for legend
@@ -102,16 +103,18 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name):
             y_values = np.array(fpr_values[idx])
             std_values_for_method = std_values[method]
             
+            color = aaai_colors[cat][method_idx]
+            
             # Plot shaded std region
             ax.fill_between(range(len(pixels)), 
                           np.maximum(y_values - std_values_for_method, 0.0),
                           np.minimum(y_values + std_values_for_method, 1.0),
-                          color=colors[cat], 
+                          color=color, 
                           alpha=0.2)
             
             # Plot main line
             line = ax.plot(range(len(pixels)), y_values,
-                    marker=marker, label=label, color=colors[cat],
+                    marker=marker, label=label, color=color,
                     alpha=0.9, markersize=10, linestyle=line_styles[cat], linewidth=2.5)[0]
             
             lines.append(line)
@@ -122,8 +125,12 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name):
     ax.set_xticklabels(pixels)
     ax.set_xlabel('Fingerprint Length (Number of Pixels Selected)', labelpad=15)
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title(f"Target Model: {dataset_name} 70k Train Data, ADA Aug" if dataset_name == "FFHQ" else f"Target Model: {dataset_name} 100k Train Data, ADA Aug", pad=15)
+    dataset_title = "StyleGAN2, FFHQ" if dataset_name == "FFHQ" else "StyleGAN2, LSUN-Cat"
+    ax.set_title(dataset_title, pad=15)
     ax.set_ylim(-0.05, 1.05)  # Add margins above and below
+    
+    # Add grid for better readability
+    ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')
     
     # Set spines to black
     for spine in ax.spines.values():
@@ -183,47 +190,53 @@ lsun_fpr_values = [
 # Set up plotting style
 setup_plotting_style()
 
-# Create a single figure with two subplots
-fig = plt.figure(figsize=(18, 7.5))  # Middle ground size
-gs = fig.add_gridspec(2, 2, height_ratios=[3.5, 1], width_ratios=[1, 1])
+# Create two separate figures - one for training methods and one for optimization methods
+def create_and_save_plots(plot_type="training"):
+    fig = plt.figure(figsize=(18, 7.5))
+    gs = fig.add_gridspec(2, 2, height_ratios=[3.5, 1], width_ratios=[1, 1])
 
-# Create main subplots and share y-axis
-ax1 = fig.add_subplot(gs[0, 0])
-ax2 = fig.add_subplot(gs[0, 1], sharey=ax1)  # Share y-axis with first subplot
+    # Create main subplots and share y-axis
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1], sharey=ax1)
 
-# Create both subplots and get legend handles
-lines1, labels1 = create_subplot(ax1, ffhq_methods, ffhq_fid_scores, ffhq_fpr_values, "FFHQ")
-lines2, labels2 = create_subplot(ax2, lsun_methods, lsun_fid_scores, lsun_fpr_values, "LSUN-Cat")
+    # Create both subplots and get legend handles
+    lines1, labels1 = create_subplot(ax1, ffhq_methods, ffhq_fid_scores, ffhq_fpr_values, "FFHQ", plot_type)
+    lines2, labels2 = create_subplot(ax2, lsun_methods, lsun_fid_scores, lsun_fpr_values, "LSUN-Cat", plot_type)
 
-# Remove redundant y-axis label from second subplot
-ax2.set_ylabel('')
+    # Remove redundant y-axis label from second subplot
+    ax2.set_ylabel('')
 
-# Create separate legend axes
-legend_ax1 = fig.add_subplot(gs[1, 0])
-legend_ax2 = fig.add_subplot(gs[1, 1])
+    # Create separate legend axes
+    legend_ax1 = fig.add_subplot(gs[1, 0])
+    legend_ax2 = fig.add_subplot(gs[1, 1])
 
-# Remove axes for legend subplots
-legend_ax1.axis('off')
-legend_ax2.axis('off')
+    # Remove axes for legend subplots
+    legend_ax1.axis('off')
+    legend_ax2.axis('off')
 
-# Add legends below each subplot
-legend1 = legend_ax1.legend(lines1, labels1, 
-                          loc='center',
-                          ncol=2, borderaxespad=0,
-                          handletextpad=0.3, handlelength=1.5, markerscale=1.2,
-                          fontsize=15,  # Middle ground font size
-                          edgecolor='black')
+    # Add legends below each subplot
+    legend1 = legend_ax1.legend(lines1, labels1, 
+                              loc='center',
+                              ncol=2, borderaxespad=0,
+                              handletextpad=0.3, handlelength=1.5, markerscale=1.2,
+                              fontsize=15,
+                              edgecolor='black')
 
-legend2 = legend_ax2.legend(lines2, labels2, 
-                          loc='center',
-                          ncol=2, borderaxespad=0,
-                          handletextpad=0.3, handlelength=1.5, markerscale=1.2,
-                          fontsize=15,  # Middle ground font size
-                          edgecolor='black')
+    legend2 = legend_ax2.legend(lines2, labels2, 
+                              loc='center',
+                              ncol=2, borderaxespad=0,
+                              handletextpad=0.3, handlelength=1.5, markerscale=1.2,
+                              fontsize=15,
+                              edgecolor='black')
 
-# Adjust layout
-plt.tight_layout()
+    # Adjust layout
+    plt.tight_layout()
 
-# Save the figure
-plt.savefig('stylegan2_fpr.png', bbox_inches='tight', dpi=300, transparent=True)
-plt.close() 
+    # Save the figure
+    suffix = "training" if plot_type == "training" else "optimization"
+    plt.savefig(f'stylegan2_fpr_{suffix}.png', bbox_inches='tight', dpi=300, transparent=True)
+    plt.close()
+
+# Create both plots
+create_and_save_plots("training")
+create_and_save_plots("optimization") 

@@ -1,0 +1,152 @@
+2025-05-27 14:48:34,028 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-05-27 14:48:34,028 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=4, prompt='A cozy wooden cabin perched on a snow-covered mountain peak, Disney animation style, warm golden light glowing from windows, pine trees dusted with fresh snow, magical winter atmosphere, soft pastel colors, whimsical architecture, detailed digital art, trending on ArtStation, 8k resolution, cinematic lighting, fairy tale aesthetic, Pixar quality rendering', num_inference_steps=25, guidance_scale=7.5)
+2025-05-27 14:48:34,907 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-27 14:48:34,924 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-27 14:48:35,172 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-27 14:48:43,652 - INFO - Loading pretrained model: sd-2.1
+2025-05-27 14:48:44,560 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-05-27 14:48:44,560 - INFO - Loading pretrained model: sd-1.5
+2025-05-27 14:48:53,444 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-05-27 14:48:53,444 - INFO - Loading pretrained model: sd-1.4
+2025-05-27 14:48:53,982 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-27 14:48:54,177 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-27 14:48:54,205 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-05-27 14:49:22,422 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-05-27 14:49:22,422 - INFO - Loading pretrained model: sd-1.3
+2025-05-27 14:49:30,774 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-05-27 14:49:30,774 - INFO - Loading pretrained model: sd-1.2
+2025-05-27 14:49:39,233 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-05-27 14:49:39,233 - INFO - Loading pretrained model: sd-1.1
+2025-05-27 14:49:47,726 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-05-27 14:49:47,726 - INFO - Loaded 6 pretrained models: ['sd-2.1', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-05-27 15:00:00,701 - INFO - Saved grid for original
+2025-05-27 15:00:03,731 - INFO - Saved grid for pretrained_sd-2.1
+2025-05-27 15:00:06,548 - INFO - Saved grid for pretrained_sd-1.5
+2025-05-27 15:00:09,218 - INFO - Saved grid for pretrained_sd-1.4
+2025-05-27 15:00:11,904 - INFO - Saved grid for pretrained_sd-1.3
+2025-05-27 15:00:14,663 - INFO - Saved grid for pretrained_sd-1.2
+2025-05-27 15:00:17,534 - INFO - Saved grid for pretrained_sd-1.1
+2025-05-27 15:00:19,952 - INFO - Saved grid for downsampled_16
+2025-05-27 15:00:22,714 - INFO - Saved grid for downsampled_224
+2025-05-27 15:00:22,714 - INFO - Visualization completed successfully
+2025-05-27 15:00:22,764 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-05-27 15:00:22,764 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=4, prompt='A cozy wooden cabin perched on a snow-covered mountain peak, Disney animation style, warm golden light glowing from windows, pine trees dusted with fresh snow, magical winter atmosphere, soft pastel colors, whimsical architecture, detailed digital art, trending on ArtStation, 8k resolution, cinematic lighting, fairy tale aesthetic, Pixar quality rendering', num_inference_steps=25, guidance_scale=7.5)
+2025-05-27 15:00:24,422 - INFO - Loading pretrained model: sd-2.1
+2025-05-27 15:00:26,636 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-05-27 15:00:26,637 - INFO - Loading pretrained model: sd-1.5
+2025-05-27 15:00:27,596 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-05-27 15:00:27,596 - INFO - Loading pretrained model: sd-1.4
+2025-05-27 15:00:28,650 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-05-27 15:00:28,650 - INFO - Loading pretrained model: sd-1.3
+2025-05-27 15:00:29,524 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-05-27 15:00:29,524 - INFO - Loading pretrained model: sd-1.2
+2025-05-27 15:00:30,191 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-05-27 15:00:30,191 - INFO - Loading pretrained model: sd-1.1
+2025-05-27 15:00:31,037 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-05-27 15:00:31,038 - INFO - Loaded 6 pretrained models: ['sd-2.1', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-05-27 15:10:48,141 - INFO - Saved grid for original
+2025-05-27 15:10:51,422 - INFO - Saved grid for pretrained_sd-2.1
+2025-05-27 15:10:54,137 - INFO - Saved grid for pretrained_sd-1.5
+2025-05-27 15:10:56,877 - INFO - Saved grid for pretrained_sd-1.4
+2025-05-27 15:10:59,273 - INFO - Saved grid for pretrained_sd-1.3
+2025-05-27 15:11:01,859 - INFO - Saved grid for pretrained_sd-1.2
+2025-05-27 15:11:04,481 - INFO - Saved grid for pretrained_sd-1.1
+2025-05-27 15:11:06,548 - INFO - Saved grid for downsampled_16
+2025-05-27 15:11:09,262 - INFO - Saved grid for downsampled_224
+2025-05-27 15:11:09,263 - INFO - Visualization completed successfully
+2025-05-27 15:11:09,308 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-05-27 15:11:09,309 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=4, prompt='A cozy wooden cabin perched on a snow-covered mountain peak, Disney animation style, warm golden light glowing from windows, pine trees dusted with fresh snow, magical winter atmosphere, soft pastel colors, whimsical architecture, detailed digital art, trending on ArtStation, 8k resolution, cinematic lighting, fairy tale aesthetic, Pixar quality rendering', num_inference_steps=25, guidance_scale=7.5)
+2025-05-27 15:11:11,435 - INFO - Loading pretrained model: sd-2.1
+2025-05-27 15:11:12,202 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-05-27 15:11:12,202 - INFO - Loading pretrained model: sd-1.5
+2025-05-27 15:11:13,233 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-05-27 15:11:13,233 - INFO - Loading pretrained model: sd-1.4
+2025-05-27 15:11:14,121 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-05-27 15:11:14,121 - INFO - Loading pretrained model: sd-1.3
+2025-05-27 15:11:14,793 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-05-27 15:11:14,793 - INFO - Loading pretrained model: sd-1.2
+2025-05-27 15:11:15,442 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-05-27 15:11:15,442 - INFO - Loading pretrained model: sd-1.1
+2025-05-27 15:11:16,091 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-05-27 15:11:16,091 - INFO - Loaded 6 pretrained models: ['sd-2.1', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-05-27 15:21:26,480 - INFO - Saved grid for original
+2025-05-27 15:21:29,704 - INFO - Saved grid for pretrained_sd-2.1
+2025-05-27 15:21:32,441 - INFO - Saved grid for pretrained_sd-1.5
+2025-05-27 15:21:35,196 - INFO - Saved grid for pretrained_sd-1.4
+2025-05-27 15:21:37,654 - INFO - Saved grid for pretrained_sd-1.3
+2025-05-27 15:21:40,361 - INFO - Saved grid for pretrained_sd-1.2
+2025-05-27 15:21:43,296 - INFO - Saved grid for pretrained_sd-1.1
+2025-05-27 15:21:45,599 - INFO - Saved grid for downsampled_16
+2025-05-27 15:21:48,373 - INFO - Saved grid for downsampled_224
+2025-05-27 15:21:48,374 - INFO - Visualization completed successfully
+2025-05-27 15:21:48,409 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-05-27 15:21:48,409 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=4, prompt='A cozy wooden cabin perched on a snow-covered mountain peak, Disney animation style, warm golden light glowing from windows, pine trees dusted with fresh snow, magical winter atmosphere, soft pastel colors, whimsical architecture, detailed digital art, trending on ArtStation, 8k resolution, cinematic lighting, fairy tale aesthetic, Pixar quality rendering', num_inference_steps=25, guidance_scale=7.5)
+2025-05-27 15:21:50,361 - INFO - Loading pretrained model: sd-2.1
+2025-05-27 15:21:51,295 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-05-27 15:21:51,295 - INFO - Loading pretrained model: sd-1.5
+2025-05-27 15:21:52,472 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-05-27 15:21:52,472 - INFO - Loading pretrained model: sd-1.4
+2025-05-27 15:21:53,662 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-05-27 15:21:53,663 - INFO - Loading pretrained model: sd-1.3
+2025-05-27 15:21:54,428 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-05-27 15:21:54,429 - INFO - Loading pretrained model: sd-1.2
+2025-05-27 15:21:55,321 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-05-27 15:21:55,321 - INFO - Loading pretrained model: sd-1.1
+2025-05-27 15:21:56,022 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-05-27 15:21:56,022 - INFO - Loaded 6 pretrained models: ['sd-2.1', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-05-27 15:32:43,131 - INFO - Saved grid for original
+2025-05-27 15:32:46,423 - INFO - Saved grid for pretrained_sd-2.1
+2025-05-27 15:32:49,036 - INFO - Saved grid for pretrained_sd-1.5
+2025-05-27 15:32:51,898 - INFO - Saved grid for pretrained_sd-1.4
+2025-05-27 15:32:54,564 - INFO - Saved grid for pretrained_sd-1.3
+2025-05-27 15:32:57,177 - INFO - Saved grid for pretrained_sd-1.2
+2025-05-27 15:32:59,955 - INFO - Saved grid for pretrained_sd-1.1
+2025-05-27 15:33:02,193 - INFO - Saved grid for downsampled_16
+2025-05-27 15:33:05,182 - INFO - Saved grid for downsampled_224
+2025-05-27 15:33:05,182 - INFO - Visualization completed successfully
+2025-05-27 15:33:05,229 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-05-27 15:33:05,229 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=4, prompt='A cozy wooden cabin perched on a snow-covered mountain peak, Disney animation style, warm golden light glowing from windows, pine trees dusted with fresh snow, magical winter atmosphere, soft pastel colors, whimsical architecture, detailed digital art, trending on ArtStation, 8k resolution, cinematic lighting, fairy tale aesthetic, Pixar quality rendering', num_inference_steps=25, guidance_scale=7.5)
+2025-05-27 15:33:07,275 - INFO - Loading pretrained model: sd-2.1
+2025-05-27 15:33:08,219 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-05-27 15:33:08,219 - INFO - Loading pretrained model: sd-1.5
+2025-05-27 15:33:09,269 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-05-27 15:33:09,270 - INFO - Loading pretrained model: sd-1.4
+2025-05-27 15:33:10,132 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-05-27 15:33:10,132 - INFO - Loading pretrained model: sd-1.3
+2025-05-27 15:33:11,006 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-05-27 15:33:11,007 - INFO - Loading pretrained model: sd-1.2
+2025-05-27 15:33:11,671 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-05-27 15:33:11,671 - INFO - Loading pretrained model: sd-1.1
+2025-05-27 15:33:12,306 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-05-27 15:33:12,306 - INFO - Loaded 6 pretrained models: ['sd-2.1', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-05-27 15:43:34,444 - INFO - Saved grid for original
+2025-05-27 15:43:37,604 - INFO - Saved grid for pretrained_sd-2.1
+2025-05-27 15:43:40,356 - INFO - Saved grid for pretrained_sd-1.5
+2025-05-27 15:43:43,220 - INFO - Saved grid for pretrained_sd-1.4
+2025-05-27 15:43:45,736 - INFO - Saved grid for pretrained_sd-1.3
+2025-05-27 15:43:48,467 - INFO - Saved grid for pretrained_sd-1.2
+2025-05-27 15:43:50,905 - INFO - Saved grid for pretrained_sd-1.1
+2025-05-27 15:43:53,111 - INFO - Saved grid for downsampled_16
+2025-05-27 15:43:55,723 - INFO - Saved grid for downsampled_224
+2025-05-27 15:43:55,724 - INFO - Visualization completed successfully
+2025-05-27 15:43:55,765 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-05-27 15:43:55,765 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=4, prompt='A cozy wooden cabin perched on a snow-covered mountain peak, Disney animation style, warm golden light glowing from windows, pine trees dusted with fresh snow, magical winter atmosphere, soft pastel colors, whimsical architecture, detailed digital art, trending on ArtStation, 8k resolution, cinematic lighting, fairy tale aesthetic, Pixar quality rendering', num_inference_steps=25, guidance_scale=7.5)
+2025-05-27 15:43:57,505 - INFO - Loading pretrained model: sd-2.1
+2025-05-27 15:43:58,398 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-05-27 15:43:58,398 - INFO - Loading pretrained model: sd-1.5
+2025-05-27 15:43:59,248 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-05-27 15:43:59,248 - INFO - Loading pretrained model: sd-1.4
+2025-05-27 15:44:00,228 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-05-27 15:44:00,228 - INFO - Loading pretrained model: sd-1.3
+2025-05-27 15:44:01,345 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-05-27 15:44:01,345 - INFO - Loading pretrained model: sd-1.2
+2025-05-27 15:44:02,239 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-05-27 15:44:02,239 - INFO - Loading pretrained model: sd-1.1
+2025-05-27 15:44:02,902 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-05-27 15:44:02,902 - INFO - Loaded 6 pretrained models: ['sd-2.1', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']

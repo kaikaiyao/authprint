@@ -251,6 +251,55 @@ def create_iteration_comparison(ax):
         spine.set_color('black')
         spine.set_linewidth(1.5)
 
+def create_decoder_size_comparison(ax):
+    """Create a plot comparing different decoder sizes for 1024 pixels."""
+    models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
+    small_decoder = [0.9576, 0.9488, 0.9887, 0.9543, 0.9555]    # 32M params
+    medium_decoder = [0.2536, 0.1883, 0.3016, 0.2586, 0.0768]   # 187M params
+    large_decoder = [0.1133, 0.082, 0.1328, 0.1328, 0.0000]     # 674M params
+    
+    x = np.arange(len(models))
+    width = 0.25
+    
+    # ML conference standard colors
+    colors = {
+        'small': '#0077BB',    # Blue
+        'medium': '#EE7733',   # Orange
+        'large': '#009988'     # Teal
+    }
+    
+    # Plot bars
+    bars1 = ax.bar(x - width, small_decoder, width, label='32M params', color=colors['small'])
+    bars2 = ax.bar(x, medium_decoder, width, label='187M params', color=colors['medium'])
+    bars3 = ax.bar(x + width, large_decoder, width, label='674M params', color=colors['large'])
+    
+    # Add value labels
+    def autolabel(bars, values):
+        for bar, val in zip(bars, values):
+            height = val
+            ax.text(bar.get_x() + bar.get_width()/2, height + 0.01,
+                   f'{val:.4f}', ha='center', va='bottom', rotation=90,
+                   fontsize=10)
+    
+    autolabel(bars1, small_decoder)
+    autolabel(bars2, medium_decoder)
+    autolabel(bars3, large_decoder)
+    
+    ax.set_ylabel('FPR@95%TPR', labelpad=15)
+    ax.set_title('Comparison of Decoder Sizes\n(1024 Pixels)', pad=15)
+    ax.set_xticks(x)
+    ax.set_xticklabels(models)
+    ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
+    ax.legend()
+    
+    # Add grid for better readability
+    ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')
+    
+    # Set spines to black
+    for spine in ax.spines.values():
+        spine.set_color('black')
+        spine.set_linewidth(1.5)
+
 # Set up plotting style
 setup_plotting_style()
 
@@ -286,4 +335,12 @@ ax4 = fig4.add_subplot(111)
 create_iteration_comparison(ax4)
 plt.tight_layout()
 plt.savefig('sd_iteration_comparison.png', bbox_inches='tight', dpi=300, transparent=True)
+plt.close()
+
+# Create figure for decoder size comparison
+fig5 = plt.figure(figsize=(8, 6))
+ax5 = fig5.add_subplot(111)
+create_decoder_size_comparison(ax5)
+plt.tight_layout()
+plt.savefig('sd_decoder_size_comparison.png', bbox_inches='tight', dpi=300, transparent=True)
 plt.close() 

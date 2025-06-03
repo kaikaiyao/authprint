@@ -36,6 +36,8 @@ def setup_plotting_style():
         'figure.edgecolor': 'black'
     })
 
+# Comment out the STD values dictionaries but preserve them for future use
+"""
 ffhq_std_values = {
     "1K Train Data, ADA Aug": [0.026, 0.0142, 0.0085, 0.0057, 0.0044, 0.0051],
     "30K Train Data, ADA Aug": [0.027, 0.0098, 0.0083, 0.0049, 0.0042, 0.0048],
@@ -57,13 +59,13 @@ lsun_std_values = {
     "Downsampling to 128": [0.039, 0.0142, 0.0052, 0.0045, 0.0059, 0.0048],
     "Downsampling to 224": [0.052, 0.0285, 0.0155, 0.0108, 0.0112, 0.0082]
 }
-
+"""
 
 def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name, plot_type="training"):
     """Create a subplot for the given dataset."""
     pixels = [1, 4, 16, 32, 256, 1024]
     
-    # ML conference standard colorblind-friendly colors
+    # ML conference standard colors
     aaai_colors = {
         'Data Size': ['#0077BB', '#EE7733'],      # Blue and Orange
         'Augmentation': ['#009988', '#CC3311'],    # Teal and Red
@@ -91,7 +93,7 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name, plot_type=
     labels = []  # Store labels for legend
     
     # Get the appropriate std values dictionary based on dataset
-    std_values = ffhq_std_values if dataset_name == "FFHQ" else lsun_std_values
+    # std_values = ffhq_std_values if dataset_name == "FFHQ" else lsun_std_values
     
     # Plot FPR vs Pixels with std
     for cat_idx, (cat, methods_in_cat) in enumerate(categories.items()):
@@ -101,21 +103,22 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name, plot_type=
             label = f"{method} (FID: {fid_scores[idx]:.2f})"
             
             y_values = np.array(fpr_values[idx])
-            std_values_for_method = std_values[method]
+            # std_values_for_method = std_values[method]
             
             color = aaai_colors[cat][method_idx]
             
             # Plot shaded std region
-            ax.fill_between(range(len(pixels)), 
-                          np.maximum(y_values - std_values_for_method, 0.0),
-                          np.minimum(y_values + std_values_for_method, 1.0),
-                          color=color, 
-                          alpha=0.2)
+            # ax.fill_between(range(len(pixels)), 
+            #               np.maximum(y_values - std_values_for_method, 0.0),
+            #               np.minimum(y_values + std_values_for_method, 1.0),
+            #               color=color, 
+            #               alpha=0.2)
             
             # Plot main line
             line = ax.plot(range(len(pixels)), y_values,
                     marker=marker, label=label, color=color,
-                    alpha=0.9, markersize=10, linestyle=line_styles[cat], linewidth=2.5)[0]
+                    alpha=0.9, markersize=10, linestyle=line_styles[cat], linewidth=2.5,
+                    markeredgecolor='black', markeredgewidth=1)[0]
             
             lines.append(line)
             labels.append(label)

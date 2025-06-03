@@ -47,18 +47,22 @@ sd_methods = [
 
 # Updated FPR values for each model
 sd_fpr_values = [
-    [0.8281, 0.1953, 0.1602, 0.2536, 0.3789, 0.3984, 0.3984],  # SD 1.5
-    [0.7930, 0.1172, 0.1172, 0.1883, 0.2148, 0.2344, 0.2422],  # SD 1.4
-    [0.8008, 0.1914, 0.1797, 0.3016, 0.3359, 0.3359, 0.3438],  # SD 1.3
-    [0.8398, 0.1914, 0.2109, 0.2586, 0.3672, 0.3633, 0.3828],  # SD 1.2
-    [0.6953, 0.0195, 0.0039, 0.0768, 0.0391, 0.0625, 0.0586]   # SD 1.1
+    [0.3764, 0.0888, 0.0728, 0.1133, 0.1722, 0.1811, 0.1811],  # SD 1.5
+    [0.3650, 0.0509, 0.0509, 0.0820, 0.0934, 0.1019, 0.1053],  # SD 1.4
+    [0.3640, 0.0870, 0.0817, 0.1328, 0.1527, 0.1527, 0.1563],  # SD 1.3
+    [0.4307, 0.0982, 0.1082, 0.1428, 0.1884, 0.1863, 0.1963],  # SD 1.2
+    [0.3160, 0.0089, 0.0018, 0.0000, 0.0178, 0.0284, 0.0266]   # SD 1.1
 ]
+
+def add_small_offset(values, threshold=0.01):
+    """Add small offset to very small values to make them visible in plots."""
+    return [max(v, threshold) if v > 0 else v for v in values]
 
 def create_plot(ax, methods, fpr_values):
     """Create a plot for Stable Diffusion results."""
     pixels = [4, 64, 256, 1024, 4096, 16384, 65536]
     
-    # ML conference standard colorblind-friendly colors
+    # ML conference standard colors
     colors = [
         '#0077BB',  # Blue
         '#EE7733',  # Orange
@@ -80,7 +84,8 @@ def create_plot(ax, methods, fpr_values):
         # Plot main line
         line = ax.plot(range(len(pixels)), y_values,
                 marker=marker, label=label, color=colors[idx],
-                alpha=0.9, markersize=10, linestyle='-', linewidth=2.5)[0]
+                alpha=0.9, markersize=10, linestyle='-', linewidth=2.5,
+                markeredgecolor='black', markeredgewidth=1)[0]
         
         lines.append(line)
         labels.append(label)
@@ -109,11 +114,11 @@ def create_plot(ax, methods, fpr_values):
     return lines, labels
 
 def create_inference_steps_comparison(ax):
-    """Create a plot comparing different inference steps for 1024 pixels."""
+    """Create a plot comparing different inference steps."""
     models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
-    steps_25 = [0.2536, 0.1883, 0.3016, 0.2586, 0.0768]  # 25 steps
-    steps_15 = [0.1692, 0.0850, 0.1927, 0.2247, 0.0625]  # 15 steps with specific prompt
-    steps_5 = [0.0000, 0.0039, 0.0039, 0.0078, 0.0000]   # 5 steps
+    steps_25 = [0.1133, 0.082, 0.1328, 0.1428, 0.0]      # 25 steps
+    steps_15 = [0.0765, 0.0315, 0.0819, 0.1021, 0.0284]  # 15 steps
+    steps_5 = [0.0, 0.0039, 0.0039, 0.0078, 0.0]         # 5 steps
     
     x = np.arange(len(models))
     width = 0.25
@@ -126,28 +131,16 @@ def create_inference_steps_comparison(ax):
     }
     
     # Plot bars
-    bars1 = ax.bar(x - width, steps_25, width, label='25 Steps', color=colors['25_steps'])
-    bars2 = ax.bar(x, steps_15, width, label='15 Steps', color=colors['15_steps'])
-    bars3 = ax.bar(x + width, steps_5, width, label='5 Steps', color=colors['5_steps'])
-    
-    # Add value labels for all bars
-    def autolabel(bars, values):
-        for bar, val in zip(bars, values):
-            height = val
-            ax.text(bar.get_x() + bar.get_width()/2, height + 0.01,
-                   f'{val:.4f}', ha='center', va='bottom', rotation=90,
-                   fontsize=10)
-    
-    autolabel(bars1, steps_25)
-    autolabel(bars2, steps_15)
-    autolabel(bars3, steps_5)
+    ax.bar(x - width, steps_25, width, label='25 Steps', color=colors['25_steps'], edgecolor='black', linewidth=1)
+    ax.bar(x, steps_15, width, label='15 Steps', color=colors['15_steps'], edgecolor='black', linewidth=1)
+    ax.bar(x + width, steps_5, width, label='5 Steps', color=colors['5_steps'], edgecolor='black', linewidth=1)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title('Comparison of Inference Steps\n(1024 Pixels)', pad=15)
+    ax.set_title('Impact of Number of Inference Steps', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(models)
     ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
-    ax.legend(loc='upper right')
+    ax.legend(edgecolor='black')
     
     # Add grid for better readability
     ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')
@@ -158,10 +151,10 @@ def create_inference_steps_comparison(ax):
         spine.set_linewidth(1.5)
 
 def create_prompt_comparison(ax):
-    """Create a plot comparing prompt vs no prompt for 1024 pixels with 15 steps."""
+    """Create a plot comparing prompt vs no prompt."""
     models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
-    with_prompt = [0.1692, 0.0850, 0.1927, 0.2247, 0.0625]    # 15 steps with specific prompt
-    no_prompt = [0.2278, 0.2560, 0.1892, 0.4031, 0.6509]      # 15 steps with empty prompt
+    with_prompt = [0.1133, 0.082, 0.1328, 0.1428, 0.0]        # Japanese café prompt
+    no_prompt = [0.1535, 0.1364, 0.1006, 0.1832, 0.2959]      # generic prompt
     
     x = np.arange(len(models))
     width = 0.35
@@ -173,26 +166,15 @@ def create_prompt_comparison(ax):
     }
     
     # Plot bars
-    bars1 = ax.bar(x - width/2, no_prompt, width, label='Empty Prompt', color=colors['no_prompt'])
-    bars2 = ax.bar(x + width/2, with_prompt, width, label='Specific Prompt', color=colors['with_prompt'])
-    
-    # Add value labels
-    def autolabel(bars, values):
-        for bar, val in zip(bars, values):
-            height = val
-            ax.text(bar.get_x() + bar.get_width()/2, height + 0.01,
-                   f'{val:.4f}', ha='center', va='bottom', rotation=90,
-                   fontsize=10)
-    
-    autolabel(bars1, no_prompt)
-    autolabel(bars2, with_prompt)
+    ax.bar(x - width/2, no_prompt, width, label='Generic Prompt', color=colors['no_prompt'], edgecolor='black', linewidth=1)
+    ax.bar(x + width/2, with_prompt, width, label='Japanese Café Prompt', color=colors['with_prompt'], edgecolor='black', linewidth=1)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title('Comparison of Prompts\n(1024 Pixels, 15 Steps)', pad=15)
+    ax.set_title('Impact of Prompt Types', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(models)
     ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
-    ax.legend()
+    ax.legend(edgecolor='black')
     
     # Add grid for better readability
     ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')
@@ -203,11 +185,11 @@ def create_prompt_comparison(ax):
         spine.set_linewidth(1.5)
 
 def create_iteration_comparison(ax):
-    """Create a plot comparing training iterations for 256 pixels."""
+    """Create a plot comparing training iterations."""
     models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
-    iter_2000 = [0.3594, 0.1992, 0.3438, 0.3906, 0.0352]  # 2000 iterations
-    iter_5000 = [0.2656, 0.1523, 0.2305, 0.3008, 0.0078]  # 5000 iterations
-    iter_8000 = [0.1602, 0.1172, 0.1797, 0.2109, 0.0039]  # 8000 iterations
+    iter_2000 = [0.3012, 0.1685, 0.2556, 0.2764, 0.1436]  # 2000 iterations
+    iter_5000 = [0.1658, 0.1012, 0.1835, 0.1965, 0.0822]   # 5000 iterations
+    iter_8000 = [0.1133, 0.082, 0.1328, 0.1428, 0.0]      # 8000 iterations
     
     x = np.arange(len(models))
     width = 0.25  # Adjusted width to fit three bars
@@ -220,28 +202,16 @@ def create_iteration_comparison(ax):
     }
     
     # Plot bars
-    bars1 = ax.bar(x - width, iter_2000, width, label='2000 Iterations', color=colors['2000_iter'])
-    bars2 = ax.bar(x, iter_5000, width, label='5000 Iterations', color=colors['5000_iter'])
-    bars3 = ax.bar(x + width, iter_8000, width, label='8000 Iterations', color=colors['8000_iter'])
-    
-    # Add value labels
-    def autolabel(bars, values):
-        for bar, val in zip(bars, values):
-            height = val
-            ax.text(bar.get_x() + bar.get_width()/2, height + 0.01,
-                   f'{val:.4f}', ha='center', va='bottom', rotation=90,
-                   fontsize=10)
-    
-    autolabel(bars1, iter_2000)
-    autolabel(bars2, iter_5000)
-    autolabel(bars3, iter_8000)
+    ax.bar(x - width, iter_2000, width, label='2000 Iterations', color=colors['2000_iter'], edgecolor='black', linewidth=1)
+    ax.bar(x, iter_5000, width, label='5000 Iterations', color=colors['5000_iter'], edgecolor='black', linewidth=1)
+    ax.bar(x + width, iter_8000, width, label='8000 Iterations', color=colors['8000_iter'], edgecolor='black', linewidth=1)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title('Comparison of Training Iterations\n(256 Pixels)', pad=15)
+    ax.set_title('Impact of Number of Training Iterations', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(models)
     ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
-    ax.legend()
+    ax.legend(edgecolor='black')
     
     # Add grid for better readability
     ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')
@@ -252,11 +222,11 @@ def create_iteration_comparison(ax):
         spine.set_linewidth(1.5)
 
 def create_decoder_size_comparison(ax):
-    """Create a plot comparing different decoder sizes for 1024 pixels."""
+    """Create a plot comparing different decoder sizes."""
     models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
     small_decoder = [0.9576, 0.9488, 0.9887, 0.9543, 0.9555]    # 32M params
     medium_decoder = [0.2536, 0.1883, 0.3016, 0.2586, 0.0768]   # 187M params
-    large_decoder = [0.1133, 0.082, 0.1328, 0.1328, 0.0000]     # 674M params
+    large_decoder = [0.1133, 0.082, 0.1328, 0.1428, 0.0]        # 674M params
     
     x = np.arange(len(models))
     width = 0.25
@@ -269,28 +239,16 @@ def create_decoder_size_comparison(ax):
     }
     
     # Plot bars
-    bars1 = ax.bar(x - width, small_decoder, width, label='32M params', color=colors['small'])
-    bars2 = ax.bar(x, medium_decoder, width, label='187M params', color=colors['medium'])
-    bars3 = ax.bar(x + width, large_decoder, width, label='674M params', color=colors['large'])
-    
-    # Add value labels
-    def autolabel(bars, values):
-        for bar, val in zip(bars, values):
-            height = val
-            ax.text(bar.get_x() + bar.get_width()/2, height + 0.01,
-                   f'{val:.4f}', ha='center', va='bottom', rotation=90,
-                   fontsize=10)
-    
-    autolabel(bars1, small_decoder)
-    autolabel(bars2, medium_decoder)
-    autolabel(bars3, large_decoder)
+    ax.bar(x - width, small_decoder, width, label='32M params', color=colors['small'], edgecolor='black', linewidth=1)
+    ax.bar(x, medium_decoder, width, label='187M params', color=colors['medium'], edgecolor='black', linewidth=1)
+    ax.bar(x + width, large_decoder, width, label='674M params', color=colors['large'], edgecolor='black', linewidth=1)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title('Comparison of Decoder Sizes\n(1024 Pixels)', pad=15)
+    ax.set_title('Impact of Decoder Sizes', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(models)
     ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
-    ax.legend()
+    ax.legend(edgecolor='black')
     
     # Add grid for better readability
     ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')

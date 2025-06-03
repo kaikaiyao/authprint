@@ -17,7 +17,7 @@ import torchvision
 import time
 from datetime import datetime
 import psutil
-import GPUtil
+import torch.cuda
 
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -80,16 +80,18 @@ def get_memory_usage():
     
     # GPU Memory
     gpu_memory = []
-    try:
-        gpus = GPUtil.getGPUs()
-        for gpu in gpus:
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            allocated = torch.cuda.memory_allocated(i) / 1024 / 1024  # MB
+            reserved = torch.cuda.memory_reserved(i) / 1024 / 1024   # MB
             gpu_memory.append({
-                'id': gpu.id,
-                'used': gpu.memoryUsed,
-                'total': gpu.memoryTotal
+                'id': i,
+                'allocated': allocated,
+                'reserved': reserved,
+                'total': torch.cuda.get_device_properties(i).total_memory / 1024 / 1024
             })
-    except:
-        gpu_memory = "Unable to get GPU memory info"
+    else:
+        gpu_memory = "CUDA not available"
     
     return cpu_memory, gpu_memory
 
@@ -103,7 +105,9 @@ def log_progress(rank: int, message: str, level: str = "info"):
         mem_info = f"CPU Memory: {cpu_mem:.2f}MB"
         if isinstance(gpu_mem, list):
             for gpu in gpu_mem:
-                mem_info += f", GPU{gpu['id']}: {gpu['used']}/{gpu['total']}MB"
+                mem_info += f", GPU{gpu['id']}: {gpu['allocated']:.0f}MB allocated/{gpu['reserved']:.0f}MB reserved/{gpu['total']:.0f}MB total"
+        else:
+            mem_info += f", {gpu_mem}"
         
         log_msg = f"[{timestamp}] {message}\n{mem_info}"
         

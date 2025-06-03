@@ -200,17 +200,7 @@ def generate_images_distributed(
 
 
 def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -> Dict[str, float]:
-    """Compute FID scores between reference model and comparison models.
-    
-    Args:
-        args: Command line arguments
-        rank: Process rank
-        world_size: Total number of processes
-        device: Torch device
-        
-    Returns:
-        Dict[str, float]: FID scores for each comparison
-    """
+    """Compute FID scores between reference model and comparison models."""
     log_progress(rank, "Starting FID computation")
     start_time = time.time()
     
@@ -241,98 +231,116 @@ def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -
             enable_cpu_offload=args.enable_cpu_offload
         )
         
-        # Initialize FID statistics
-        ref_activations = []
-        comp_activations = []
-        chunk_fids = []
+        # Initialize FID statistics accumulators
+        total_chunks = (args.num_images // world_size + args.chunk_size - 1) // args.chunk_size
+        ref_features_sum = None
+        ref_features_sq_sum = None
+        comp_features_sum = None
+        comp_features_sq_sum = None
+        total_images = 0
         
-        # Generate and process images in chunks
-        ref_generator = generate_images_distributed(
-            model=ref_model,
-            num_images=args.num_images,
-            batch_size=args.batch_size,
-            rank=rank,
-            world_size=world_size,
-            chunk_size=args.chunk_size,
-            prompt=args.prompt,
-            num_inference_steps=args.num_inference_steps,
-            guidance_scale=args.guidance_scale
-        )
-        
-        comp_generator = generate_images_distributed(
-            model=comp_model,
-            num_images=args.num_images,
-            batch_size=args.batch_size,
-            rank=rank,
-            world_size=world_size,
-            chunk_size=args.chunk_size,
-            prompt=args.prompt,
-            num_inference_steps=args.num_inference_steps,
-            guidance_scale=args.guidance_scale
-        )
-        
-        # Process chunks
-        for chunk_idx, (ref_chunk, comp_chunk) in enumerate(zip(ref_generator, comp_generator)):
+        # Process chunks one at a time
+        for chunk_idx in range(total_chunks):
             chunk_start_time = time.time()
-            log_progress(rank, f"Processing chunk {chunk_idx + 1} for FID computation")
+            log_progress(rank, f"Processing chunk {chunk_idx + 1}/{total_chunks}")
             
-            # Save images if requested
-            if args.save_images and rank == 0:
-                save_dir = Path(args.output_dir) / "images"
-                for m, chunk, prefix in [(args.reference_model, ref_chunk, "ref"), (model_name, comp_chunk, "comp")]:
-                    model_dir = save_dir / m
-                    model_dir.mkdir(parents=True, exist_ok=True)
-                    for i, img in enumerate(chunk):
-                        img_path = model_dir / f"{prefix}_chunk{chunk_idx}_img{i:05d}.png"
-                        torchvision.utils.save_image(img, img_path)
-            
-            # Update FID statistics
-            chunk_fid = calculate_fid(
-                ref_chunk,
-                comp_chunk,
+            # Generate reference model images for this chunk
+            log_progress(rank, f"Generating {args.reference_model} images for chunk {chunk_idx + 1}")
+            ref_chunk = next(generate_images_distributed(
+                model=ref_model,
+                num_images=min(args.chunk_size, args.num_images - chunk_idx * args.chunk_size),
                 batch_size=args.batch_size,
-                device=device
-            )
-            chunk_fids.append(chunk_fid)
+                rank=rank,
+                world_size=world_size,
+                chunk_size=args.chunk_size,
+                prompt=args.prompt,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale
+            ))
+            
+            # Save reference images if requested
+            if args.save_images and rank == 0:
+                save_dir = Path(args.output_dir) / "images" / args.reference_model
+                save_dir.mkdir(parents=True, exist_ok=True)
+                for i, img in enumerate(ref_chunk):
+                    img_path = save_dir / f"chunk{chunk_idx}_img{i:05d}.png"
+                    torchvision.utils.save_image(img, img_path)
+            
+            # Generate comparison model images for this chunk
+            log_progress(rank, f"Generating {model_name} images for chunk {chunk_idx + 1}")
+            comp_chunk = next(generate_images_distributed(
+                model=comp_model,
+                num_images=min(args.chunk_size, args.num_images - chunk_idx * args.chunk_size),
+                batch_size=args.batch_size,
+                rank=rank,
+                world_size=world_size,
+                chunk_size=args.chunk_size,
+                prompt=args.prompt,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale
+            ))
+            
+            # Save comparison images if requested
+            if args.save_images and rank == 0:
+                save_dir = Path(args.output_dir) / "images" / model_name
+                save_dir.mkdir(parents=True, exist_ok=True)
+                for i, img in enumerate(comp_chunk):
+                    img_path = save_dir / f"chunk{chunk_idx}_img{i:05d}.png"
+                    torchvision.utils.save_image(img, img_path)
+            
+            # Extract features and update statistics
+            ref_features = calculate_fid.extract_features(ref_chunk, device)
+            comp_features = calculate_fid.extract_features(comp_chunk, device)
+            
+            # Update running statistics
+            if ref_features_sum is None:
+                ref_features_sum = ref_features.sum(0)
+                ref_features_sq_sum = (ref_features ** 2).sum(0)
+                comp_features_sum = comp_features.sum(0)
+                comp_features_sq_sum = (comp_features ** 2).sum(0)
+            else:
+                ref_features_sum += ref_features.sum(0)
+                ref_features_sq_sum += (ref_features ** 2).sum(0)
+                comp_features_sum += comp_features.sum(0)
+                comp_features_sq_sum += (comp_features ** 2).sum(0)
+            
+            total_images += len(ref_features)
+            
+            # Clear memory immediately
+            del ref_chunk, comp_chunk, ref_features, comp_features
+            torch.cuda.empty_cache()
             
             chunk_time = time.time() - chunk_start_time
             log_progress(rank, 
-                f"Chunk {chunk_idx + 1} Results:\n"
-                f"- FID Score: {chunk_fid:.4f}\n"
+                f"Processed chunk {chunk_idx + 1}:\n"
                 f"- Processing Time: {chunk_time:.2f}s\n"
-                f"- Average FID so far: {sum(chunk_fids)/len(chunk_fids):.4f}"
+                f"- Total images processed: {total_images}"
             )
-            
-            # Accumulate activations for final FID computation
-            ref_activations.append(ref_chunk)
-            comp_activations.append(comp_chunk)
-            
-            # Clear memory after processing each chunk
-            del ref_chunk, comp_chunk
-            torch.cuda.empty_cache()
-            log_progress(rank, f"Cleared memory after chunk {chunk_idx + 1}")
         
-        # Compute final FID score using all accumulated activations
-        log_progress(rank, "Computing final FID score...")
-        final_fid = calculate_fid(
-            torch.cat(ref_activations, dim=0),
-            torch.cat(comp_activations, dim=0),
-            batch_size=args.batch_size,
-            device=device
+        # Compute final statistics
+        ref_mean = ref_features_sum / total_images
+        ref_cov = (ref_features_sq_sum / total_images) - (ref_mean ** 2)
+        comp_mean = comp_features_sum / total_images
+        comp_cov = (comp_features_sq_sum / total_images) - (comp_mean ** 2)
+        
+        # Compute final FID score
+        final_fid = calculate_fid.compute_fid_from_stats(
+            ref_mean, ref_cov,
+            comp_mean, comp_cov
         )
         
         model_time = time.time() - model_start_time
         log_progress(rank, 
             f"\nFinal Results for {model_name}:\n"
-            f"- Final FID: {final_fid:.4f}\n"
-            f"- Chunk FIDs: {', '.join(f'{fid:.4f}' for fid in chunk_fids)}\n"
+            f"- FID Score: {final_fid:.4f}\n"
+            f"- Total Images: {total_images}\n"
             f"- Total Processing Time: {model_time:.2f}s"
         )
         
         fid_scores[model_name] = final_fid
         
-        # Clean up
-        del ref_activations, comp_activations, comp_model
+        # Clean up comparison model and statistics
+        del comp_model, ref_features_sum, ref_features_sq_sum, comp_features_sum, comp_features_sq_sum
         torch.cuda.empty_cache()
         log_progress(rank, f"Completed comparison with {model_name}")
     

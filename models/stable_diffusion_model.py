@@ -77,12 +77,12 @@ class StableDiffusionModel(BaseGenerativeModel):
         Returns:
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
-        # Print actual pipeline model configurations
-        print(f"[Debug] Pipeline Configuration:")
-        print(f"- UNet: {self.pipe.unet.config._name_or_path}")
-        print(f"- VAE: {self.pipe.vae.config._name_or_path}")
-        print(f"- Text Encoder: {self.pipe.text_encoder.config._name_or_path}")
-        print(f"- Scheduler: {self.pipe.scheduler.__class__.__name__}")
+        # # Print actual pipeline model configurations
+        # print(f"[Debug] Pipeline Configuration:")
+        # print(f"- UNet: {self.pipe.unet.config._name_or_path}")
+        # print(f"- VAE: {self.pipe.vae.config._name_or_path}")
+        # print(f"- Text Encoder: {self.pipe.text_encoder.config._name_or_path}")
+        # print(f"- Scheduler: {self.pipe.scheduler.__class__.__name__}")
         
         # Extract generation parameters
         prompt = kwargs.get("prompt", "A photorealistic advertisement poster for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.")

@@ -14,6 +14,10 @@ import torch
 import torch.distributed as dist
 import numpy as np
 import torchvision
+import time
+from datetime import datetime
+import psutil
+import GPUtil
 
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -69,6 +73,50 @@ def parse_args():
     return parser.parse_args()
 
 
+def get_memory_usage():
+    """Get current memory usage of CPU and GPU."""
+    # CPU Memory
+    cpu_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+    
+    # GPU Memory
+    gpu_memory = []
+    try:
+        gpus = GPUtil.getGPUs()
+        for gpu in gpus:
+            gpu_memory.append({
+                'id': gpu.id,
+                'used': gpu.memoryUsed,
+                'total': gpu.memoryTotal
+            })
+    except:
+        gpu_memory = "Unable to get GPU memory info"
+    
+    return cpu_memory, gpu_memory
+
+
+def log_progress(rank: int, message: str, level: str = "info"):
+    """Log progress with timestamp and memory usage."""
+    if rank == 0:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cpu_mem, gpu_mem = get_memory_usage()
+        
+        mem_info = f"CPU Memory: {cpu_mem:.2f}MB"
+        if isinstance(gpu_mem, list):
+            for gpu in gpu_mem:
+                mem_info += f", GPU{gpu['id']}: {gpu['used']}/{gpu['total']}MB"
+        
+        log_msg = f"[{timestamp}] {message}\n{mem_info}"
+        
+        if level == "info":
+            logging.info(log_msg)
+        elif level == "warning":
+            logging.warning(log_msg)
+        elif level == "error":
+            logging.error(log_msg)
+        elif level == "debug":
+            logging.debug(log_msg)
+
+
 def generate_images_distributed(
     model: StableDiffusionModel,
     num_images: int,
@@ -97,30 +145,54 @@ def generate_images_distributed(
     if rank < num_images % world_size:
         images_per_gpu += 1
     
+    total_chunks = (images_per_gpu + chunk_size - 1) // chunk_size
+    
     # Process in chunks
-    for chunk_start in range(0, images_per_gpu, chunk_size):
+    for chunk_idx in range(total_chunks):
+        chunk_start = chunk_idx * chunk_size
         chunk_end = min(chunk_start + chunk_size, images_per_gpu)
         chunk_images = []
         
+        log_progress(rank, f"Starting chunk {chunk_idx + 1}/{total_chunks} (images {chunk_start}-{chunk_end})")
+        chunk_start_time = time.time()
+        
         # Generate images for this chunk
         for i in range(chunk_start, chunk_end, batch_size):
+            batch_start_time = time.time()
             current_batch_size = min(batch_size, chunk_end - i)
+            
+            log_progress(rank, f"Generating batch of {current_batch_size} images in chunk {chunk_idx + 1}")
+            
             batch = model.generate_images(
                 batch_size=current_batch_size,
                 **kwargs
             )
             chunk_images.append(batch)
             
+            batch_time = time.time() - batch_start_time
             if rank == 0:
-                total_progress = (i + current_batch_size) * world_size
-                logging.info(f"Generated {total_progress}/{num_images} images")
+                total_progress = (chunk_start + i + current_batch_size) * world_size
+                log_progress(rank, 
+                    f"Progress: {total_progress}/{num_images} images "
+                    f"(Batch time: {batch_time:.2f}s, "
+                    f"Images/sec: {current_batch_size/batch_time:.2f})"
+                )
         
-        # Yield this chunk's images
-        yield torch.cat(chunk_images, dim=0)
+        # Concatenate and yield chunk images
+        chunk_images = torch.cat(chunk_images, dim=0)
+        chunk_time = time.time() - chunk_start_time
+        log_progress(rank, 
+            f"Completed chunk {chunk_idx + 1}/{total_chunks} "
+            f"(Time: {chunk_time:.2f}s, "
+            f"Images/sec: {len(chunk_images)/chunk_time:.2f})"
+        )
+        
+        yield chunk_images
         
         # Clear memory
         del chunk_images
         torch.cuda.empty_cache()
+        log_progress(rank, f"Cleared memory after chunk {chunk_idx + 1}")
 
 
 def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -> Dict[str, float]:
@@ -135,9 +207,11 @@ def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -
     Returns:
         Dict[str, float]: FID scores for each comparison
     """
+    log_progress(rank, "Starting FID computation")
+    start_time = time.time()
+    
     # Initialize models
-    if rank == 0:
-        logging.info("Initializing models...")
+    log_progress(rank, "Initializing models...")
     
     # Initialize reference model
     ref_model = StableDiffusionModel(
@@ -150,9 +224,9 @@ def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -
     
     # Compute FID scores for each comparison model
     fid_scores = {}
-    for model_name in args.comparison_models:
-        if rank == 0:
-            logging.info(f"\nComputing FID between {args.reference_model} and {model_name}...")
+    for model_idx, model_name in enumerate(args.comparison_models):
+        model_start_time = time.time()
+        log_progress(rank, f"\nStarting comparison {model_idx + 1}/{len(args.comparison_models)}: {args.reference_model} vs {model_name}")
         
         # Initialize comparison model
         comp_model = StableDiffusionModel(
@@ -166,6 +240,7 @@ def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -
         # Initialize FID statistics
         ref_activations = []
         comp_activations = []
+        chunk_fids = []
         
         # Generate and process images in chunks
         ref_generator = generate_images_distributed(
@@ -194,11 +269,14 @@ def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -
         
         # Process chunks
         for chunk_idx, (ref_chunk, comp_chunk) in enumerate(zip(ref_generator, comp_generator)):
+            chunk_start_time = time.time()
+            log_progress(rank, f"Processing chunk {chunk_idx + 1} for FID computation")
+            
             # Save images if requested
             if args.save_images and rank == 0:
                 save_dir = Path(args.output_dir) / "images"
-                for model, chunk, prefix in [(args.reference_model, ref_chunk, "ref"), (model_name, comp_chunk, "comp")]:
-                    model_dir = save_dir / model
+                for m, chunk, prefix in [(args.reference_model, ref_chunk, "ref"), (model_name, comp_chunk, "comp")]:
+                    model_dir = save_dir / m
                     model_dir.mkdir(parents=True, exist_ok=True)
                     for i, img in enumerate(chunk):
                         img_path = model_dir / f"{prefix}_chunk{chunk_idx}_img{i:05d}.png"
@@ -211,9 +289,15 @@ def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -
                 batch_size=args.batch_size,
                 device=device
             )
+            chunk_fids.append(chunk_fid)
             
-            if rank == 0:
-                logging.info(f"Chunk {chunk_idx + 1} FID: {chunk_fid:.4f}")
+            chunk_time = time.time() - chunk_start_time
+            log_progress(rank, 
+                f"Chunk {chunk_idx + 1} Results:\n"
+                f"- FID Score: {chunk_fid:.4f}\n"
+                f"- Processing Time: {chunk_time:.2f}s\n"
+                f"- Average FID so far: {sum(chunk_fids)/len(chunk_fids):.4f}"
+            )
             
             # Accumulate activations for final FID computation
             ref_activations.append(ref_chunk)
@@ -222,8 +306,10 @@ def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -
             # Clear memory after processing each chunk
             del ref_chunk, comp_chunk
             torch.cuda.empty_cache()
+            log_progress(rank, f"Cleared memory after chunk {chunk_idx + 1}")
         
         # Compute final FID score using all accumulated activations
+        log_progress(rank, "Computing final FID score...")
         final_fid = calculate_fid(
             torch.cat(ref_activations, dim=0),
             torch.cat(comp_activations, dim=0),
@@ -231,18 +317,27 @@ def compute_fid_scores(args, rank: int, world_size: int, device: torch.device) -
             device=device
         )
         
-        if rank == 0:
-            logging.info(f"Final FID score between {args.reference_model} and {model_name}: {final_fid:.4f}")
+        model_time = time.time() - model_start_time
+        log_progress(rank, 
+            f"\nFinal Results for {model_name}:\n"
+            f"- Final FID: {final_fid:.4f}\n"
+            f"- Chunk FIDs: {', '.join(f'{fid:.4f}' for fid in chunk_fids)}\n"
+            f"- Total Processing Time: {model_time:.2f}s"
+        )
         
         fid_scores[model_name] = final_fid
         
         # Clean up
         del ref_activations, comp_activations, comp_model
         torch.cuda.empty_cache()
+        log_progress(rank, f"Completed comparison with {model_name}")
     
     # Clean up reference model
     del ref_model
     torch.cuda.empty_cache()
+    
+    total_time = time.time() - start_time
+    log_progress(rank, f"\nCompleted all FID computations in {total_time:.2f}s")
     
     return fid_scores
 
@@ -258,8 +353,16 @@ def main():
     if rank == 0:
         os.makedirs(args.output_dir, exist_ok=True)
         setup_logging(args.output_dir, rank)
-        logging.info(f"Configuration:\n{args}")
-        logging.info(f"Distributed setup: {world_size} GPUs")
+        log_progress(rank, 
+            f"Starting FID computation with configuration:\n"
+            f"- Reference Model: {args.reference_model}\n"
+            f"- Comparison Models: {args.comparison_models}\n"
+            f"- Number of Images: {args.num_images}\n"
+            f"- Chunk Size: {args.chunk_size}\n"
+            f"- Batch Size: {args.batch_size}\n"
+            f"- Image Size: {args.img_size}\n"
+            f"- Number of GPUs: {world_size}"
+        )
     
     try:
         # Compute FID scores
@@ -270,19 +373,21 @@ def main():
             results_file = Path(args.output_dir) / "fid_scores.txt"
             with open(results_file, "w") as f:
                 f.write(f"FID Scores (Reference: {args.reference_model})\n")
+                f.write(f"Computation completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write("-" * 50 + "\n")
                 for model_name, score in fid_scores.items():
                     f.write(f"{model_name}: {score:.4f}\n")
             
-            logging.info(f"\nResults saved to {results_file}")
+            log_progress(rank, f"\nResults saved to {results_file}")
     
     except Exception as e:
-        if rank == 0:
-            logging.error(f"Error during FID computation: {str(e)}", exc_info=True)
+        log_progress(rank, f"Error during FID computation: {str(e)}", level="error")
         raise
     finally:
         # Clean up distributed environment
         cleanup_distributed()
+        if rank == 0:
+            log_progress(rank, "Cleaned up distributed environment")
 
 
 if __name__ == "__main__":

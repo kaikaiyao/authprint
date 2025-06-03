@@ -1,0 +1,181 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: ${USER}-job-fid-sd-${JOB_SUFFIX}
+  labels:
+    eidf/user: ${USER}
+    kueue.x-k8s.io/queue-name: ${QUEUE_NAME}
+    kueue.x-k8s.io/priority-class: batch-workload-priority
+spec:
+  completions: 1
+  parallelism: 1
+  completionMode: Indexed
+  backoffLimit: 2147483647
+  activeDeadlineSeconds: 864000
+  template:
+    metadata:
+      labels:
+        eidf/user: ${USER}
+    spec:
+      restartPolicy: OnFailure
+      # Replace nodeSelector with affinity to allow multiple GPU types
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-H200
+      # Add tolerations to allow scheduling on nodes with specific taints
+      tolerations:
+        - key: "eidf098"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+        - key: "eidf107"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+      containers:
+        - name: sd-fid-compute
+          image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
+          workingDir: "/workspace/authprint"
+          env:
+            - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+              value: "1"
+            - name: NCCL_DEBUG
+              value: "INFO"
+            - name: NCCL_IB_DISABLE
+              value: "1"
+            - name: NCCL_IB_HCA
+              value: "^mlx5"
+            - name: PYTHONPATH
+              value: "/workspace/authprint"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "Setting up environment..."
+              mkdir -p /workspace/authprint/fid_results
+              mkdir -p /workspace/authprint/fid_results/logs
+              
+              # Define common parameters for all runs
+              TORCHRUN_CMD="torchrun --nproc_per_node=4 \
+                          --nnodes=1 \
+                          --node_rank=0 \
+                          --master_addr=127.0.0.1 \
+                          --master_port=12345"
+              
+              # Define script arguments as an array for proper handling
+              SCRIPT_ARGS=(
+                "--reference_model" "sd-2.1"
+                "--comparison_models" "sd-1.5" "sd-1.4" "sd-1.3" "sd-1.2" "sd-1.1"
+                "--prompt" "\"A photorealistic advertisement poster for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.\""
+                "--img_size" "1024"
+                "--num_images" "100"
+                "--batch_size" "8"
+                "--num_inference_steps" "25"
+                "--guidance_scale" "7.5"
+                "--enable_cpu_offload"
+              )
+              
+              # Run FID computation multiple times for robustness
+              for run in {1..5}; do
+                echo "Starting FID computation run $run/5..."
+                log_file="/workspace/authprint/fid_results/logs/run_${run}.log"
+                
+                # Run computation using torchrun
+                (
+                  echo "=== FID Computation Run $run/5 ===" 
+                  echo "Started at: $(date)"
+                  echo ""
+                  
+                  if [ $run -eq 1 ]; then
+                    # Show full logs only for first run
+                    eval "$TORCHRUN_CMD scripts/compute_fid_sd.py ${SCRIPT_ARGS[@]}"
+                  else
+                    # Suppress torchrun logs for subsequent runs
+                    eval "$TORCHRUN_CMD scripts/compute_fid_sd.py ${SCRIPT_ARGS[@]}" > /dev/null 2>&1
+                  fi
+                  
+                  echo ""
+                  echo "Finished at: $(date)"
+                  echo "Exit status: $?"
+                ) 2>&1 | tee "$log_file"
+                
+                # Also append to a combined log file
+                cat "$log_file" >> "/workspace/authprint/fid_results/logs/combined.log"
+                echo -e "\n\n" >> "/workspace/authprint/fid_results/logs/combined.log"
+                
+                echo "Completed run $run/5. Logs saved to $log_file"
+                echo "-------------------------------------------"
+                
+                # Add a small delay between runs to ensure clean GPU memory
+                sleep 30
+              done
+              
+              echo "All FID computation runs completed. Logs are available in /workspace/authprint/fid_results/logs/"
+              
+              # Compute average FID scores across all runs
+              echo "Computing average FID scores..."
+              python3 -c '
+              import os
+              import re
+              import numpy as np
+              
+              # Initialize storage for FID scores
+              fid_scores = {}
+              
+              # Read all log files
+              log_dir = "/workspace/authprint/fid_results/logs"
+              for file in os.listdir(log_dir):
+                  if not file.startswith("run_"):
+                      continue
+                      
+                  with open(os.path.join(log_dir, file), "r") as f:
+                      content = f.read()
+                      # Extract FID scores using regex
+                      matches = re.findall(r"FID score between sd-2\.1 and (sd-\d\.\d): (\d+\.\d+)", content)
+                      for model, score in matches:
+                          if model not in fid_scores:
+                              fid_scores[model] = []
+                          fid_scores[model].append(float(score))
+              
+              # Compute statistics
+              with open("/workspace/authprint/fid_results/average_fid_scores.txt", "w") as f:
+                  f.write("Average FID Scores across 5 runs\n")
+                  f.write("-" * 50 + "\n")
+                  for model in sorted(fid_scores.keys()):
+                      scores = fid_scores[model]
+                      mean = np.mean(scores)
+                      std = np.std(scores)
+                      f.write(f"{model}: {mean:.4f} ± {std:.4f}\n")
+              '
+              
+              echo "Results have been summarized in /workspace/authprint/fid_results/average_fid_scores.txt"
+          resources:
+            limits:
+              nvidia.com/gpu: "4"  # Request 8 GPUs for distributed computation
+              cpu: "8"           # Increased CPU count for multi-GPU setup
+              memory: "32Gi"     # Increased memory for multi-GPU setup
+          volumeMounts:
+            - name: nfs-user-107
+              mountPath: /nfs-user-107
+            - name: nfs-user-029
+              mountPath: /nfs-user-029
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: nfs-user-107
+          nfs:
+            server: 10.24.6.77
+            path: /user/s2470447-eidf107
+        - name: nfs-user-029
+          nfs:
+            server: 10.24.1.255
+            path: /user/s2470447-infk8s
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi  # Increased shared memory for multi-GPU setup 

@@ -157,8 +157,8 @@ spec:
           resources:
             limits:
               nvidia.com/gpu: "4"  # Request 8 GPUs for distributed computation
-              cpu: "8"           # Increased CPU count for multi-GPU setup
-              memory: "32Gi"     # Increased memory for multi-GPU setup
+              cpu: "4"           # Increased CPU count for multi-GPU setup
+              memory: "16Gi"     # Increased memory for multi-GPU setup
           volumeMounts:
             - name: nfs-user-107
               mountPath: /nfs-user-107

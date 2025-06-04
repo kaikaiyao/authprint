@@ -235,3 +235,65 @@ def calculate_fid(images1, images2, batch_size=50, device='cpu'):
     fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
     
     return float(fid) 
+
+
+def extract_inception_features(images, batch_size=50, device='cpu'):
+    """Extract features from the InceptionV3 model for FID calculation.
+    
+    Args:
+        images: Images tensor of shape (N,C,H,W) in range [0,1]
+        batch_size: Batch size for processing
+        device: Device to run calculations on
+        
+    Returns:
+        Features array of shape (N, 2048)
+    """
+    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
+    model = InceptionV3([block_idx]).to(device)
+    model.eval()
+    
+    n_batches = (images.size(0) + batch_size - 1) // batch_size
+    n_used_imgs = n_batches * batch_size
+    
+    pred_arr = np.empty((n_used_imgs, 2048))
+    
+    for i in range(n_batches):
+        start = i * batch_size
+        end = min((i + 1) * batch_size, images.size(0))
+        
+        batch = images[start:end].to(device)
+        with torch.no_grad():
+            pred = model(batch)[0]
+        
+        pred_arr[start:end] = pred.cpu().numpy().reshape(pred.size(0), -1)
+    
+    return pred_arr[:images.size(0)]
+
+
+def compute_fid_from_features(features1, features2):
+    """Compute FID score from pre-extracted features.
+    
+    Args:
+        features1: Features from first set of images, array of shape (N, 2048)
+        features2: Features from second set of images, array of shape (N, 2048)
+        
+    Returns:
+        FID score
+    """
+    mu1 = np.mean(features1, axis=0)
+    sigma1 = np.cov(features1, rowvar=False)
+    
+    mu2 = np.mean(features2, axis=0)
+    sigma2 = np.cov(features2, rowvar=False)
+    
+    # Calculate FID
+    ssdiff = np.sum((mu1 - mu2) ** 2.0)
+    covmean = linalg.sqrtm(sigma1.dot(sigma2))
+    
+    # Numerical error might give slight imaginary component
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+    
+    fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
+    
+    return float(fid) 

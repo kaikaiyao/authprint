@@ -72,7 +72,7 @@ spec:
                 "--reference_model" "sd-2.1"
                 "--comparison_models" "sd-1.5"
                 "--prompt" "\"a high quality image\""
-                "--img_size" "1024"
+                "--img_size" "768"
                 "--num_images" "10000"
                 "--batch_size" "8"
                 "--num_inference_steps" "25"

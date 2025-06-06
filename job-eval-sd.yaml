@@ -85,7 +85,7 @@ spec:
                 "--img_size" "1024"
                 "--image_pixel_count" "1024"
                 "--image_pixel_set_seed" "42"
-                "--num_samples" "2560"
+                "--num_samples" "256"
                 "--batch_size" "32"
                 "--sd_decoder_size" "L"
               )

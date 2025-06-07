@@ -126,10 +126,24 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name, plot_type=
     # Customize the subplot
     ax.set_xticks(range(len(pixels)))
     ax.set_xticklabels(pixels)
-    ax.set_xlabel('Fingerprint Length (Number of Pixels Selected)', labelpad=15)
+    ax.set_xlabel('Fingerprint Length', labelpad=15)
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    dataset_title = "StyleGAN2, FFHQ (70K Train Data, ADA Aug)" if dataset_name == "FFHQ" else "StyleGAN2, LSUN-Cat (100K Train Data, ADA Aug)"
-    ax.set_title(dataset_title, pad=15)
+    
+    # Split titles into main title and subtitle
+    if dataset_name == "FFHQ":
+        main_title = "StyleGAN2, FFHQ"
+        subtitle = "(Target Model: 70K Train Data, ADA Aug)"
+    else:
+        main_title = "StyleGAN2, LSUN-Cat"
+        subtitle = "(Target Model: 100K Train Data, ADA Aug)"
+    
+    # Set main title and subtitle with default spacing
+    ax.set_title(main_title + '\n', pad=20, fontsize=24)
+    ax.text(0.5, 1.05, subtitle, 
+            horizontalalignment='center',
+            transform=ax.transAxes,
+            fontsize=18)  # Default spacing
+    
     ax.set_ylim(-0.05, 1.05)  # Add margins above and below
     
     # Add grid for better readability
@@ -148,10 +162,10 @@ ffhq_methods = [
     "30K Train Data, ADA Aug",
     "70K Train Data, BCR Aug",
     "70K Train Data, No Aug",
-    "Quantization INT8",
-    "Quantization INT4",
-    "Downsampling to 128",
-    "Downsampling to 224"
+    "Quant INT8",
+    "Quant INT4",
+    "Downsample to 128",
+    "Downsample to 224"
 ]
 
 ffhq_fid_scores = [14.0726, 2.5086, 2.1812, 3.1219, 1.7242, 268.1055, 40.2009, 9.9268]
@@ -172,13 +186,13 @@ lsun_methods = [
     "30K Train Data, ADA Aug",
     "100K Train Data, BCR Aug",
     "100K Train Data, No Aug",
-    "Quantization INT8",
-    "Quantization INT4",
-    "Downsampling to 128",
-    "Downsampling to 224"
+    "Quant INT8",
+    "Quant INT4",
+    "Downsample to 128",
+    "Downsample to 224"
 ]
 
-lsun_fid_scores = [28.5018, 4.9672, 4.6296, 5.0971, 2.092, 286415.3296, 19.6367, 4.839]
+lsun_fid_scores = [28.5018, 4.9672, 4.6296, 5.0971, 2.092, 286.415, 19.6367, 4.839]
 lsun_fpr_values = [
     [0.5651, 0.0026, 0, 0, 0.3674, 0.8167],
     [0.5583, 0.0026, 0.0001, 0.0001, 0.3657, 0.8423],
@@ -195,47 +209,102 @@ setup_plotting_style()
 
 # Create two separate figures - one for training methods and one for optimization methods
 def create_and_save_plots(plot_type="training"):
-    # Create figure for FFHQ
-    fig_ffhq = plt.figure(figsize=(7, 6))
-    ax_ffhq = plt.gca()
+    # Set consistent figure size and layout parameters
+    fig_width = 14  # Double width to accommodate two plots side by side
+    fig_height = 7 if plot_type == "optimization" else 5  # Less height needed for training plots
+    
+    # Create figure
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    
+    if plot_type == "training":
+        # For training plots, use simple subplot layout
+        ax_ffhq = plt.subplot(121)
+        ax_lsun = plt.subplot(122)
+    else:
+        # For optimization plots, use gridspec for bottom legends
+        gs = fig.add_gridspec(2, 2, height_ratios=[4, 1])
+        ax_ffhq = fig.add_subplot(gs[0, 0])
+        ax_lsun = fig.add_subplot(gs[0, 1])
+    
+    # Create FFHQ subplot
     lines1, labels1 = create_subplot(ax_ffhq, ffhq_methods, ffhq_fid_scores, ffhq_fpr_values, "FFHQ", plot_type)
     
-    # Add legend for FFHQ
-    ax_ffhq.legend(lines1, labels1, 
-                  loc='upper right',
-                  ncol=1, 
-                  handletextpad=0.3, 
-                  handlelength=1.5, 
-                  markerscale=1.2,
-                  fontsize=15,
-                  edgecolor='black',
-                  bbox_to_anchor=(0.99, 0.99))
-    
-    # Adjust layout and save FFHQ
-    plt.tight_layout()
-    suffix = "training" if plot_type == "training" else "optimization"
-    plt.savefig(f'stylegan2_fpr_ffhq_{suffix}.png', bbox_inches='tight', dpi=300, transparent=True)
-    plt.close()
-
-    # Create figure for LSUN-Cat
-    fig_lsun = plt.figure(figsize=(7, 6))
-    ax_lsun = plt.gca()
+    # Create LSUN subplot
     lines2, labels2 = create_subplot(ax_lsun, lsun_methods, lsun_fid_scores, lsun_fpr_values, "LSUN-Cat", plot_type)
     
-    # Add legend for LSUN-Cat
-    ax_lsun.legend(lines2, labels2, 
-                  loc='upper right',
-                  ncol=1, 
-                  handletextpad=0.3, 
-                  handlelength=1.5, 
-                  markerscale=1.2,
-                  fontsize=15,
-                  edgecolor='black',
-                  bbox_to_anchor=(0.99, 0.99))
+    if plot_type == "training":
+        # Place legends inside plots at top-left for training plots
+        legend_ffhq = ax_ffhq.legend(lines1, labels1,
+                                loc='upper left',
+                                ncol=1,  # Vertical alignment
+                                handletextpad=0.3,
+                                handlelength=1.5,
+                                markerscale=1.2,
+                                fontsize=15,
+                                edgecolor='black',
+                                bbox_to_anchor=(0.02, 0.98))
+        
+        legend_lsun = ax_lsun.legend(lines2, labels2,
+                                loc='upper left',
+                                ncol=1,  # Vertical alignment
+                                handletextpad=0.3,
+                                handlelength=1.5,
+                                markerscale=1.2,
+                                fontsize=15,
+                                edgecolor='black',
+                                bbox_to_anchor=(0.02, 0.98))
+        
+        # Ensure legend backgrounds are opaque
+        legend_ffhq.get_frame().set_facecolor('white')
+        legend_ffhq.get_frame().set_alpha(0.9)
+        legend_lsun.get_frame().set_facecolor('white')
+        legend_lsun.get_frame().set_alpha(0.9)
+        
+        # Adjust spacing between subplots
+        plt.subplots_adjust(wspace=0.3)
+    else:
+        # Create legend areas below each plot for optimization plots
+        legend_ax_ffhq = fig.add_subplot(gs[1, 0])
+        legend_ax_lsun = fig.add_subplot(gs[1, 1])
+        legend_ax_ffhq.axis('off')
+        legend_ax_lsun.axis('off')
+        
+        # FFHQ Legend
+        legend_ffhq = legend_ax_ffhq.legend(lines1, labels1,
+                                loc='center',
+                                ncol=2,
+                                handletextpad=0.3,
+                                handlelength=1.5,
+                                markerscale=1.2,
+                                fontsize=13,
+                                edgecolor='black',
+                                columnspacing=1.0,
+                                bbox_to_anchor=(0.5, 0.5))
+        
+        # LSUN Legend
+        legend_lsun = legend_ax_lsun.legend(lines2, labels2,
+                                loc='center',
+                                ncol=2,
+                                handletextpad=0.3,
+                                handlelength=1.5,
+                                markerscale=1.2,
+                                fontsize=13,
+                                edgecolor='black',
+                                columnspacing=1.0,
+                                bbox_to_anchor=(0.5, 0.5))
+        
+        # Ensure legend backgrounds are opaque
+        legend_ffhq.get_frame().set_facecolor('white')
+        legend_ffhq.get_frame().set_alpha(1.0)
+        legend_lsun.get_frame().set_facecolor('white')
+        legend_lsun.get_frame().set_alpha(1.0)
+        
+        # Adjust spacing between subplots
+        plt.subplots_adjust(hspace=0.4, wspace=0.3)
     
-    # Adjust layout and save LSUN-Cat
-    plt.tight_layout()
-    plt.savefig(f'stylegan2_fpr_lsun_{suffix}.png', bbox_inches='tight', dpi=300, transparent=True)
+    # Save the combined figure
+    suffix = "training" if plot_type == "training" else "optimization"
+    plt.savefig(f'stylegan2_fpr_combined_{suffix}.png', bbox_inches='tight', dpi=300, transparent=True)
     plt.close()
 
 # Create both plots

@@ -287,7 +287,7 @@ def create_ensemble_decoder_plot(ax):
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
     ax.set_title('Performance of Ensemble Decoder', pad=15)
     ax.set_xticks(num_decoders)
-    ax.set_ylim(-0.01, 0.12)  # Adjusted to data range
+    ax.set_ylim(-0.01, 0.5)  # Extended y-axis range for better context
     
     # Add legend
     ax.legend(edgecolor='black', loc='upper right')

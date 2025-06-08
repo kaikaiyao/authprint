@@ -184,30 +184,30 @@ def create_prompt_comparison(ax):
         spine.set_color('black')
         spine.set_linewidth(1.5)
 
-def create_iteration_comparison(ax):
-    """Create a plot comparing training iterations."""
+def create_training_samples_comparison(ax):
+    """Create a plot comparing number of training samples."""
     models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
-    iter_2000 = [0.3012, 0.1685, 0.2556, 0.2764, 0.1436]  # 2000 iterations
-    iter_5000 = [0.1658, 0.1012, 0.1835, 0.1965, 0.0822]   # 5000 iterations
-    iter_8000 = [0.1133, 0.082, 0.1328, 0.1428, 0.0]      # 8000 iterations
+    samples_128k = [0.3012, 0.1685, 0.2556, 0.2764, 0.1436]  # 128k samples
+    samples_320k = [0.1658, 0.1012, 0.1835, 0.1965, 0.0822]  # 320k samples
+    samples_512k = [0.1133, 0.082, 0.1328, 0.1428, 0.0]      # 512k samples
     
     x = np.arange(len(models))
     width = 0.25  # Adjusted width to fit three bars
     
     # ML conference standard colors
     colors = {
-        '2000_iter': '#0077BB',    # Blue
-        '5000_iter': '#EE7733',    # Orange
-        '8000_iter': '#009988'     # Teal
+        '128k_samples': '#0077BB',    # Blue
+        '320k_samples': '#EE7733',    # Orange
+        '512k_samples': '#009988'     # Teal
     }
     
     # Plot bars
-    ax.bar(x - width, iter_2000, width, label='2000 Iterations', color=colors['2000_iter'], edgecolor='black', linewidth=1)
-    ax.bar(x, iter_5000, width, label='5000 Iterations', color=colors['5000_iter'], edgecolor='black', linewidth=1)
-    ax.bar(x + width, iter_8000, width, label='8000 Iterations', color=colors['8000_iter'], edgecolor='black', linewidth=1)
+    ax.bar(x - width, samples_128k, width, label='128k samples', color=colors['128k_samples'], edgecolor='black', linewidth=1)
+    ax.bar(x, samples_320k, width, label='320k samples', color=colors['320k_samples'], edgecolor='black', linewidth=1)
+    ax.bar(x + width, samples_512k, width, label='512k samples', color=colors['512k_samples'], edgecolor='black', linewidth=1)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
-    ax.set_title('Impact of Number of Training Iterations', pad=15)
+    ax.set_title('Impact of Number of Training Samples', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(models)
     ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
@@ -271,6 +271,24 @@ plt.tight_layout()
 plt.savefig('sd_fpr.png', bbox_inches='tight', dpi=300, transparent=True)
 plt.close()
 
+# Create figure for training samples and decoder size comparison
+fig4 = plt.figure(figsize=(14, 6))  # Wider figure to accommodate two plots
+
+# Create subplots
+ax4_left = fig4.add_subplot(121)  # Left subplot
+ax4_right = fig4.add_subplot(122)  # Right subplot
+
+# Create decoder size comparison on left subplot
+create_decoder_size_comparison(ax4_left)
+
+# Create training samples comparison on right subplot
+create_training_samples_comparison(ax4_right)
+
+# Adjust layout and save
+plt.tight_layout()
+plt.savefig('sd_training_resource.png', bbox_inches='tight', dpi=300, transparent=True)
+plt.close()
+
 # Create figure for inference steps comparison
 fig2 = plt.figure(figsize=(8, 6))
 ax2 = fig2.add_subplot(111)
@@ -285,20 +303,4 @@ ax3 = fig3.add_subplot(111)
 create_prompt_comparison(ax3)
 plt.tight_layout()
 plt.savefig('sd_prompt_comparison.png', bbox_inches='tight', dpi=300, transparent=True)
-plt.close()
-
-# Create figure for iteration comparison
-fig4 = plt.figure(figsize=(8, 6))
-ax4 = fig4.add_subplot(111)
-create_iteration_comparison(ax4)
-plt.tight_layout()
-plt.savefig('sd_iteration_comparison.png', bbox_inches='tight', dpi=300, transparent=True)
-plt.close()
-
-# Create figure for decoder size comparison
-fig5 = plt.figure(figsize=(8, 6))
-ax5 = fig5.add_subplot(111)
-create_decoder_size_comparison(ax5)
-plt.tight_layout()
-plt.savefig('sd_decoder_size_comparison.png', bbox_inches='tight', dpi=300, transparent=True)
 plt.close() 

@@ -69,8 +69,8 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name, plot_type=
     aaai_colors = {
         'Data Size': ['#0077BB', '#EE7733'],      # Blue and Orange
         'Augmentation': ['#009988', '#CC3311'],    # Teal and Red
-        'Quantization': ['#0077BB', '#EE7733'],    # Blue and Orange
-        'Downsampling': ['#009988', '#CC3311']     # Teal and Red
+        'Quantization': ['#0077BB', '#66CCEE'],    # Dark blue and Light blue
+        'Downsampling': ['#009988', '#99DDAA']     # Dark green and Light green
     }
     
     if plot_type == "training":
@@ -100,7 +100,8 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name, plot_type=
         for method_idx, method in enumerate(methods_in_cat):
             idx = methods.index(method)
             marker = 'o' if method_idx % 2 == 0 else 's'
-            label = f"{method} (FID: {fid_scores[idx]:.2f})"
+            # Restore "FID:" prefix but keep one decimal place
+            label = f"{method} (FID: {fid_scores[idx]:.1f})"
             
             y_values = np.array(fpr_values[idx])
             # std_values_for_method = std_values[method]
@@ -162,10 +163,10 @@ ffhq_methods = [
     "30K Train Data, ADA Aug",
     "70K Train Data, BCR Aug",
     "70K Train Data, No Aug",
-    "Quant INT8",
-    "Quant INT4",
-    "Downsample to 128",
-    "Downsample to 224"
+    "Quant INT8",  # Keep original Quant prefix
+    "Quant INT4",  # Keep original Quant prefix
+    "Downsample 128px",  # More descriptive but still concise
+    "Downsample 224px"   # More descriptive but still concise
 ]
 
 ffhq_fid_scores = [14.0726, 2.5086, 2.1812, 3.1219, 1.7242, 268.1055, 40.2009, 9.9268]
@@ -186,10 +187,10 @@ lsun_methods = [
     "30K Train Data, ADA Aug",
     "100K Train Data, BCR Aug",
     "100K Train Data, No Aug",
-    "Quant INT8",
-    "Quant INT4",
-    "Downsample to 128",
-    "Downsample to 224"
+    "Quant INT8",  # Keep original Quant prefix
+    "Quant INT4",  # Keep original Quant prefix
+    "Downsample 128px",  # More descriptive but still concise
+    "Downsample 224px"   # More descriptive but still concise
 ]
 
 lsun_fid_scores = [28.5018, 4.9672, 4.6296, 5.0971, 2.092, 286.415, 19.6367, 4.839]
@@ -276,7 +277,7 @@ def create_and_save_plots(plot_type="training"):
                                 handletextpad=0.3,
                                 handlelength=1.5,
                                 markerscale=1.2,
-                                fontsize=13,
+                                fontsize=14,
                                 edgecolor='black',
                                 columnspacing=1.0,
                                 bbox_to_anchor=(0.5, 0.5))
@@ -288,7 +289,7 @@ def create_and_save_plots(plot_type="training"):
                                 handletextpad=0.3,
                                 handlelength=1.5,
                                 markerscale=1.2,
-                                fontsize=13,
+                                fontsize=14,
                                 edgecolor='black',
                                 columnspacing=1.0,
                                 bbox_to_anchor=(0.5, 0.5))

@@ -258,6 +258,48 @@ def create_decoder_size_comparison(ax):
         spine.set_color('black')
         spine.set_linewidth(1.5)
 
+def create_ensemble_decoder_plot(ax):
+    """Create a plot showing the impact of number of decoders."""
+    models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
+    num_decoders = [1, 2, 3, 4, 5]
+    
+    # FPR values for each model and number of decoders
+    fpr_values = {
+        "SD 1.5": [0.0888, 0.0625, 0.0354, 0.0315, 0.0299],
+        "SD 1.4": [0.0509, 0.0251, 0.0172, 0.0165, 0.0110],
+        "SD 1.3": [0.0870, 0.0617, 0.0451, 0.0298, 0.0265],
+        "SD 1.2": [0.0982, 0.0685, 0.0475, 0.0384, 0.0358],
+        "SD 1.1": [0.0089, 0.0053, 0.0035, 0.0019, 0.0021]
+    }
+    
+    # ML conference standard colors
+    colors = ['#0077BB', '#EE7733', '#009988', '#CC3311', '#33BBEE']
+    
+    # Plot lines for each model
+    for idx, model in enumerate(models):
+        ax.plot(num_decoders, fpr_values[model], 
+                marker='o' if idx % 2 == 0 else 's',
+                label=model, color=colors[idx],
+                alpha=0.9, markersize=10, linestyle='-', linewidth=2.5,
+                markeredgecolor='black', markeredgewidth=1)
+    
+    ax.set_xlabel('Number of Decoders', labelpad=15)
+    ax.set_ylabel('FPR@95%TPR', labelpad=15)
+    ax.set_title('Performance of Ensemble Decoder', pad=15)
+    ax.set_xticks(num_decoders)
+    ax.set_ylim(-0.01, 0.12)  # Adjusted to data range
+    
+    # Add legend
+    ax.legend(edgecolor='black', loc='upper right')
+    
+    # Add grid for better readability
+    ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')
+    
+    # Set spines to black
+    for spine in ax.spines.values():
+        spine.set_color('black')
+        spine.set_linewidth(1.5)
+
 # Set up plotting style
 setup_plotting_style()
 
@@ -276,6 +318,11 @@ ax_img = fig1.add_subplot(gs[1])  # Right subplot
 img = plt.imread('nova_cafe_sd2-1.png')
 ax_img.imshow(img)
 ax_img.set_title('SD2.1 Example', pad=15)
+# Add subtitle below the image
+ax_img.text(0.5, -0.1, 'The Japanese Cafe prompt', 
+            horizontalalignment='center',
+            transform=ax_img.transAxes,
+            fontsize=20)
 ax_img.axis('off')  # Hide axes for the image
 
 # Save with tight layout
@@ -314,4 +361,62 @@ ax3 = fig3.add_subplot(111)
 create_prompt_comparison(ax3)
 plt.tight_layout()
 plt.savefig('sd_prompt_comparison.png', bbox_inches='tight', dpi=300, transparent=True)
+plt.close()
+
+def create_ensemble_decoder_plot(ax):
+    """Create a plot showing the impact of number of decoders."""
+    models = ["SD 1.5", "SD 1.4", "SD 1.3", "SD 1.2", "SD 1.1"]
+    num_decoders = [1, 2, 3, 4, 5]
+    
+    # FPR values for each model and number of decoders
+    fpr_values = {
+        "SD 1.5": [0.0888, 0.0625, 0.0354, 0.0315, 0.0299],
+        "SD 1.4": [0.0509, 0.0251, 0.0172, 0.0165, 0.0110],
+        "SD 1.3": [0.0870, 0.0617, 0.0451, 0.0298, 0.0265],
+        "SD 1.2": [0.0982, 0.0685, 0.0475, 0.0384, 0.0358],
+        "SD 1.1": [0.0089, 0.0053, 0.0035, 0.0019, 0.0021]
+    }
+    
+    # ML conference standard colors
+    colors = ['#0077BB', '#EE7733', '#009988', '#CC3311', '#33BBEE']
+    
+    # Plot lines for each model
+    for idx, model in enumerate(models):
+        ax.plot(num_decoders, fpr_values[model], 
+                marker='o' if idx % 2 == 0 else 's',
+                label=model, color=colors[idx],
+                alpha=0.9, markersize=10, linestyle='-', linewidth=2.5,
+                markeredgecolor='black', markeredgewidth=1)
+    
+    ax.set_xlabel('Number of Decoders', labelpad=15)
+    ax.set_ylabel('FPR@95%TPR', labelpad=15)
+    ax.set_title('Performance of Ensemble Decoder', pad=15)
+    ax.set_xticks(num_decoders)
+    ax.set_ylim(-0.01, 0.12)  # Adjusted to data range
+    
+    # Add legend
+    ax.legend(edgecolor='black', loc='upper right')
+    
+    # Add grid for better readability
+    ax.grid(True, axis='y', linestyle='--', alpha=0.7, color='#E0E0E0')
+    
+    # Set spines to black
+    for spine in ax.spines.values():
+        spine.set_color('black')
+        spine.set_linewidth(1.5)
+
+# Create figure for ensemble decoder comparison
+fig5 = plt.figure(figsize=(8, 6))
+ax5 = fig5.add_subplot(111)
+create_ensemble_decoder_plot(ax5)
+plt.tight_layout()
+plt.savefig('sd_ensemble_decoder.png', bbox_inches='tight', dpi=300, transparent=True)
+plt.close()
+
+# Create figure for ensemble decoder comparison
+fig5 = plt.figure(figsize=(8, 6))
+ax5 = fig5.add_subplot(111)
+create_ensemble_decoder_plot(ax5)
+plt.tight_layout()
+plt.savefig('sd_ensemble_decoder.png', bbox_inches='tight', dpi=300, transparent=True)
 plt.close() 

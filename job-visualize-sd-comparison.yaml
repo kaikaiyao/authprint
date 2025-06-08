@@ -73,7 +73,7 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--sd_enable_cpu_offload --num_samples 4 --prompt 'A photorealistic photo for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.'"
+              SCRIPT_ARGS="--sd_enable_cpu_offload --num_samples 4 --prompt 'A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.'"
               
 
               # Run visualization 10 times

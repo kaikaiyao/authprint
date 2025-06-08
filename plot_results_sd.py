@@ -93,7 +93,7 @@ def create_plot(ax, methods, fpr_values):
     # Customize the plot
     ax.set_xticks(range(len(pixels)))
     ax.set_xticklabels(pixels)
-    ax.set_xlabel('Fingerprint Length (Number of Pixels Selected)', labelpad=15)
+    ax.set_xlabel('Fingerprint Length', labelpad=15)
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
     ax.set_title('Stable Diffusion 2.1', pad=15)
     ax.set_ylim(-0.05, 1.05)  # Consistent y-axis range
@@ -261,13 +261,24 @@ def create_decoder_size_comparison(ax):
 # Set up plotting style
 setup_plotting_style()
 
-# Create figure for main FPR plot
-fig1 = plt.figure(figsize=(8, 6))  # More compact size
-ax1 = fig1.add_subplot(111)
+# Create figure for main FPR plot with example image
+fig1 = plt.figure(figsize=(14, 6))  # Slightly narrower overall
+
+# Create subplots with specific width ratios and less spacing
+gs = fig1.add_gridspec(1, 2, width_ratios=[1.2, 1], wspace=0.1)  # Reduced wspace for closer plots
+
+# Create subplot for FPR plot
+ax1 = fig1.add_subplot(gs[0])  # Left subplot
 create_plot(ax1, sd_methods, sd_fpr_values)
 
-# Adjust layout and save
-plt.tight_layout()
+# Create subplot for example image
+ax_img = fig1.add_subplot(gs[1])  # Right subplot
+img = plt.imread('nova_cafe_sd2-1.png')
+ax_img.imshow(img)
+ax_img.set_title('SD2.1 Example', pad=15)
+ax_img.axis('off')  # Hide axes for the image
+
+# Save with tight layout
 plt.savefig('sd_fpr.png', bbox_inches='tight', dpi=300, transparent=True)
 plt.close()
 

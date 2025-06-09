@@ -66,7 +66,8 @@ RUN pip install --no-cache-dir \
     diffusers \
     transformers \
     accelerate \
-    safetensors
+    safetensors \
+    datasets
 
 RUN pip install huggingface_hub[hf_xet]
 

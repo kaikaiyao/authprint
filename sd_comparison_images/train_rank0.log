@@ -1,0 +1,285 @@
+2025-06-08 21:54:05,742 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-08 21:54:05,742 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-08 21:54:06,967 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-06-08 21:54:07,129 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-06-08 21:54:07,272 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-06-08 21:54:15,530 - INFO - Loading pretrained model: sd-2.1
+2025-06-08 21:54:16,361 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-08 21:54:16,361 - INFO - Loading pretrained model: sd-2.0
+2025-06-08 21:54:25,404 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-08 21:54:25,404 - INFO - Loading pretrained model: sd-1.5
+2025-06-08 21:54:34,694 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-08 21:54:34,694 - INFO - Loading pretrained model: sd-1.4
+2025-06-08 21:54:35,216 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-06-08 21:54:35,456 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-06-08 21:54:35,473 - WARNING - Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-06-08 21:54:43,212 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-08 21:54:43,212 - INFO - Loading pretrained model: sd-1.3
+2025-06-08 21:54:51,457 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-08 21:54:51,457 - INFO - Loading pretrained model: sd-1.2
+2025-06-08 21:55:00,212 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-08 21:55:00,213 - INFO - Loading pretrained model: sd-1.1
+2025-06-08 21:55:08,706 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-08 21:55:08,706 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-08 23:04:00,465 - INFO - Saved grid for original
+2025-06-08 23:04:18,142 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-08 23:04:35,801 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-08 23:04:52,795 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-08 23:05:09,549 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-08 23:05:25,411 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-08 23:05:41,490 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-08 23:05:57,081 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-08 23:06:10,867 - INFO - Saved grid for downsampled_16
+2025-06-08 23:06:27,652 - INFO - Saved grid for downsampled_224
+2025-06-08 23:06:27,653 - INFO - Visualization completed successfully
+2025-06-08 23:06:27,716 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-08 23:06:27,716 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-08 23:06:29,886 - INFO - Loading pretrained model: sd-2.1
+2025-06-08 23:06:30,993 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-08 23:06:30,993 - INFO - Loading pretrained model: sd-2.0
+2025-06-08 23:06:32,205 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-08 23:06:32,205 - INFO - Loading pretrained model: sd-1.5
+2025-06-08 23:06:33,456 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-08 23:06:33,456 - INFO - Loading pretrained model: sd-1.4
+2025-06-08 23:06:34,253 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-08 23:06:34,253 - INFO - Loading pretrained model: sd-1.3
+2025-06-08 23:06:35,099 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-08 23:06:35,099 - INFO - Loading pretrained model: sd-1.2
+2025-06-08 23:06:35,901 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-08 23:06:35,902 - INFO - Loading pretrained model: sd-1.1
+2025-06-08 23:06:37,194 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-08 23:06:37,194 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-09 00:15:26,935 - INFO - Saved grid for original
+2025-06-09 00:15:45,411 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-09 00:16:04,249 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-09 00:16:20,566 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-09 00:16:37,488 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-09 00:16:54,453 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-09 00:17:12,199 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-09 00:17:29,358 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-09 00:17:43,671 - INFO - Saved grid for downsampled_16
+2025-06-09 00:18:01,210 - INFO - Saved grid for downsampled_224
+2025-06-09 00:18:01,210 - INFO - Visualization completed successfully
+2025-06-09 00:18:01,264 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-09 00:18:01,264 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-09 00:18:02,654 - INFO - Loading pretrained model: sd-2.1
+2025-06-09 00:18:03,510 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-09 00:18:03,510 - INFO - Loading pretrained model: sd-2.0
+2025-06-09 00:18:04,802 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-09 00:18:04,803 - INFO - Loading pretrained model: sd-1.5
+2025-06-09 00:18:06,554 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-09 00:18:06,554 - INFO - Loading pretrained model: sd-1.4
+2025-06-09 00:18:07,314 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-09 00:18:07,314 - INFO - Loading pretrained model: sd-1.3
+2025-06-09 00:18:08,115 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-09 00:18:08,116 - INFO - Loading pretrained model: sd-1.2
+2025-06-09 00:18:08,845 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-09 00:18:08,846 - INFO - Loading pretrained model: sd-1.1
+2025-06-09 00:18:09,581 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-09 00:18:09,581 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-09 01:27:40,037 - INFO - Saved grid for original
+2025-06-09 01:27:56,780 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-09 01:28:13,118 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-09 01:28:27,845 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-09 01:28:43,426 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-09 01:28:58,151 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-09 01:29:13,536 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-09 01:29:28,437 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-09 01:29:41,751 - INFO - Saved grid for downsampled_16
+2025-06-09 01:29:57,904 - INFO - Saved grid for downsampled_224
+2025-06-09 01:29:57,905 - INFO - Visualization completed successfully
+2025-06-09 01:29:57,966 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-09 01:29:57,966 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-09 01:29:59,443 - INFO - Loading pretrained model: sd-2.1
+2025-06-09 01:30:00,474 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-09 01:30:00,475 - INFO - Loading pretrained model: sd-2.0
+2025-06-09 01:30:01,878 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-09 01:30:01,878 - INFO - Loading pretrained model: sd-1.5
+2025-06-09 01:30:02,966 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-09 01:30:02,967 - INFO - Loading pretrained model: sd-1.4
+2025-06-09 01:30:04,748 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-09 01:30:04,748 - INFO - Loading pretrained model: sd-1.3
+2025-06-09 01:30:05,577 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-09 01:30:05,577 - INFO - Loading pretrained model: sd-1.2
+2025-06-09 01:30:06,445 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-09 01:30:06,445 - INFO - Loading pretrained model: sd-1.1
+2025-06-09 01:30:07,261 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-09 01:30:07,261 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-09 02:40:36,642 - INFO - Saved grid for original
+2025-06-09 02:40:53,861 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-09 02:41:10,930 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-09 02:41:26,745 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-09 02:41:42,503 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-09 02:41:57,952 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-09 02:42:14,025 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-09 02:42:29,436 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-09 02:42:42,642 - INFO - Saved grid for downsampled_16
+2025-06-09 02:42:59,435 - INFO - Saved grid for downsampled_224
+2025-06-09 02:42:59,435 - INFO - Visualization completed successfully
+2025-06-09 02:42:59,484 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-09 02:42:59,484 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-09 02:43:01,499 - INFO - Loading pretrained model: sd-2.1
+2025-06-09 02:43:02,365 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-09 02:43:02,365 - INFO - Loading pretrained model: sd-2.0
+2025-06-09 02:43:03,613 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-09 02:43:03,613 - INFO - Loading pretrained model: sd-1.5
+2025-06-09 02:43:04,765 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-09 02:43:04,765 - INFO - Loading pretrained model: sd-1.4
+2025-06-09 02:43:05,539 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-09 02:43:05,539 - INFO - Loading pretrained model: sd-1.3
+2025-06-09 02:43:06,345 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-09 02:43:06,346 - INFO - Loading pretrained model: sd-1.2
+2025-06-09 02:43:07,125 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-09 02:43:07,125 - INFO - Loading pretrained model: sd-1.1
+2025-06-09 02:43:08,118 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-09 02:43:08,118 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-09 03:53:16,394 - INFO - Saved grid for original
+2025-06-09 03:53:35,934 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-09 03:53:53,931 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-09 03:54:09,351 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-09 03:54:25,110 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-09 03:54:40,845 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-09 03:54:56,996 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-09 03:55:13,418 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-09 03:55:27,350 - INFO - Saved grid for downsampled_16
+2025-06-09 03:55:43,995 - INFO - Saved grid for downsampled_224
+2025-06-09 03:55:43,996 - INFO - Visualization completed successfully
+2025-06-09 03:55:44,041 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-09 03:55:44,041 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-09 03:55:45,580 - INFO - Loading pretrained model: sd-2.1
+2025-06-09 03:55:46,446 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-09 03:55:46,447 - INFO - Loading pretrained model: sd-2.0
+2025-06-09 03:55:47,681 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-09 03:55:47,681 - INFO - Loading pretrained model: sd-1.5
+2025-06-09 03:55:49,418 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-09 03:55:49,418 - INFO - Loading pretrained model: sd-1.4
+2025-06-09 03:55:50,220 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-09 03:55:50,220 - INFO - Loading pretrained model: sd-1.3
+2025-06-09 03:55:51,004 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-09 03:55:51,004 - INFO - Loading pretrained model: sd-1.2
+2025-06-09 03:55:51,795 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-09 03:55:51,795 - INFO - Loading pretrained model: sd-1.1
+2025-06-09 03:55:52,848 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-09 03:55:52,848 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-09 05:04:53,840 - INFO - Saved grid for original
+2025-06-09 05:05:12,267 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-09 05:05:30,327 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-09 05:05:47,683 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-09 05:06:04,810 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-09 05:06:21,737 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-09 05:06:39,376 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-09 05:06:57,049 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-09 05:07:11,810 - INFO - Saved grid for downsampled_16
+2025-06-09 05:07:29,674 - INFO - Saved grid for downsampled_224
+2025-06-09 05:07:29,675 - INFO - Visualization completed successfully
+2025-06-09 05:07:29,735 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-09 05:07:29,735 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-09 05:07:31,195 - INFO - Loading pretrained model: sd-2.1
+2025-06-09 05:07:32,112 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-09 05:07:32,112 - INFO - Loading pretrained model: sd-2.0
+2025-06-09 05:07:33,434 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-09 05:07:33,434 - INFO - Loading pretrained model: sd-1.5
+2025-06-09 05:07:35,401 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-09 05:07:35,401 - INFO - Loading pretrained model: sd-1.4
+2025-06-09 05:07:36,217 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-09 05:07:36,217 - INFO - Loading pretrained model: sd-1.3
+2025-06-09 05:07:37,031 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-09 05:07:37,031 - INFO - Loading pretrained model: sd-1.2
+2025-06-09 05:07:37,854 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-09 05:07:37,854 - INFO - Loading pretrained model: sd-1.1
+2025-06-09 05:07:38,719 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-09 05:07:38,719 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-09 06:18:40,046 - INFO - Saved grid for original
+2025-06-09 06:18:57,347 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-09 06:19:13,844 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-09 06:19:28,875 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-09 06:19:44,091 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-09 06:19:58,634 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-09 06:20:14,643 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-09 06:20:29,231 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-09 06:20:42,826 - INFO - Saved grid for downsampled_16
+2025-06-09 06:20:58,829 - INFO - Saved grid for downsampled_224
+2025-06-09 06:20:58,830 - INFO - Visualization completed successfully
+2025-06-09 06:20:58,877 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-09 06:20:58,877 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-09 06:21:00,301 - INFO - Loading pretrained model: sd-2.1
+2025-06-09 06:21:01,153 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-09 06:21:01,153 - INFO - Loading pretrained model: sd-2.0
+2025-06-09 06:21:02,391 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-09 06:21:02,391 - INFO - Loading pretrained model: sd-1.5
+2025-06-09 06:21:03,366 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-09 06:21:03,366 - INFO - Loading pretrained model: sd-1.4
+2025-06-09 06:21:05,155 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-09 06:21:05,155 - INFO - Loading pretrained model: sd-1.3
+2025-06-09 06:21:06,802 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-09 06:21:06,803 - INFO - Loading pretrained model: sd-1.2
+2025-06-09 06:21:07,589 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-09 06:21:07,589 - INFO - Loading pretrained model: sd-1.1
+2025-06-09 06:21:08,403 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-09 06:21:08,403 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-09 07:32:11,391 - INFO - Saved grid for original
+2025-06-09 07:32:30,572 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-09 07:32:48,902 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-09 07:33:05,628 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-09 07:33:22,382 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-09 07:33:38,538 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-09 07:33:56,022 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-09 07:34:12,368 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-09 07:34:28,002 - INFO - Saved grid for downsampled_16
+2025-06-09 07:34:46,222 - INFO - Saved grid for downsampled_224
+2025-06-09 07:34:46,222 - INFO - Visualization completed successfully
+2025-06-09 07:34:46,270 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-09 07:34:46,270 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-09 07:34:48,371 - INFO - Loading pretrained model: sd-2.1
+2025-06-09 07:34:49,642 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-09 07:34:49,642 - INFO - Loading pretrained model: sd-2.0
+2025-06-09 07:34:50,930 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-09 07:34:50,930 - INFO - Loading pretrained model: sd-1.5
+2025-06-09 07:34:52,156 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-09 07:34:52,156 - INFO - Loading pretrained model: sd-1.4
+2025-06-09 07:34:53,019 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-09 07:34:53,019 - INFO - Loading pretrained model: sd-1.3
+2025-06-09 07:34:53,867 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-09 07:34:53,867 - INFO - Loading pretrained model: sd-1.2
+2025-06-09 07:34:54,698 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-09 07:34:54,698 - INFO - Loading pretrained model: sd-1.1
+2025-06-09 07:34:55,717 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-09 07:34:55,717 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']
+2025-06-09 08:46:19,387 - INFO - Saved grid for original
+2025-06-09 08:46:37,495 - INFO - Saved grid for pretrained_sd-2.1
+2025-06-09 08:46:54,526 - INFO - Saved grid for pretrained_sd-2.0
+2025-06-09 08:47:10,466 - INFO - Saved grid for pretrained_sd-1.5
+2025-06-09 08:47:26,391 - INFO - Saved grid for pretrained_sd-1.4
+2025-06-09 08:47:40,867 - INFO - Saved grid for pretrained_sd-1.3
+2025-06-09 08:47:56,582 - INFO - Saved grid for pretrained_sd-1.2
+2025-06-09 08:48:11,099 - INFO - Saved grid for pretrained_sd-1.1
+2025-06-09 08:48:24,437 - INFO - Saved grid for downsampled_16
+2025-06-09 08:48:40,062 - INFO - Saved grid for downsampled_224
+2025-06-09 08:48:40,062 - INFO - Visualization completed successfully
+2025-06-09 08:48:40,115 - INFO - Logging initialized (rank 0). Log file: sd_comparison_images/train_rank0.log
+2025-06-09 08:48:40,115 - INFO - Configuration:
+Namespace(sd_model_name='stabilityai/stable-diffusion-2-1', sd_enable_cpu_offload=True, img_size=1024, seed=42, output_dir='sd_comparison_images', num_samples=25, prompt='A photorealistic photo for a Japanese cafe named NOVA CAFE, with the name written clearly in both English on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.', num_inference_steps=25, guidance_scale=7.5)
+2025-06-09 08:48:41,744 - INFO - Loading pretrained model: sd-2.1
+2025-06-09 08:48:42,644 - INFO - Successfully loaded pretrained model: sd-2.1
+2025-06-09 08:48:42,644 - INFO - Loading pretrained model: sd-2.0
+2025-06-09 08:48:44,001 - INFO - Successfully loaded pretrained model: sd-2.0
+2025-06-09 08:48:44,001 - INFO - Loading pretrained model: sd-1.5
+2025-06-09 08:48:45,811 - INFO - Successfully loaded pretrained model: sd-1.5
+2025-06-09 08:48:45,811 - INFO - Loading pretrained model: sd-1.4
+2025-06-09 08:48:46,625 - INFO - Successfully loaded pretrained model: sd-1.4
+2025-06-09 08:48:46,625 - INFO - Loading pretrained model: sd-1.3
+2025-06-09 08:48:47,387 - INFO - Successfully loaded pretrained model: sd-1.3
+2025-06-09 08:48:47,387 - INFO - Loading pretrained model: sd-1.2
+2025-06-09 08:48:48,284 - INFO - Successfully loaded pretrained model: sd-1.2
+2025-06-09 08:48:48,284 - INFO - Loading pretrained model: sd-1.1
+2025-06-09 08:48:49,019 - INFO - Successfully loaded pretrained model: sd-1.1
+2025-06-09 08:48:49,019 - INFO - Loaded 7 pretrained models: ['sd-2.1', 'sd-2.0', 'sd-1.5', 'sd-1.4', 'sd-1.3', 'sd-1.2', 'sd-1.1']

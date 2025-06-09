@@ -131,9 +131,9 @@ def create_inference_steps_comparison(ax):
     }
     
     # Plot bars
-    ax.bar(x - width, steps_25, width, label='25 Steps', color=colors['25_steps'], edgecolor='black', linewidth=1)
-    ax.bar(x, steps_15, width, label='15 Steps', color=colors['15_steps'], edgecolor='black', linewidth=1)
-    ax.bar(x + width, steps_5, width, label='5 Steps', color=colors['5_steps'], edgecolor='black', linewidth=1)
+    ax.bar(x - width, steps_25, width, label='25 steps', color=colors['25_steps'], edgecolor='black', linewidth=1)
+    ax.bar(x, steps_15, width, label='15 steps', color=colors['15_steps'], edgecolor='black', linewidth=1)
+    ax.bar(x + width, steps_5, width, label='5 steps', color=colors['5_steps'], edgecolor='black', linewidth=1)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
     ax.set_title('Impact of Number of Inference Steps', pad=15)
@@ -166,8 +166,8 @@ def create_prompt_comparison(ax):
     }
     
     # Plot bars
-    ax.bar(x - width/2, no_prompt, width, label='Generic Prompt', color=colors['no_prompt'], edgecolor='black', linewidth=1)
-    ax.bar(x + width/2, with_prompt, width, label='Japanese Café Prompt', color=colors['with_prompt'], edgecolor='black', linewidth=1)
+    ax.bar(x - width/2, no_prompt, width, label='Generic: "a high quality photo"', color=colors['no_prompt'], edgecolor='black', linewidth=1)
+    ax.bar(x + width/2, with_prompt, width, label='Specific: "Japanese café at neon night"', color=colors['with_prompt'], edgecolor='black', linewidth=1)
     
     ax.set_ylabel('FPR@95%TPR', labelpad=15)
     ax.set_title('Impact of Prompt Types', pad=15)

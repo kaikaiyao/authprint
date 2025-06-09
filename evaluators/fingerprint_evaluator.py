@@ -7,6 +7,7 @@ from typing import Dict, Optional, List, Tuple, Any
 
 import torch
 import numpy as np
+import random
 
 from config.default_config import Config
 from models.decoder import DecoderSD_L, DecoderSD_M, DecoderSD_S, StyleGAN2Decoder
@@ -79,8 +80,15 @@ class FingerprintEvaluator:
         self.image_pixel_count = self.config.model.image_pixel_count
         self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
         
+        # Initialize prompt dataset if multi-prompt mode is enabled
+        self.prompts: Optional[List[str]] = None
+        if self.config.model.enable_multi_prompt:
+            self._load_prompt_dataset()
+        
         if self.rank == 0:
             logging.info(f"Using direct pixel prediction with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
+            if self.config.model.enable_multi_prompt:
+                logging.info("Multi-prompt evaluation mode is enabled")
         
         # Initialize quantized models dictionary
         self.quantized_models = {}
@@ -295,12 +303,15 @@ class FingerprintEvaluator:
         """
         if self.rank == 0:
             logging.info(f"Running batch evaluation with {self.config.evaluate.num_samples} samples...")
+            if self.config.model.enable_multi_prompt:
+                logging.info("Using multi-prompt evaluation mode")
         
         try:
             # Set seed for reproducibility
             if hasattr(self.config.evaluate, 'seed') and self.config.evaluate.seed is not None:
                 np.random.seed(self.config.evaluate.seed)
                 torch.manual_seed(self.config.evaluate.seed)
+                random.seed(self.config.evaluate.seed)  # For prompt sampling
                 if self.rank == 0:
                     logging.info(f"Using fixed random seed {self.config.evaluate.seed} for evaluation")
             
@@ -327,6 +338,20 @@ class FingerprintEvaluator:
                     start_idx = i * batch_size
                     end_idx = min((i + 1) * batch_size, num_samples)
                     current_batch_size = end_idx - start_idx
+                    
+                    # For Stable Diffusion, update prompts if multi-prompt mode is enabled
+                    if self.config.model.model_type == "stable-diffusion":
+                        prompts = self._sample_prompts(current_batch_size)
+                        gen_kwargs["prompt"] = prompts
+                        if self.rank == 0 and i == 0:  # Log sample prompts from first batch
+                            logging.info(f"Sample prompts for evaluation: {prompts[:3]}")
+                    
+                    # For Stable Diffusion, update prompts if multi-prompt mode is enabled
+                    if self.config.model.model_type == "stable-diffusion":
+                        prompts = self._sample_prompts(current_batch_size)
+                        gen_kwargs["prompt"] = prompts
+                        if self.rank == 0 and i == 0:  # Log sample prompts from first batch
+                            logging.info(f"Sample prompts for evaluation: {prompts[:3]}")
                     
                     # Generate images based on model type
                     if self.config.model.model_type == "stylegan2":
@@ -647,3 +672,47 @@ class FingerprintEvaluator:
             logging.info("-" * 150)
         
         return metrics
+
+    def _load_prompt_dataset(self) -> None:
+        """
+        Load prompts from the dataset file.
+        """
+        if self.rank == 0:
+            logging.info(f"Loading prompts from {self.config.model.prompt_dataset_path}")
+        
+        try:
+            with open(self.config.model.prompt_dataset_path, 'r', encoding='utf-8') as f:
+                all_prompts = [line.strip() for line in f if line.strip()]
+            
+            # Sample the specified number of prompts
+            if len(all_prompts) > self.config.model.prompt_dataset_size:
+                self.prompts = random.sample(all_prompts, self.config.model.prompt_dataset_size)
+            else:
+                self.prompts = all_prompts
+                if self.rank == 0:
+                    logging.warning(f"Prompt dataset contains fewer prompts ({len(all_prompts)}) "
+                                  f"than requested ({self.config.model.prompt_dataset_size})")
+            
+            if self.rank == 0:
+                logging.info(f"Loaded {len(self.prompts)} prompts for evaluation")
+                logging.info(f"Sample prompts: {self.prompts[:3]}")
+        
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error loading prompt dataset: {str(e)}")
+            raise
+
+    def _sample_prompts(self, batch_size: int) -> List[str]:
+        """
+        Sample prompts for the current batch.
+        
+        Args:
+            batch_size (int): Number of prompts to sample.
+            
+        Returns:
+            List[str]: List of sampled prompts.
+        """
+        if not self.config.model.enable_multi_prompt or not self.prompts:
+            return [self.config.model.sd_prompt] * batch_size
+        
+        return random.sample(self.prompts, min(batch_size, len(self.prompts)))

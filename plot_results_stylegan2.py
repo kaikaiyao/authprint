@@ -69,8 +69,8 @@ def create_subplot(ax, methods, fid_scores, fpr_values, dataset_name, plot_type=
     aaai_colors = {
         'Data Size': ['#0077BB', '#EE7733'],      # Blue and Orange
         'Augmentation': ['#009988', '#CC3311'],    # Teal and Red
-        'Quantization': ['#0077BB', '#66CCEE'],    # Dark blue and Light blue
-        'Downsampling': ['#009988', '#99DDAA']     # Dark green and Light green
+        'Quantization': ['#88CCEE', '#0077BB'],    # Light blue and Dark blue (INT8 light circle, INT4 dark square)
+        'Downsampling': ['#88DDBB', '#009988']     # Light green and Dark green (224px light circle, 128px dark square)
     }
     
     if plot_type == "training":
@@ -163,13 +163,13 @@ ffhq_methods = [
     "30K Train Data, ADA Aug",
     "70K Train Data, BCR Aug",
     "70K Train Data, No Aug",
-    "Quant INT8",  # Keep original Quant prefix
-    "Quant INT4",  # Keep original Quant prefix
-    "Downsample 128px",  # More descriptive but still concise
-    "Downsample 224px"   # More descriptive but still concise
+    "Quant INT8",  # Light blue, circle
+    "Quant INT4",  # Dark blue, square
+    "Downsample 224px",  # Light green, circle
+    "Downsample 128px"   # Dark green, square
 ]
 
-ffhq_fid_scores = [14.0726, 2.5086, 2.1812, 3.1219, 1.7242, 268.1055, 40.2009, 9.9268]
+ffhq_fid_scores = [14.0726, 2.5086, 2.1812, 3.1219, 1.7242, 268.1055, 9.9268, 40.2009]
 ffhq_fpr_values = [
     [0.0314, 0.0007, 0, 0, 0.0537, 0.1598],
     [0.0544, 0.0014, 0, 0, 0.0654, 0.1989],
@@ -177,8 +177,8 @@ ffhq_fpr_values = [
     [0.1229, 0.0298, 0, 0, 0.2223, 0.4445],
     [0.9505, 0.9505, 0.9535, 0.9559, 0.9514, 0.9524],
     [0.0208, 0.0001, 0, 0, 0.0273, 0.0536],
-    [0.2875, 0.1264, 0, 0, 0.5423, 0.7475],
-    [0.7481, 0.7208, 0.0762, 0.2001, 0.8972, 0.9481]
+    [0.7481, 0.7208, 0.0762, 0.2001, 0.8972, 0.9481],
+    [0.2875, 0.1264, 0, 0, 0.5423, 0.7475]
 ]
 
 # Data for LSUN Cat dataset
@@ -187,13 +187,13 @@ lsun_methods = [
     "30K Train Data, ADA Aug",
     "100K Train Data, BCR Aug",
     "100K Train Data, No Aug",
-    "Quant INT8",  # Keep original Quant prefix
-    "Quant INT4",  # Keep original Quant prefix
-    "Downsample 128px",  # More descriptive but still concise
-    "Downsample 224px"   # More descriptive but still concise
+    "Quant INT8",  # Light blue, circle
+    "Quant INT4",  # Dark blue, square
+    "Downsample 224px",  # Light green, circle
+    "Downsample 128px"   # Dark green, square
 ]
 
-lsun_fid_scores = [28.5018, 4.9672, 4.6296, 5.0971, 2.092, 286.415, 19.6367, 4.839]
+lsun_fid_scores = [28.5018, 4.9672, 4.6296, 5.0971, 2.092, 286.415, 4.839, 19.6367]
 lsun_fpr_values = [
     [0.5651, 0.0026, 0, 0, 0.3674, 0.8167],
     [0.5583, 0.0026, 0.0001, 0.0001, 0.3657, 0.8423],
@@ -201,8 +201,8 @@ lsun_fpr_values = [
     [0.1559, 0.018, 0.0024, 0.0013, 0.1838, 0.7501],
     [0.954, 0.9419, 0.9446, 0.949, 0.9482, 0.9482],
     [0.0045, 0, 0, 0, 0, 0],
-    [0.8457, 0.3517, 0.1332, 0.1452, 0.8715, 0.9843],
-    [0.9217, 0.7992, 0.6728, 0.7191, 0.966, 0.9781]
+    [0.9217, 0.7992, 0.6728, 0.7191, 0.966, 0.9781],
+    [0.8457, 0.3517, 0.1332, 0.1452, 0.8715, 0.9843]
 ]
 
 # Set up plotting style
@@ -270,8 +270,20 @@ def create_and_save_plots(plot_type="training"):
         legend_ax_ffhq.axis('off')
         legend_ax_lsun.axis('off')
         
-        # FFHQ Legend
-        legend_ffhq = legend_ax_ffhq.legend(lines1, labels1,
+        # Reorder lines and labels for the desired legend layout
+        def reorder_for_legend(lines, labels):
+            # Get indices for optimization methods (last 4 items)
+            opt_indices = range(len(lines)-4, len(lines))
+            # Reorder as: INT8, INT4, 224px, 128px
+            new_order = list(range(len(lines)-4))  # Keep training methods in original order
+            new_order.extend([opt_indices[0], opt_indices[1], opt_indices[2], opt_indices[3]])
+            return [lines[i] for i in new_order], [labels[i] for i in new_order]
+        
+        lines1_reordered, labels1_reordered = reorder_for_legend(lines1, labels1)
+        lines2_reordered, labels2_reordered = reorder_for_legend(lines2, labels2)
+        
+        # FFHQ Legend with custom marker assignment
+        legend_ffhq = legend_ax_ffhq.legend(lines1_reordered, labels1_reordered,
                                 loc='center',
                                 ncol=2,
                                 handletextpad=0.3,
@@ -282,8 +294,8 @@ def create_and_save_plots(plot_type="training"):
                                 columnspacing=1.0,
                                 bbox_to_anchor=(0.5, 0.5))
         
-        # LSUN Legend
-        legend_lsun = legend_ax_lsun.legend(lines2, labels2,
+        # LSUN Legend with custom marker assignment
+        legend_lsun = legend_ax_lsun.legend(lines2_reordered, labels2_reordered,
                                 loc='center',
                                 ncol=2,
                                 handletextpad=0.3,

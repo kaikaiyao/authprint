@@ -39,6 +39,13 @@ class ModelConfig:
     sd_prompt: str = "A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo"  # Default prompt for generation
     sd_decoder_size: str = "M"  # One of ["S", "M", "L"]
     
+    # Multi-prompt training configuration
+    enable_multi_prompt: bool = False  # Whether to use multiple prompts during training
+    prompt_source: str = "local"  # One of ["local", "diffusiondb"]
+    prompt_dataset_path: str = ""  # Path to local prompt dataset file (one prompt per line)
+    prompt_dataset_size: int = 10000  # Number of prompts to load from dataset
+    diffusiondb_subset: str = "2m"  # One of ["2m", "large"] - which DiffusionDB subset to use
+    
     # Pretrained model configuration
     selected_pretrained_models: List[str] = field(default_factory=list)
     custom_pretrained_models: Dict[str, Any] = field(default_factory=dict)
@@ -52,6 +59,15 @@ class ModelConfig:
         assert self.sd_num_inference_steps > 0, "Number of inference steps must be positive"
         assert self.sd_guidance_scale > 0, "Guidance scale must be positive"
         assert self.sd_decoder_size in ["S", "M", "L"], f"Invalid SD decoder size: {self.sd_decoder_size}"
+        
+        # Validate multi-prompt configuration
+        if self.enable_multi_prompt:
+            assert self.prompt_source in ["local", "diffusiondb"], f"Invalid prompt source: {self.prompt_source}"
+            if self.prompt_source == "local":
+                assert os.path.exists(self.prompt_dataset_path), f"Prompt dataset file not found: {self.prompt_dataset_path}"
+            else:  # diffusiondb
+                assert self.diffusiondb_subset in ["2m", "large"], f"Invalid DiffusionDB subset: {self.diffusiondb_subset}"
+            assert self.prompt_dataset_size > 0, "Prompt dataset size must be positive"
     
     def get_model_class(self) -> Type:
         """Get the model class based on model type."""

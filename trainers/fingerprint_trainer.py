@@ -3,11 +3,13 @@ Trainer for StyleGAN fingerprinting.
 """
 import logging
 import time
-from typing import Dict
+import random
+from typing import Dict, List, Optional
 
 import torch
 import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
+from datasets import load_dataset
 
 from config.default_config import Config
 from models.decoder import DecoderSD_L, DecoderSD_M, DecoderSD_S, StyleGAN2Decoder
@@ -59,6 +61,91 @@ class FingerprintTrainer:
         self.image_pixel_count = self.config.model.image_pixel_count
         self.image_pixel_set_seed = self.config.model.image_pixel_set_seed
         logging.info(f"Using image-based approach with {self.image_pixel_count} pixels and seed {self.image_pixel_set_seed}")
+        
+        # Initialize prompt dataset if multi-prompt mode is enabled
+        self.prompts: Optional[List[str]] = None
+        if self.config.model.enable_multi_prompt:
+            if self.config.model.prompt_source == "local":
+                self._load_prompt_dataset_local()
+            else:  # diffusiondb
+                self._load_prompt_dataset_diffusiondb()
+    
+    def _load_prompt_dataset_local(self) -> None:
+        """
+        Load prompts from a local file.
+        """
+        if self.rank == 0:
+            logging.info(f"Loading prompts from local file: {self.config.model.prompt_dataset_path}")
+        
+        try:
+            with open(self.config.model.prompt_dataset_path, 'r', encoding='utf-8') as f:
+                all_prompts = [line.strip() for line in f if line.strip()]
+            
+            # Sample the specified number of prompts
+            if len(all_prompts) > self.config.model.prompt_dataset_size:
+                self.prompts = random.sample(all_prompts, self.config.model.prompt_dataset_size)
+            else:
+                self.prompts = all_prompts
+                if self.rank == 0:
+                    logging.warning(f"Prompt dataset contains fewer prompts ({len(all_prompts)}) "
+                                  f"than requested ({self.config.model.prompt_dataset_size})")
+            
+            if self.rank == 0:
+                logging.info(f"Loaded {len(self.prompts)} prompts from local file")
+                logging.info(f"Sample prompts: {self.prompts[:3]}")
+        
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error loading prompt dataset: {str(e)}")
+            raise
+    
+    def _load_prompt_dataset_diffusiondb(self) -> None:
+        """
+        Load prompts from DiffusionDB dataset.
+        """
+        if self.rank == 0:
+            logging.info("Loading prompts from DiffusionDB dataset")
+        
+        try:
+            # Load the metadata table from DiffusionDB
+            subset = "2m" if self.config.model.diffusiondb_subset == "2m" else "large"
+            dataset = load_dataset("poloclub/diffusiondb", subset, split="train")
+            
+            # Extract all unique prompts
+            all_prompts = list(set(dataset["prompt"]))
+            
+            # Sample the specified number of prompts
+            if len(all_prompts) > self.config.model.prompt_dataset_size:
+                self.prompts = random.sample(all_prompts, self.config.model.prompt_dataset_size)
+            else:
+                self.prompts = all_prompts
+                if self.rank == 0:
+                    logging.warning(f"DiffusionDB contains fewer unique prompts ({len(all_prompts)}) "
+                                  f"than requested ({self.config.model.prompt_dataset_size})")
+            
+            if self.rank == 0:
+                logging.info(f"Loaded {len(self.prompts)} prompts from DiffusionDB")
+                logging.info(f"Sample prompts: {self.prompts[:3]}")
+        
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error loading DiffusionDB dataset: {str(e)}")
+            raise
+    
+    def _sample_prompts(self, batch_size: int) -> List[str]:
+        """
+        Sample prompts for the current batch.
+        
+        Args:
+            batch_size (int): Number of prompts to sample.
+            
+        Returns:
+            List[str]: List of sampled prompts.
+        """
+        if not self.config.model.enable_multi_prompt or not self.prompts:
+            return [self.config.model.sd_prompt] * batch_size
+        
+        return random.sample(self.prompts, min(batch_size, len(self.prompts)))
     
     def setup_models(self) -> None:
         """
@@ -168,6 +255,11 @@ class FingerprintTrainer:
         """
         # Get generation kwargs based on model type
         gen_kwargs = self.config.model.get_generation_kwargs()
+        
+        # For Stable Diffusion, update prompts if multi-prompt mode is enabled
+        if self.config.model.model_type == "stable-diffusion":
+            prompts = self._sample_prompts(self.config.training.batch_size)
+            gen_kwargs["prompt"] = prompts
         
         # Generate images
         x = self.generative_model.generate_images(

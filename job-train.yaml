@@ -90,7 +90,10 @@ spec:
                       --sd_prompt 'a high quality image' \
                       --sd_decoder_size "L" \
                       --lr 1e-5 \
-                      --sd_enable_cpu_offload 
+                      --sd_enable_cpu_offload \
+                      --enable_multi_prompt \
+                      --prompt_source "diffusiondb" \
+                      --diffusiondb_subset "2m"
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

@@ -59,6 +59,20 @@ def parse_args():
                         default="A photo of a cat in a variety of real-world scenes, candid shot, natural lighting, diverse settings, DSLR photo",
                         help="Default prompt for Stable Diffusion generation")
     
+    # Multi-prompt training configuration
+    parser.add_argument("--enable_multi_prompt", action="store_true",
+                        help="Enable multi-prompt training mode")
+    parser.add_argument("--prompt_source", type=str, default="local",
+                        choices=["local", "diffusiondb"],
+                        help="Source of prompts: local file or DiffusionDB dataset")
+    parser.add_argument("--prompt_dataset_path", type=str, default="",
+                        help="Path to local prompt dataset file (one prompt per line)")
+    parser.add_argument("--prompt_dataset_size", type=int, default=10000,
+                        help="Number of prompts to load from dataset")
+    parser.add_argument("--diffusiondb_subset", type=str, default="2m",
+                        choices=["2m", "large"],
+                        help="Which DiffusionDB subset to use (2m or large)")
+    
     # Common configuration
     parser.add_argument("--checkpoint_path", type=str, default=None,
                         help="Path to checkpoint to resume training from")

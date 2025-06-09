@@ -44,6 +44,14 @@ def parse_args():
     parser.add_argument("--sd_guidance_scale", type=float, default=7.5,
                         help="Guidance scale for Stable Diffusion")
     
+    # Multi-prompt evaluation configuration
+    parser.add_argument("--enable_multi_prompt", action="store_true",
+                        help="Enable multi-prompt evaluation mode")
+    parser.add_argument("--prompt_dataset_path", type=str, default="",
+                        help="Path to the prompt dataset file (one prompt per line)")
+    parser.add_argument("--prompt_dataset_size", type=int, default=10000,
+                        help="Number of prompts to load from dataset")
+    
     # StyleGAN2 configuration
     parser.add_argument("--stylegan2_url", type=str,
                         default="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",

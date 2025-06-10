@@ -70,30 +70,34 @@ class StableDiffusionModel(BaseGenerativeModel):
             batch_size (int): Number of images to generate
             device (torch.device, optional): Device override
             **kwargs: Additional arguments passed to pipeline
-                prompt (str): Text prompt
+                prompt (str or List[str]): Text prompt or list of prompts
                 num_inference_steps (int): Number of denoising steps
                 guidance_scale (float): Classifier-free guidance scale
                 
         Returns:
             torch.Tensor: Generated images [B, C, H, W] in range [0, 1]
         """
-        # # Print actual pipeline model configurations
-        # print(f"[Debug] Pipeline Configuration:")
-        # print(f"- UNet: {self.pipe.unet.config._name_or_path}")
-        # print(f"- VAE: {self.pipe.vae.config._name_or_path}")
-        # print(f"- Text Encoder: {self.pipe.text_encoder.config._name_or_path}")
-        # print(f"- Scheduler: {self.pipe.scheduler.__class__.__name__}")
-        
         # Extract generation parameters
         prompt = kwargs.get("prompt", "A photorealistic advertisement poster for a Japanese cafe named 'NOVA CAFE', with the name written clearly in both English and Japanese on a street sign, a storefront banner, and a coffee cup. The scene is set at night with neon lighting, rain-slick streets reflecting the glow, and people walking by in motion blur. Cinematic tone, Leica photo quality, ultra-detailed textures.")
         num_inference_steps = kwargs.get("num_inference_steps", 50)
         guidance_scale = kwargs.get("guidance_scale", 7.5)
         
+        # Handle prompt input - ensure it's a list of strings with correct batch size
+        if isinstance(prompt, str):
+            prompt = [prompt] * batch_size
+        elif isinstance(prompt, list):
+            if len(prompt) < batch_size:
+                # If not enough prompts, repeat the last one
+                prompt = prompt + [prompt[-1]] * (batch_size - len(prompt))
+            elif len(prompt) > batch_size:
+                # If too many prompts, truncate
+                prompt = prompt[:batch_size]
+        
         # Generate images
         with torch.no_grad():
             try:
                 output = self.pipe(
-                    prompt=[prompt] * batch_size,
+                    prompt=prompt,  # Now prompt is already a list of strings
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
                     height=self._img_size,

@@ -61,11 +61,38 @@ spec:
               echo "Setting up environment..."
               mkdir -p /nfs-user-107/authprint/results
               mkdir -p /nfs-user-107/authprint/evaluation_results
+              mkdir -p /nfs-user-107/authprint/pretrained_models
               
-              # Download pretrained models
-              echo "Downloading pretrained models..."
-              curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
-              curl -o lsuncat100k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada.pkl"
+              # Check and download pretrained models if they don't exist
+              if [ ! -f "/nfs-user-107/authprint/pretrained_models/vgg16-397923af.pth" ]; then
+                echo "Downloading VGG16 weights..."
+                curl -L -o /nfs-user-107/authprint/pretrained_models/vgg16-397923af.pth \
+                  "https://download.pytorch.org/models/vgg16-397923af.pth"
+              fi
+              
+              if [ ! -f "/nfs-user-107/authprint/pretrained_models/weights-inception-2015-12-05-6726825d.pth" ]; then
+                echo "Downloading Inception weights..."
+                curl -L -o /nfs-user-107/authprint/pretrained_models/weights-inception-2015-12-05-6726825d.pth \
+                  "https://github.com/toshas/torch-fidelity/releases/download/v0.2.0/weights-inception-2015-12-05-6726825d.pth"
+              fi
+              
+              # Create symlinks to the expected locations
+              mkdir -p /root/.cache/torch/hub/checkpoints
+              ln -sf /nfs-user-107/authprint/pretrained_models/vgg16-397923af.pth /root/.cache/torch/hub/checkpoints/
+              ln -sf /nfs-user-107/authprint/pretrained_models/weights-inception-2015-12-05-6726825d.pth /root/.cache/torch/hub/checkpoints/
+              
+              # Download StyleGAN models if they don't exist
+              if [ ! -f "/nfs-user-107/authprint/ffhq70k-paper256-ada.pkl" ]; then
+                echo "Downloading StyleGAN FFHQ model..."
+                curl -o /nfs-user-107/authprint/ffhq70k-paper256-ada.pkl \
+                  "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
+              fi
+              
+              if [ ! -f "/nfs-user-107/authprint/lsuncat100k-paper256-ada.pkl" ]; then
+                echo "Downloading StyleGAN LSUN Cat model..."
+                curl -o /nfs-user-107/authprint/lsuncat100k-paper256-ada.pkl \
+                  "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/lsuncat100k-paper256-ada.pkl"
+              fi
               
               # Run training directly with torchrun
               echo "Starting training..."

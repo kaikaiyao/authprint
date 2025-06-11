@@ -75,13 +75,6 @@ RUN pip install huggingface_hub[hf_xet]
 ENV TORCH_EXTENSIONS_DIR=/tmp/torch_extensions
 RUN mkdir -p ${TORCH_EXTENSIONS_DIR} && chmod -R 777 ${TORCH_EXTENSIONS_DIR}
 
-# Download pre-trained model weights
-RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
-    curl -L -o /root/.cache/torch/hub/checkpoints/vgg16-397923af.pth \
-    https://download.pytorch.org/models/vgg16-397923af.pth && \
-    curl -L -o /root/.cache/torch/hub/checkpoints/weights-inception-2015-12-05-6726825d.pth \
-    https://github.com/toshas/torch-fidelity/releases/download/v0.2.0/weights-inception-2015-12-05-6726825d.pth
-
 ARG CACHEBUST=1
 
 CMD ["true"]

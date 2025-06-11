@@ -71,8 +71,8 @@ RUN pip install --no-cache-dir \
 
 RUN pip install huggingface_hub[hf_xet]
 
-# Configure writable directories
-ENV TORCH_EXTENSIONS_DIR=/workspace/torch_extensions
+# Configure writable directories for PyTorch extensions
+ENV TORCH_EXTENSIONS_DIR=/tmp/torch_extensions
 RUN mkdir -p ${TORCH_EXTENSIONS_DIR} && chmod -R 777 ${TORCH_EXTENSIONS_DIR}
 
 # Download pre-trained model weights
@@ -84,9 +84,4 @@ RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
 
 ARG CACHEBUST=1
 
-# Create workspace directories
-RUN mkdir -p /workspace/authprint/results
-
-# Set working directory
-WORKDIR /workspace/authprint
 CMD ["true"]

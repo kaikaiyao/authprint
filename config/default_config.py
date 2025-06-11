@@ -303,6 +303,18 @@ class Config:
             self.model.sd_prompt = args.sd_prompt
         if hasattr(args, 'sd_decoder_size'):
             self.model.sd_decoder_size = args.sd_decoder_size
+            
+        # Multi-prompt configuration
+        if hasattr(args, 'enable_multi_prompt'):
+            self.model.enable_multi_prompt = args.enable_multi_prompt
+        if hasattr(args, 'prompt_source'):
+            self.model.prompt_source = args.prompt_source
+        if hasattr(args, 'prompt_dataset_path'):
+            self.model.prompt_dataset_path = args.prompt_dataset_path
+        if hasattr(args, 'prompt_dataset_size'):
+            self.model.prompt_dataset_size = args.prompt_dataset_size
+        if hasattr(args, 'diffusiondb_subset'):
+            self.model.diffusiondb_subset = args.diffusiondb_subset
         
         # Mode-specific configuration
         if mode == 'train':

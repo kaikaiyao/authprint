@@ -4,6 +4,7 @@ Trainer for StyleGAN fingerprinting.
 import logging
 import time
 import random
+import re
 from typing import Dict, List, Optional
 
 import torch
@@ -15,6 +16,38 @@ from config.default_config import Config
 from models.decoder import DecoderSD_L, DecoderSD_M, DecoderSD_S, StyleGAN2Decoder
 from models.stable_diffusion_model import StableDiffusionModel
 from utils.checkpoint import save_checkpoint, load_checkpoint
+
+
+def clean_prompt(prompt: str) -> str:
+    """
+    Clean a prompt by removing excessive punctuation and normalizing whitespace.
+    
+    Args:
+        prompt (str): Input prompt to clean.
+        
+    Returns:
+        str: Cleaned prompt.
+    """
+    # Remove URLs
+    prompt = re.sub(r'http\S+|www\.\S+', '', prompt)
+    
+    # Remove excessive punctuation (more than 1 of the same character)
+    prompt = re.sub(r'([!?.]){2,}', r'\1', prompt)
+    
+    # Remove excessive whitespace
+    prompt = ' '.join(prompt.split())
+    
+    # Remove <|endoftext|> tokens
+    prompt = prompt.replace('<|endoftext|>', '')
+    
+    # Remove empty parentheses and brackets
+    prompt = re.sub(r'\(\s*\)|\[\s*\]|\{\s*\}', '', prompt)
+    
+    # Normalize commas and colons
+    prompt = re.sub(r'\s*,\s*', ', ', prompt)
+    prompt = re.sub(r'\s*:\s*', ': ', prompt)
+    
+    return prompt.strip()
 
 
 class FingerprintTrainer:
@@ -108,7 +141,6 @@ class FingerprintTrainer:
         
         try:
             # Load the metadata table from DiffusionDB
-            # Use a subset that matches our desired dataset size (10k by default)
             subset_mapping = {
                 "2m": "2m_random_10k",  # Using random 10k subset instead of full dataset
                 "large": "large_random_10k"
@@ -116,8 +148,23 @@ class FingerprintTrainer:
             subset = subset_mapping[self.config.model.diffusiondb_subset]
             dataset = load_dataset("poloclub/diffusiondb", subset, split="train", trust_remote_code=True)
             
-            # Extract all unique prompts
-            all_prompts = list(set(dataset["prompt"]))
+            # Extract and clean all unique prompts
+            all_prompts = []
+            raw_prompts = list(set(dataset["prompt"]))
+            
+            if self.rank == 0:
+                logging.info(f"Found {len(raw_prompts)} unique prompts before cleaning")
+            
+            for prompt in raw_prompts:
+                if not prompt:  # Skip empty prompts
+                    continue
+                    
+                cleaned_prompt = clean_prompt(prompt)
+                if cleaned_prompt and len(cleaned_prompt.split()) <= 50:  # Only keep reasonably sized prompts
+                    all_prompts.append(cleaned_prompt)
+            
+            if self.rank == 0:
+                logging.info(f"Retained {len(all_prompts)} prompts after cleaning")
             
             # Sample the specified number of prompts
             if len(all_prompts) > self.config.model.prompt_dataset_size:
@@ -125,12 +172,14 @@ class FingerprintTrainer:
             else:
                 self.prompts = all_prompts
                 if self.rank == 0:
-                    logging.warning(f"DiffusionDB contains fewer unique prompts ({len(all_prompts)}) "
+                    logging.warning(f"DiffusionDB contains fewer clean prompts ({len(all_prompts)}) "
                                   f"than requested ({self.config.model.prompt_dataset_size})")
             
             if self.rank == 0:
                 logging.info(f"Loaded {len(self.prompts)} prompts from DiffusionDB")
-                logging.info(f"Sample prompts: {self.prompts[:3]}")
+                logging.info("Sample prompts after cleaning:")
+                for i, prompt in enumerate(self.prompts[:10]):  # Show first 10 prompts
+                    logging.info(f"  {i+1}. {prompt}")
         
         except Exception as e:
             if self.rank == 0:
@@ -265,6 +314,11 @@ class FingerprintTrainer:
         if self.config.model.model_type == "stable-diffusion":
             prompts = self._sample_prompts(self.config.training.batch_size)
             gen_kwargs["prompt"] = prompts
+            # Log prompts used in this iteration
+            if self.rank == 0:
+                logging.info(f"Iteration {self.global_step + 1} prompts:")
+                for i, prompt in enumerate(prompts[:5]):  # Show first 5 prompts
+                    logging.info(f"  {i+1}. {prompt}")
         
         # Generate images
         x = self.generative_model.generate_images(

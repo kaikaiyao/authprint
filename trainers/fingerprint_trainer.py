@@ -109,7 +109,7 @@ class FingerprintTrainer:
         try:
             # Load the metadata table from DiffusionDB
             subset = "2m" if self.config.model.diffusiondb_subset == "2m" else "large"
-            dataset = load_dataset("poloclub/diffusiondb", subset, split="train")
+            dataset = load_dataset("poloclub/diffusiondb", subset, split="train", trust_remote_code=True)
             
             # Extract all unique prompts
             all_prompts = list(set(dataset["prompt"]))

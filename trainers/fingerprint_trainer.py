@@ -108,7 +108,12 @@ class FingerprintTrainer:
         
         try:
             # Load the metadata table from DiffusionDB
-            subset = "2m" if self.config.model.diffusiondb_subset == "2m" else "large"
+            # Use a subset that matches our desired dataset size (10k by default)
+            subset_mapping = {
+                "2m": "2m_random_10k",  # Using random 10k subset instead of full dataset
+                "large": "large_random_10k"
+            }
+            subset = subset_mapping[self.config.model.diffusiondb_subset]
             dataset = load_dataset("poloclub/diffusiondb", subset, split="train", trust_remote_code=True)
             
             # Extract all unique prompts

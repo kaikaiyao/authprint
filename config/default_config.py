@@ -66,7 +66,10 @@ class ModelConfig:
             if self.prompt_source == "local":
                 assert os.path.exists(self.prompt_dataset_path), f"Prompt dataset file not found: {self.prompt_dataset_path}"
             else:  # diffusiondb
-                assert self.diffusiondb_subset in ["2m", "large"], f"Invalid DiffusionDB subset: {self.diffusiondb_subset}"
+                # Update the valid subset names to match DiffusionDB's actual configurations
+                valid_subsets = ["2m", "large"]  # These will be mapped to 2m_all and large_all
+                assert self.diffusiondb_subset in valid_subsets, \
+                    f"Invalid DiffusionDB subset: {self.diffusiondb_subset}. Must be one of {valid_subsets}"
             assert self.prompt_dataset_size > 0, "Prompt dataset size must be positive"
     
     def get_model_class(self) -> Type:

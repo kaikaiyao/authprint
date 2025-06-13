@@ -293,10 +293,10 @@ def create_ensemble_decoder_plot(ax):
     ax.set_xticks(num_decoders)
     
     # Force y-axis limits and ticks
-    ax.set_ylim(0, 0.5)
-    yticks = np.linspace(0, 0.5, 6)  # 6 ticks from 0 to 0.5
+    ax.set_ylim(0, 0.2)
+    yticks = np.linspace(0, 0.2, 6)  # 6 ticks from 0 to 0.2
     ax.set_yticks(yticks)
-    ax.set_yticklabels([f'{x:.1f}' for x in yticks])  # Format as decimals
+    ax.set_yticklabels([f'{x:.2f}' for x in yticks])  # Format as decimals with 2 decimal places
     
     # Add legend
     ax.legend(edgecolor='black', loc='upper right')
@@ -381,9 +381,9 @@ ax5 = fig5.add_subplot(111)
 create_ensemble_decoder_plot(ax5)
 
 # Force y-axis limits again right before saving
-ax5.set_ylim(0, 0.5)
-ax5.set_yticks(np.linspace(0, 0.5, 6))
-ax5.yaxis.set_major_formatter(plt.FormatStrFormatter('%.1f'))
+ax5.set_ylim(0, 0.2)
+ax5.set_yticks(np.linspace(0, 0.2, 6))
+ax5.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
 
 # Force draw and save
 plt.draw()

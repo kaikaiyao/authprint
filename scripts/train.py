@@ -69,9 +69,9 @@ def parse_args():
                         help="Path to local prompt dataset file (one prompt per line)")
     parser.add_argument("--prompt_dataset_size", type=int, default=10000,
                         help="Number of prompts to load from dataset")
-    parser.add_argument("--diffusiondb_subset", type=str, default="2m",
-                        choices=["2m", "large"],
-                        help="Which DiffusionDB subset to use (2m or large)")
+    parser.add_argument("--diffusiondb_subset", type=str, default="2m_random_10k",
+                        choices=["2m_random_10k", "large_random_10k", "2m_random_5k"],
+                        help="Which DiffusionDB subset to use (2m_random_10k, large_random_10k, 2m_random_5k)")
     
     # Common configuration
     parser.add_argument("--checkpoint_path", type=str, default=None,

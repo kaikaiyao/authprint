@@ -677,8 +677,17 @@ class FingerprintEvaluator:
         """
         Load prompts from the dataset file.
         """
+        if self.config.model.prompt_source == "local":
+            self._load_prompt_dataset_local()
+        else:  # diffusiondb
+            self._load_prompt_dataset_diffusiondb()
+
+    def _load_prompt_dataset_local(self) -> None:
+        """
+        Load prompts from a local file.
+        """
         if self.rank == 0:
-            logging.info(f"Loading prompts from {self.config.model.prompt_dataset_path}")
+            logging.info(f"Loading prompts from local file: {self.config.model.prompt_dataset_path}")
         
         try:
             with open(self.config.model.prompt_dataset_path, 'r', encoding='utf-8') as f:
@@ -694,12 +703,70 @@ class FingerprintEvaluator:
                                   f"than requested ({self.config.model.prompt_dataset_size})")
             
             if self.rank == 0:
-                logging.info(f"Loaded {len(self.prompts)} prompts for evaluation")
+                logging.info(f"Loaded {len(self.prompts)} prompts from local file")
                 logging.info(f"Sample prompts: {self.prompts[:3]}")
         
         except Exception as e:
             if self.rank == 0:
                 logging.error(f"Error loading prompt dataset: {str(e)}")
+            raise
+
+    def _load_prompt_dataset_diffusiondb(self) -> None:
+        """
+        Load prompts from DiffusionDB dataset.
+        """
+        if self.rank == 0:
+            logging.info("Loading prompts from DiffusionDB dataset")
+        
+        try:
+            from datasets import load_dataset
+            from trainers.fingerprint_trainer import clean_prompt  # Reuse the clean_prompt function
+            
+            # Load the metadata table from DiffusionDB
+            subset_mapping = {
+                "2m_random_10k": "2m_random_10k",  # Using random 10k subset instead of full dataset
+                "large_random_10k": "large_random_10k",
+                "2m_random_5k": "2m_random_5k",
+            }
+            subset = subset_mapping[self.config.model.diffusiondb_subset]
+            dataset = load_dataset("poloclub/diffusiondb", subset, split="train", trust_remote_code=True)
+            
+            # Extract and clean all unique prompts
+            all_prompts = []
+            raw_prompts = list(set(dataset["prompt"]))
+            
+            if self.rank == 0:
+                logging.info(f"Found {len(raw_prompts)} unique prompts before cleaning")
+            
+            for prompt in raw_prompts:
+                if not prompt:  # Skip empty prompts
+                    continue
+                    
+                cleaned_prompt = clean_prompt(prompt)
+                if cleaned_prompt and len(cleaned_prompt.split()) <= 50:  # Only keep reasonably sized prompts
+                    all_prompts.append(cleaned_prompt)
+            
+            if self.rank == 0:
+                logging.info(f"Retained {len(all_prompts)} prompts after cleaning")
+            
+            # Sample the specified number of prompts
+            if len(all_prompts) > self.config.model.prompt_dataset_size:
+                self.prompts = random.sample(all_prompts, self.config.model.prompt_dataset_size)
+            else:
+                self.prompts = all_prompts
+                if self.rank == 0:
+                    logging.warning(f"DiffusionDB contains fewer clean prompts ({len(all_prompts)}) "
+                                  f"than requested ({self.config.model.prompt_dataset_size})")
+            
+            if self.rank == 0:
+                logging.info(f"Loaded {len(self.prompts)} prompts from DiffusionDB")
+                logging.info("Sample prompts after cleaning:")
+                for i, prompt in enumerate(self.prompts[:10]):  # Show first 10 prompts
+                    logging.info(f"  {i+1}. {prompt}")
+        
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error loading DiffusionDB dataset: {str(e)}")
             raise
 
     def _sample_prompts(self, batch_size: int) -> List[str]:

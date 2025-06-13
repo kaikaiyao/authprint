@@ -142,8 +142,9 @@ class FingerprintTrainer:
         try:
             # Load the metadata table from DiffusionDB
             subset_mapping = {
-                "2m": "2m_random_10k",  # Using random 10k subset instead of full dataset
-                "large": "large_random_10k"
+                "2m_random_10k": "2m_random_10k",  # Using random 10k subset instead of full dataset
+                "large_random_10k": "large_random_10k",
+                "2m_random_5k": "2m_random_5k",
             }
             subset = subset_mapping[self.config.model.diffusiondb_subset]
             dataset = load_dataset("poloclub/diffusiondb", subset, split="train", trust_remote_code=True)

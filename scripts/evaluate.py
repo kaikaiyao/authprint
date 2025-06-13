@@ -47,10 +47,16 @@ def parse_args():
     # Multi-prompt evaluation configuration
     parser.add_argument("--enable_multi_prompt", action="store_true",
                         help="Enable multi-prompt evaluation mode")
+    parser.add_argument("--prompt_source", type=str, default="local",
+                        choices=["local", "diffusiondb"],
+                        help="Source of prompts: local file or DiffusionDB dataset")
     parser.add_argument("--prompt_dataset_path", type=str, default="",
-                        help="Path to the prompt dataset file (one prompt per line)")
+                        help="Path to local prompt dataset file (one prompt per line)")
     parser.add_argument("--prompt_dataset_size", type=int, default=10000,
                         help="Number of prompts to load from dataset")
+    parser.add_argument("--diffusiondb_subset", type=str, default="2m_random_10k",
+                        choices=["2m_random_10k", "large_random_10k", "2m_random_5k"],
+                        help="Which DiffusionDB subset to use (2m_random_10k, large_random_10k, 2m_random_5k)")
     
     # StyleGAN2 configuration
     parser.add_argument("--stylegan2_url", type=str,

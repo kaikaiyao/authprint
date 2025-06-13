@@ -99,7 +99,7 @@ spec:
                       --sd_enable_cpu_offload \
                       --enable_multi_prompt \
                       --prompt_source "diffusiondb" \
-                      --diffusiondb_subset "2m"
+                      --diffusiondb_subset "2m_random_10k"
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

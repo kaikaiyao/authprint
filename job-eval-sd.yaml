@@ -59,12 +59,23 @@ spec:
           args:
             - |
               echo "Setting up environment..."
+              # Copy code from NFS to workspace
+              echo "Copying code from NFS to workspace..."
+              mkdir -p /workspace
+              cp -r /nfs-user-107/authprint /workspace/
+              
+              # Create necessary directories in workspace
+              mkdir -p /workspace/authprint/results
               mkdir -p /workspace/authprint/evaluation_results
               mkdir -p /workspace/authprint/evaluation_results/logs
               
-              # Download pretrained models
-              echo "Downloading pretrained models..."
-              curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
+              # Create symlinks to the expected locations
+              mkdir -p /root/.cache/torch/hub/checkpoints
+              ln -sf /nfs-user-107/authprint/pretrained_models/vgg16-397923af.pth /root/.cache/torch/hub/checkpoints/
+              ln -sf /nfs-user-107/authprint/pretrained_models/weights-inception-2015-12-05-6726825d.pth /root/.cache/torch/hub/checkpoints/
+              
+              # Set Python path
+              export PYTHONPATH=$PYTHONPATH:/workspace/authprint
               
               # Define common parameters for all runs
               TORCHRUN_CMD="torchrun --nproc_per_node=1 \

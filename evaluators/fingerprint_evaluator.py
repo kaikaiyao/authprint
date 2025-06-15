@@ -3,6 +3,7 @@ Evaluator for generative model fingerprinting.
 """
 import logging
 import os
+import re
 from typing import Dict, Optional, List, Tuple, Any
 
 import torch
@@ -23,6 +24,38 @@ from utils.model_loading import (
     STYLEGAN2_MODELS,
     STABLE_DIFFUSION_MODELS
 )
+
+
+def clean_prompt(prompt: str) -> str:
+    """
+    Clean a prompt by removing excessive punctuation and normalizing whitespace.
+    
+    Args:
+        prompt (str): Input prompt to clean.
+        
+    Returns:
+        str: Cleaned prompt.
+    """
+    # Remove URLs
+    prompt = re.sub(r'http\S+|www\.\S+', '', prompt)
+    
+    # Remove excessive punctuation (more than 1 of the same character)
+    prompt = re.sub(r'([!?.]){2,}', r'\1', prompt)
+    
+    # Remove excessive whitespace
+    prompt = ' '.join(prompt.split())
+    
+    # Remove <|endoftext|> tokens
+    prompt = prompt.replace('<|endoftext|>', '')
+    
+    # Remove empty parentheses and brackets
+    prompt = re.sub(r'\(\s*\)|\[\s*\]|\{\s*\}', '', prompt)
+    
+    # Normalize commas and colons
+    prompt = re.sub(r'\s*,\s*', ', ', prompt)
+    prompt = re.sub(r'\s*:\s*', ': ', prompt)
+    
+    return prompt.strip()
 
 
 class FingerprintEvaluator:
@@ -720,7 +753,6 @@ class FingerprintEvaluator:
         
         try:
             from datasets import load_dataset
-            from trainers.fingerprint_trainer import clean_prompt  # Reuse the clean_prompt function
             
             # Load the metadata table from DiffusionDB
             subset_mapping = {

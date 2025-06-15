@@ -20,14 +20,14 @@ for line in lines:
         train_losses.append(train_loss)
 
 # Create the plot
-plt.figure(figsize=(12, 6))
+plt.figure(figsize=(12, 12))
 plt.plot(iterations, train_losses, 'b-', label='Train Loss')
 plt.xlabel('Iteration')
 plt.ylabel('Loss')
 plt.title('Training Loss Over Time')
 plt.grid(True)
 plt.legend()
-plt.ylim(bottom=0.0, top=0.25)  # Set y-axis range from 0.0 to 0.25
+plt.ylim(bottom=0.0, top=0.1)  # Set y-axis range from 0.0 to 0.25
 
 # Save the plot
 plt.savefig('train_loss.png', dpi=300, bbox_inches='tight')

@@ -249,15 +249,20 @@ class FingerprintTrainer:
         if self.rank == 0:
             logging.info("Optimizer initialized with decoder parameters")
         
+        # Ensure models are initialized before DDP wrapping
+        torch.cuda.synchronize()
+        
         # Wrap models in DDP if using distributed training
         if self.world_size > 1:
-            self.decoder = DDP(
-                self.decoder,
-                device_ids=[self.local_rank],
-                output_device=self.local_rank
-            )
-            if self.rank == 0:
-                logging.info("Models wrapped in DistributedDataParallel")
+            # Make sure model is initialized on all ranks before DDP wrapping
+            if self.decoder is not None:
+                self.decoder = DDP(
+                    self.decoder,
+                    device_ids=[self.local_rank],
+                    output_device=self.local_rank
+                )
+                if self.rank == 0:
+                    logging.info("Models wrapped in DistributedDataParallel")
     
     def _generate_pixel_indices(self) -> None:
         """
@@ -384,7 +389,7 @@ class FingerprintTrainer:
         """
         Main training loop.
         """
-        # Set up models
+        # Set up models first
         self.setup_models()
         
         # Resume from checkpoint if specified

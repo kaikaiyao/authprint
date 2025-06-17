@@ -99,7 +99,8 @@ spec:
                       --sd_enable_cpu_offload \
                       --enable_multi_prompt \
                       --prompt_source "diffusiondb" \
-                      --diffusiondb_subset "2m_random_10k"
+                      --diffusiondb_subset "2m_random_10k" \
+                      --checkpoint_path "/nfs-user-107/SD/1024px_5000iter_L_diffusiondb.pth"
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

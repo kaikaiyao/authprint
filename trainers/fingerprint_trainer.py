@@ -206,63 +206,73 @@ class FingerprintTrainer:
         """
         Set up all models needed for training.
         """
-        # Initialize generative model
-        if self.rank == 0:
-            logging.info(f"Loading {self.config.model.model_type} model...")
-            
-        model_class = self.config.model.get_model_class()
-        model_kwargs = self.config.model.get_model_kwargs(self.device)
-        self.generative_model = model_class(**model_kwargs)
-        
-        # Initialize decoder based on model type and size
-        decoder_output_dim = self.image_pixel_count  # For direct pixel prediction
-        
-        if self.config.model.model_type == "stylegan2":
-            self.decoder = StyleGAN2Decoder(
-                image_size=self.config.model.img_size,
-                channels=3,
-                output_dim=decoder_output_dim
-            ).to(self.device)
+        try:
+            # Initialize generative model
             if self.rank == 0:
-                logging.info(f"Initialized StyleGAN2Decoder with output_dim={decoder_output_dim}")
-        else:  # stable-diffusion
-            decoder_class = {
-                "S": DecoderSD_S,
-                "M": DecoderSD_M,
-                "L": DecoderSD_L
-            }[self.config.model.sd_decoder_size]
+                logging.info(f"Loading {self.config.model.model_type} model...")
+                
+            model_class = self.config.model.get_model_class()
+            model_kwargs = self.config.model.get_model_kwargs(self.device)
+            self.generative_model = model_class(**model_kwargs)
             
-            self.decoder = decoder_class(
-                image_size=self.config.model.img_size,
-                channels=3,
-                output_dim=decoder_output_dim
-            ).to(self.device)
+            # Initialize decoder based on model type and size
+            decoder_output_dim = self.image_pixel_count  # For direct pixel prediction
             
-            if self.rank == 0:
-                logging.info(f"Initialized SD-Decoder-{self.config.model.sd_decoder_size} with output_dim={decoder_output_dim}")
-        
-        # Initialize optimizer
-        self.optimizer = optim.Adam(
-            self.decoder.parameters(),
-            lr=self.config.training.lr
-        )
-        if self.rank == 0:
-            logging.info("Optimizer initialized with decoder parameters")
-        
-        # Ensure models are initialized before DDP wrapping
-        torch.cuda.synchronize()
-        
-        # Wrap models in DDP if using distributed training
-        if self.world_size > 1:
-            # Make sure model is initialized on all ranks before DDP wrapping
-            if self.decoder is not None:
-                self.decoder = DDP(
-                    self.decoder,
-                    device_ids=[self.local_rank],
-                    output_device=self.local_rank
-                )
+            if self.config.model.model_type == "stylegan2":
+                self.decoder = StyleGAN2Decoder(
+                    image_size=self.config.model.img_size,
+                    channels=3,
+                    output_dim=decoder_output_dim
+                ).to(self.device)
                 if self.rank == 0:
-                    logging.info("Models wrapped in DistributedDataParallel")
+                    logging.info(f"Initialized StyleGAN2Decoder with output_dim={decoder_output_dim}")
+            else:  # stable-diffusion
+                decoder_class = {
+                    "S": DecoderSD_S,
+                    "M": DecoderSD_M,
+                    "L": DecoderSD_L
+                }[self.config.model.sd_decoder_size]
+                
+                self.decoder = decoder_class(
+                    image_size=self.config.model.img_size,
+                    channels=3,
+                    output_dim=decoder_output_dim
+                ).to(self.device)
+                
+                if self.rank == 0:
+                    logging.info(f"Initialized SD-Decoder-{self.config.model.sd_decoder_size} with output_dim={decoder_output_dim}")
+            
+            # Initialize optimizer
+            self.optimizer = optim.Adam(
+                self.decoder.parameters(),
+                lr=self.config.training.lr
+            )
+            if self.rank == 0:
+                logging.info("Optimizer initialized with decoder parameters")
+            
+            # Ensure models are initialized before DDP wrapping
+            torch.cuda.synchronize()
+            if self.world_size > 1:
+                torch.distributed.barrier()
+            
+            # Wrap models in DDP if using distributed training
+            if self.world_size > 1:
+                if self.decoder is not None:
+                    self.decoder = DDP(
+                        self.decoder,
+                        device_ids=[self.local_rank],
+                        output_device=self.local_rank,
+                        find_unused_parameters=True  # Add this to handle unused parameters
+                    )
+                    if self.rank == 0:
+                        logging.info("Models wrapped in DistributedDataParallel")
+                
+                # Final sync point after DDP wrapping
+                torch.distributed.barrier()
+        
+        except Exception as e:
+            logging.error(f"Error in setup_models: {str(e)}")
+            raise
     
     def _generate_pixel_indices(self) -> None:
         """
@@ -389,46 +399,61 @@ class FingerprintTrainer:
         """
         Main training loop.
         """
-        # Set up models first
-        self.setup_models()
-        
-        # Resume from checkpoint if specified
-        if self.config.checkpoint_path:
-            self.load_checkpoint(self.config.checkpoint_path)
-        
-        # Training loop
-        if self.rank == 0:
-            logging.info("Starting training...")
-            start_time = time.time()
-        
-        for iteration in range(self.start_iteration, self.config.training.total_iterations + 1):
-            # Run training iteration
-            metrics = self.train_iteration()
+        try:
+            # Set up models first
+            self.setup_models()
             
-            # Update global step
-            self.global_step = iteration
+            # Synchronize before loading checkpoint
+            if self.world_size > 1:
+                torch.distributed.barrier()
             
-            # Log progress
-            if self.rank == 0 and iteration % self.config.training.log_interval == 0:
-                elapsed = time.time() - start_time
-                logging.info(
-                    f"Iteration {iteration}/{self.config.training.total_iterations} "
-                    f"[{elapsed:.2f}s] "
-                    f"Train Loss: {metrics['train_loss']:.6f} "
-                    f"MSE: {metrics['mse_distance_mean']:.6f} ± {metrics['mse_distance_std']:.6f}"
-                )
+            # Resume from checkpoint if specified
+            if self.config.checkpoint_path:
+                if self.rank == 0:
+                    logging.info(f"Loading checkpoint from {self.config.checkpoint_path}")
+                self.load_checkpoint(self.config.checkpoint_path)
             
-            # Save checkpoint
-            if self.rank == 0 and iteration % self.config.training.checkpoint_interval == 0:
-                save_checkpoint(
-                    iteration=iteration,
-                    decoder=self.decoder,
-                    output_dir=self.config.output_dir,
-                    rank=self.rank,
-                    optimizer=self.optimizer,
-                    metrics=metrics,
-                    global_step=self.global_step
-                )
+            # Synchronize after loading checkpoint
+            if self.world_size > 1:
+                torch.distributed.barrier()
+            
+            # Training loop
+            if self.rank == 0:
+                logging.info("Starting training...")
+                start_time = time.time()
+            
+            for iteration in range(self.start_iteration, self.config.training.total_iterations + 1):
+                # Run training iteration
+                metrics = self.train_iteration()
+                
+                # Update global step
+                self.global_step = iteration
+                
+                # Log progress
+                if self.rank == 0 and iteration % self.config.training.log_interval == 0:
+                    elapsed = time.time() - start_time
+                    logging.info(
+                        f"Iteration {iteration}/{self.config.training.total_iterations} "
+                        f"[{elapsed:.2f}s] "
+                        f"Train Loss: {metrics['train_loss']:.6f} "
+                        f"MSE: {metrics['mse_distance_mean']:.6f} ± {metrics['mse_distance_std']:.6f}"
+                    )
+                
+                # Save checkpoint
+                if self.rank == 0 and iteration % self.config.training.checkpoint_interval == 0:
+                    save_checkpoint(
+                        iteration=iteration,
+                        decoder=self.decoder,
+                        output_dir=self.config.output_dir,
+                        rank=self.rank,
+                        optimizer=self.optimizer,
+                        metrics=metrics,
+                        global_step=self.global_step
+                    )
+            
+            if self.rank == 0:
+                logging.info("Training completed")
         
-        if self.rank == 0:
-            logging.info("Training completed") 
+        except Exception as e:
+            logging.error(f"Error in training: {str(e)}")
+            raise 

@@ -140,8 +140,8 @@ spec:
           resources:
             limits:
               nvidia.com/gpu: "1"
-              cpu: "8"
-              memory: "48Gi"
+              cpu: "16"
+              memory: "64Gi"
           volumeMounts:
             - name: nfs-user-107
               mountPath: /nfs-user-107
@@ -161,4 +161,4 @@ spec:
         - name: dshm
           emptyDir:
             medium: Memory
-            sizeLimit: 16Gi 
+            sizeLimit: 32Gi 

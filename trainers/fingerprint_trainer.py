@@ -5,6 +5,7 @@ import logging
 import time
 import random
 import re
+import os
 from typing import Dict, List, Optional
 
 import torch
@@ -381,19 +382,72 @@ class FingerprintTrainer:
         Args:
             checkpoint_path (str): Path to the checkpoint file.
         """
-        if self.rank == 0:
-            logging.info(f"Loading checkpoint from {checkpoint_path}")
+        try:
+            if not self.decoder:
+                if self.rank == 0:
+                    logging.error("Decoder is not initialized. Make sure setup_models() is called first.")
+                raise RuntimeError("Decoder not initialized")
+            
+            if self.rank == 0:
+                logging.info(f"Loading checkpoint from {checkpoint_path}")
+            
+            # Verify checkpoint exists
+            if not os.path.exists(checkpoint_path):
+                if self.rank == 0:
+                    logging.error(f"Checkpoint not found at {checkpoint_path}")
+                raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+            
+            # Load checkpoint to CPU first
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            
+            # Verify checkpoint contents
+            required_keys = ['decoder_state', 'iteration']
+            missing_keys = [key for key in required_keys if key not in checkpoint]
+            if missing_keys:
+                if self.rank == 0:
+                    logging.error(f"Checkpoint is missing required keys: {missing_keys}")
+                raise ValueError(f"Invalid checkpoint: missing keys {missing_keys}")
+            
+            # Get decoder (handle DDP wrapping)
+            dec = self.decoder.module if hasattr(self.decoder, 'module') else self.decoder
+            
+            # Load decoder state
+            try:
+                dec.load_state_dict(checkpoint['decoder_state'])
+                if self.rank == 0:
+                    logging.info("Successfully loaded decoder state")
+            except Exception as e:
+                if self.rank == 0:
+                    logging.error(f"Failed to load decoder state: {str(e)}")
+                raise
+            
+            # Load optimizer state if available
+            if self.optimizer is not None and 'optimizer_state' in checkpoint:
+                try:
+                    self.optimizer.load_state_dict(checkpoint['optimizer_state'])
+                    if self.rank == 0:
+                        logging.info("Successfully loaded optimizer state")
+                except Exception as e:
+                    if self.rank == 0:
+                        logging.warning(f"Failed to load optimizer state: {str(e)}")
+            
+            # Update training progress
+            self.start_iteration = checkpoint.get('iteration', 1)
+            self.global_step = checkpoint.get('global_step', self.start_iteration - 1)
+            
+            if self.rank == 0:
+                logging.info(f"Resuming from iteration {self.start_iteration}")
+                if 'metrics' in checkpoint:
+                    logging.info(f"Previous metrics: {checkpoint['metrics']}")
+            
+            # Synchronize after loading
+            if self.world_size > 1:
+                torch.distributed.barrier()
         
-        # Load checkpoint
-        load_checkpoint(
-            checkpoint_path=checkpoint_path,
-            decoder=self.decoder,
-            optimizer=self.optimizer,
-            device=self.device
-        )
-        
-        if self.rank == 0:
-            logging.info("Checkpoint loaded successfully")
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error loading checkpoint: {str(e)}")
+            raise
     
     def train(self) -> None:
         """

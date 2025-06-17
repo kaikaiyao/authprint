@@ -102,30 +102,24 @@ def main():
     """Main entry point for training."""
     args = parse_args()
     
-    # Setup distributed training first
-    local_rank, rank, world_size, device = setup_distributed()
-    
-    # Load default configuration and update with args
-    config = get_default_config()
-    config.update_from_args(args, mode='train')
-    
-    # Setup logging
-    setup_logging(config.output_dir, rank)
-    
-    # Log configuration
-    if rank == 0:
-        logging.info(f"Configuration:\n{config}")
-        logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
-    
     try:
+        # Setup distributed training first
+        local_rank, rank, world_size, device = setup_distributed()
+        
+        # Load default configuration and update with args
+        config = get_default_config()
+        config.update_from_args(args, mode='train')
+        
+        # Setup logging
+        setup_logging(config.output_dir, rank)
+        
+        # Log configuration
+        if rank == 0:
+            logging.info(f"Configuration:\n{config}")
+            logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
+        
         # Initialize trainer
         trainer = FingerprintTrainer(config, local_rank, rank, world_size, device)
-        
-        # Load checkpoint if specified
-        if config.checkpoint_path:
-            if rank == 0:
-                logging.info(f"Resuming training from checkpoint: {config.checkpoint_path}")
-            trainer.load_checkpoint(config.checkpoint_path)
         
         # Run training
         trainer.train()

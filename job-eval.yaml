@@ -93,7 +93,7 @@ spec:
                           --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
                           --image_pixel_count 32 \
                           --image_pixel_set_seed 42 \
-                          --num_samples 128 \
+                          --num_samples 10000 \
                           --batch_size 128"
               
               

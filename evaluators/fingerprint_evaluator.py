@@ -14,7 +14,14 @@ from config.default_config import Config
 from models.decoder import DecoderSD_L, DecoderSD_M, DecoderSD_S, StyleGAN2Decoder
 from models.base_model import BaseGenerativeModel
 from utils.checkpoint import load_checkpoint
-from utils.metrics import save_metrics_text, calculate_fid
+from utils.metrics import save_metrics_text, calculate_fid, extract_inception_features
+from utils.distribution_metrics import (
+    InceptionScore,
+    calculate_kid,
+    calculate_precision_recall,
+    calculate_wasserstein,
+    calculate_mmd
+)
 from utils.image_transforms import (
     quantize_model_weights, 
     downsample_and_upsample
@@ -479,6 +486,9 @@ class FingerprintEvaluator:
         num_samples = self.config.evaluate.num_samples
         num_batches = (num_samples + batch_size - 1) // batch_size
         
+        # Initialize Inception Score calculator
+        inception_score_calc = InceptionScore(device=self.device)
+        
         # Define the evaluations to run
         evaluations_to_run = []
         
@@ -492,45 +502,32 @@ class FingerprintEvaluator:
             if self.quantized_models:
                 if 'int8' in self.quantized_models:
                     evaluations_to_run.append((None, 'quantization_int8'))
-                    if self.rank == 0:
-                        logging.info(f"Added int8 quantization evaluation")
                 if 'int4' in self.quantized_models:
                     evaluations_to_run.append((None, 'quantization_int4'))
-                    if self.rank == 0:
-                        logging.info(f"Added int4 quantization evaluation")
-                if self.rank == 0:
-                    logging.info(f"Added quantization evaluations for: {list(self.quantized_models.keys())}")
-            else:
-                if self.rank == 0:
-                    logging.warning("No quantized models available, skipping quantization evaluation")
         
         # Add downsample evaluations for both sizes
         evaluations_to_run.append((None, 'downsample_16'))
         evaluations_to_run.append((None, 'downsample_224'))
-        if self.rank == 0:
-            logging.info("Added downsample evaluations for sizes 16 and 224")
         
-        # Run evaluations
         total_evals = len(evaluations_to_run)
         if self.rank == 0:
-            logging.info(f"Running {total_evals} evaluations...")
-            logging.info(f"Evaluations to run: {[e[1] if e[1] else e[0] for e in evaluations_to_run]}")
+            logging.info(f"Running {total_evals} evaluations with extended distribution metrics...")
         
-        # Generate original images for FID comparison
+        # Generate original images for distribution comparison
         original_images = []
+        original_features = []
         with torch.no_grad():
             for i in range(num_batches):
                 start_idx = i * batch_size
                 end_idx = min((i + 1) * batch_size, num_samples)
                 current_batch_size = end_idx - start_idx
                 
-                # Generate images based on model type
                 if self.config.model.model_type == "stylegan2":
                     z = original_z[start_idx:end_idx]
                     x = self.generative_model.generate_images(
                         batch_size=current_batch_size,
                         device=self.device,
-                        z=z,  # Pass the latent vectors explicitly
+                        z=z,
                         **gen_kwargs
                     )
                 else:  # stable-diffusion
@@ -539,12 +536,26 @@ class FingerprintEvaluator:
                         device=self.device,
                         **gen_kwargs
                     )
+                
                 original_images.append(x)
+                # Extract inception features for distribution metrics
+                features = extract_inception_features(x, batch_size=batch_size, device=self.device)
+                original_features.append(features)
         
-        # Concatenate all original images
+        # Concatenate all original images and features
         original_images = torch.cat(original_images, dim=0)
+        original_features = np.concatenate(original_features, axis=0)
         
-        # Generate negative case images for FID comparison
+        # Calculate Inception Score for original distribution
+        is_mean, is_std = inception_score_calc.calculate_score(
+            (original_images + 1) / 2,  # Convert to [0, 1] range
+            batch_size=batch_size
+        )
+        
+        if self.rank == 0:
+            logging.info(f"Original distribution Inception Score: {is_mean:.4f} ± {is_std:.4f}")
+        
+        # Generate negative case images and compute all metrics
         with torch.no_grad():
             for idx, (model_name, transformation) in enumerate(evaluations_to_run):
                 key = model_name if model_name else transformation
@@ -553,6 +564,7 @@ class FingerprintEvaluator:
                 
                 mse_per_sample = []
                 negative_images = []
+                negative_features = []
                 
                 # Process in batches
                 for i in range(num_batches):
@@ -562,42 +574,38 @@ class FingerprintEvaluator:
                     
                     # Generate negative sample images
                     if model_name is not None:
-                        # Use pretrained model
                         model = self.pretrained_models[model_name]
                         if self.config.model.model_type == "stylegan2":
                             z = negative_z[start_idx:end_idx]
                             x = model.generate_images(
                                 batch_size=current_batch_size,
                                 device=self.device,
-                                z=z,  # Pass the latent vectors explicitly
+                                z=z,
                                 **gen_kwargs
                             )
-                        else:  # stable-diffusion
+                        else:
                             x = model.generate_images(
                                 batch_size=current_batch_size,
                                 device=self.device,
                                 **gen_kwargs
                             )
                     else:
-                        # Generate base images
                         if self.config.model.model_type == "stylegan2":
                             z = negative_z[start_idx:end_idx]
                             x = self.generative_model.generate_images(
                                 batch_size=current_batch_size,
                                 device=self.device,
-                                z=z,  # Pass the latent vectors explicitly
+                                z=z,
                                 **gen_kwargs
                             )
-                        else:  # stable-diffusion
+                        else:
                             x = self.generative_model.generate_images(
                                 batch_size=current_batch_size,
                                 device=self.device,
                                 **gen_kwargs
                             )
                         
-                        # Apply transformations
                         if transformation and transformation.startswith('quantization'):
-                            # For quantization, use the pre-quantized models
                             precision = transformation.split('_')[-1]
                             if precision in self.quantized_models:
                                 model = self.quantized_models[precision]
@@ -605,10 +613,10 @@ class FingerprintEvaluator:
                                     x = model.generate_images(
                                         batch_size=current_batch_size,
                                         device=self.device,
-                                        z=z,  # Pass the latent vectors explicitly
+                                        z=z,
                                         **gen_kwargs
                                     )
-                                else:  # stable-diffusion
+                                else:
                                     x = model.generate_images(
                                         batch_size=current_batch_size,
                                         device=self.device,
@@ -621,48 +629,85 @@ class FingerprintEvaluator:
                             downsample_size = int(transformation.split('_')[1])
                             x = downsample_and_upsample(x, downsample_size=downsample_size)
                     
-                    # Store images for FID calculation
+                    # Store images and extract features
                     negative_images.append(x)
+                    features = extract_inception_features(x, batch_size=batch_size, device=self.device)
+                    negative_features.append(features)
                     
-                    # Extract features (real pixel values)
+                    # Calculate MSE (existing code)
                     features = self.extract_image_partial(x)
                     true_values = features
-                    
-                    # Predict values
                     pred_values = self.decoder(x)
-                    
-                    # Calculate per-sample MSE
                     mse = torch.mean(torch.pow(pred_values - true_values, 2), dim=1).cpu().numpy()
                     mse_per_sample.extend(mse.tolist())
                 
-                # Combine all negative images
+                # Combine all negative images and features
                 negative_images = torch.cat(negative_images, dim=0)
+                negative_features = np.concatenate(negative_features, axis=0)
                 
-                # Calculate FID score
-                fid_score = calculate_fid(original_images, negative_images, batch_size=batch_size, device=self.device)
+                # Calculate all distribution metrics
+                fid_score = calculate_fid(
+                    (original_images + 1) / 2,
+                    (negative_images + 1) / 2,
+                    batch_size=batch_size,
+                    device=self.device
+                )
                 
-                # Convert to numpy array for calculations
+                kid_score = calculate_kid(original_features, negative_features)
+                
+                is_mean, is_std = inception_score_calc.calculate_score(
+                    (negative_images + 1) / 2,
+                    batch_size=batch_size
+                )
+                
+                precision, recall = calculate_precision_recall(
+                    original_features,
+                    negative_features
+                )
+                
+                wasserstein_dist = calculate_wasserstein(
+                    original_features,
+                    negative_features
+                )
+                
+                mmd_score = calculate_mmd(
+                    original_features,
+                    negative_features
+                )
+                
+                # Calculate standard metrics (existing code)
                 mse_per_sample = np.array(mse_per_sample)
-                
-                # Calculate metrics
                 mse_all = np.mean(mse_per_sample)
                 mse_std = np.std(mse_per_sample)
+                fpr = np.mean(mse_per_sample <= threshold)
                 
-                # Calculate FPR at 95% TPR threshold - now using per-sample MSEs
-                fpr = np.mean(mse_per_sample <= threshold)  # Proportion of negative samples below threshold
-                
-                # Store metrics
+                # Store all metrics
                 negative_results[key] = {
                     'mse_mean': mse_all,
                     'mse_std': mse_std,
-                    'mse_values': mse_per_sample,  # Now storing all per-sample MSEs
+                    'mse_values': mse_per_sample,
                     'fpr_at_95tpr': fpr,
-                    'fid_score': fid_score
+                    'fid_score': fid_score,
+                    'kid_score': kid_score,
+                    'inception_score_mean': is_mean,
+                    'inception_score_std': is_std,
+                    'precision': precision,
+                    'recall': recall,
+                    'wasserstein': wasserstein_dist,
+                    'mmd': mmd_score
                 }
                 
                 if self.rank == 0:
-                    logging.info(f"FPR at 95% TPR for {key}: {fpr:.4f} (computed over {len(mse_per_sample)} samples)")
-                    logging.info(f"FID score for {key}: {fid_score:.4f}")
+                    logging.info(
+                        f"Results for {key}:\n"
+                        f"- FPR at 95% TPR: {fpr:.4f}\n"
+                        f"- FID Score: {fid_score:.4f}\n"
+                        f"- KID Score: {kid_score:.4f}\n"
+                        f"- Inception Score: {is_mean:.4f} ± {is_std:.4f}\n"
+                        f"- Precision/Recall: {precision:.4f}/{recall:.4f}\n"
+                        f"- Wasserstein: {wassertein_dist:.4f}\n"
+                        f"- MMD: {mmd_score:.4f}"
+                    )
                 
                 # Progress reporting
                 if self.rank == 0 and (idx+1) % max(1, total_evals//5) == 0:
@@ -688,21 +733,42 @@ class FingerprintEvaluator:
         # Print metrics table if we have results and are on rank 0
         if metrics and self.rank == 0:
             logging.info("\nEvaluation Results:")
-            logging.info("-" * 150)
-            logging.info(f"{'Model/Transform':<40}{'Avg MSE':>15}{'Std MSE':>15}{'FPR@95%TPR':>15}{'FID Score':>15}")
-            logging.info("-" * 150)
+            logging.info("-" * 200)
+            logging.info(
+                f"{'Model/Transform':<30}"
+                f"{'MSE Mean':>12}{'MSE Std':>12}"
+                f"{'FPR@95%':>10}{'FID':>10}{'KID':>10}"
+                f"{'IS Mean':>10}{'IS Std':>10}"
+                f"{'Prec':>8}{'Rec':>8}"
+                f"{'Wass':>10}{'MMD':>10}"
+            )
+            logging.info("-" * 200)
             
             # Print original model results and threshold
-            logging.info(f"{'Original Model':<40}{metrics['pixel_mse_mean']:>15.6f}{metrics['pixel_mse_std']:>15.6f}{'N/A':>15}{'N/A':>15}")
+            logging.info(
+                f"{'Original Model':<30}"
+                f"{metrics['pixel_mse_mean']:>12.4f}{metrics['pixel_mse_std']:>12.4f}"
+                f"{'N/A':>10}{'N/A':>10}{'N/A':>10}"
+                f"{'N/A':>10}{'N/A':>10}"
+                f"{'N/A':>8}{'N/A':>8}"
+                f"{'N/A':>10}{'N/A':>10}"
+            )
             logging.info(f"Threshold at 95% TPR: {metrics['threshold_95tpr']:.6f}")
             
             # Print negative sample results if available
             if 'negative_results' in metrics:
                 logging.info("\nNegative Sample Results:")
                 for name, result in metrics['negative_results'].items():
-                    logging.info(f"{name:<40}{result['mse_mean']:>15.6f}{result['mse_std']:>15.6f}{result['fpr_at_95tpr']:>15.4f}{result['fid_score']:>15.4f}")
+                    logging.info(
+                        f"{name:<30}"
+                        f"{result['mse_mean']:>12.4f}{result['mse_std']:>12.4f}"
+                        f"{result['fpr_at_95tpr']:>10.4f}{result['fid_score']:>10.2f}{result['kid_score']:>10.4f}"
+                        f"{result['inception_score_mean']:>10.2f}{result['inception_score_std']:>10.2f}"
+                        f"{result['precision']:>8.2f}{result['recall']:>8.2f}"
+                        f"{result['wasserstein']:>10.4f}{result['mmd']:>10.4f}"
+                    )
             
-            logging.info("-" * 150)
+            logging.info("-" * 200)
         
         return metrics
 

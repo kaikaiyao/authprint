@@ -705,7 +705,7 @@ class FingerprintEvaluator:
                         f"- KID Score: {kid_score:.4f}\n"
                         f"- Inception Score: {is_mean:.4f} ± {is_std:.4f}\n"
                         f"- Precision/Recall: {precision:.4f}/{recall:.4f}\n"
-                        f"- Wasserstein: {wassertein_dist:.4f}\n"
+                        f"- Wasserstein: {wasserstein_dist:.4f}\n"
                         f"- MMD: {mmd_score:.4f}"
                     )
                 

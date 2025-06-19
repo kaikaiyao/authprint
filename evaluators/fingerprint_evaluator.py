@@ -517,6 +517,9 @@ class FingerprintEvaluator:
         evaluations_to_run.append((None, 'set_mixed_50_50_pixels_minus_one'))
         evaluations_to_run.append((None, 'set_mixed_75_25_pixels_minus_one'))
         evaluations_to_run.append((None, 'set_mixed_25_75_pixels_minus_one'))
+        evaluations_to_run.append((None, 'set_mixed_10_90_pixels_minus_one'))
+        evaluations_to_run.append((None, 'set_mixed_5_95_pixels_minus_one'))
+        evaluations_to_run.append((None, 'set_mixed_1_99_pixels_minus_one'))
         
         total_evals = len(evaluations_to_run)
         if self.rank == 0:
@@ -652,6 +655,15 @@ class FingerprintEvaluator:
                             x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=mixed_indices)
                         elif transformation == 'set_mixed_25_75_pixels_minus_one':
                             mixed_indices = self._mix_pixel_indices(0.25, self.image_pixel_set_seed + 4000)
+                            x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=mixed_indices)
+                        elif transformation == 'set_mixed_10_90_pixels_minus_one':
+                            mixed_indices = self._mix_pixel_indices(0.10, self.image_pixel_set_seed + 5000)
+                            x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=mixed_indices)
+                        elif transformation == 'set_mixed_5_95_pixels_minus_one':
+                            mixed_indices = self._mix_pixel_indices(0.05, self.image_pixel_set_seed + 6000)
+                            x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=mixed_indices)
+                        elif transformation == 'set_mixed_1_99_pixels_minus_one':
+                            mixed_indices = self._mix_pixel_indices(0.01, self.image_pixel_set_seed + 7000)
                             x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=mixed_indices)
                     
                     # Store images and extract features

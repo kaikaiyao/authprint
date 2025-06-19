@@ -514,6 +514,9 @@ class FingerprintEvaluator:
         
         # Add pixel manipulation evaluations
         evaluations_to_run.append((None, 'set_random_pixels_minus_one'))
+        evaluations_to_run.append((None, 'set_mixed_50_50_pixels_minus_one'))
+        evaluations_to_run.append((None, 'set_mixed_75_25_pixels_minus_one'))
+        evaluations_to_run.append((None, 'set_mixed_25_75_pixels_minus_one'))
         
         total_evals = len(evaluations_to_run)
         if self.rank == 0:
@@ -641,6 +644,15 @@ class FingerprintEvaluator:
                             random_seed = self.image_pixel_set_seed + 1000
                             random_indices = self._generate_random_pixel_indices(random_seed)
                             x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=random_indices)
+                        elif transformation == 'set_mixed_50_50_pixels_minus_one':
+                            mixed_indices = self._mix_pixel_indices(0.5, self.image_pixel_set_seed + 2000)
+                            x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=mixed_indices)
+                        elif transformation == 'set_mixed_75_25_pixels_minus_one':
+                            mixed_indices = self._mix_pixel_indices(0.75, self.image_pixel_set_seed + 3000)
+                            x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=mixed_indices)
+                        elif transformation == 'set_mixed_25_75_pixels_minus_one':
+                            mixed_indices = self._mix_pixel_indices(0.25, self.image_pixel_set_seed + 4000)
+                            x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=mixed_indices)
                     
                     # Store images and extract features
                     negative_images.append(x)
@@ -948,3 +960,46 @@ class FingerprintEvaluator:
             indices = torch.randperm(total_pixels)[:self.image_pixel_count]
         
         return indices.to(self.device)
+
+    # Add helper method for mixing pixel indices
+    def _mix_pixel_indices(self, original_ratio: float, random_seed: int) -> torch.Tensor:
+        """
+        Mix original pixel indices with random ones at specified ratio.
+        
+        Args:
+            original_ratio (float): Ratio of original pixels to keep (0.0 to 1.0)
+            random_seed (int): Random seed for generating new pixel indices
+            
+        Returns:
+            torch.Tensor: Mixed pixel indices
+        """
+        total_pixels = len(self.image_pixel_indices)
+        num_original = int(total_pixels * original_ratio)
+        num_random = total_pixels - num_original
+        
+        # Get original indices
+        original_indices = self.image_pixel_indices[:num_original]
+        
+        # Generate random indices ensuring no overlap with original indices
+        if num_random > 0:
+            torch.manual_seed(random_seed)
+            
+            # Calculate total available pixels
+            img_size = self.config.model.img_size
+            channels = 3
+            total_available = channels * img_size * img_size
+            
+            # Create mask of available indices (excluding original indices)
+            available_mask = torch.ones(total_available, dtype=torch.bool, device=self.device)
+            available_mask[self.image_pixel_indices] = False
+            available_indices = torch.nonzero(available_mask).squeeze()
+            
+            # Sample random indices from available ones
+            random_indices = available_indices[torch.randperm(len(available_indices))[:num_random]]
+            
+            # Combine original and random indices
+            mixed_indices = torch.cat([original_indices, random_indices])
+        else:
+            mixed_indices = original_indices
+        
+        return mixed_indices

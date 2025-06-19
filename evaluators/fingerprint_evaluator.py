@@ -509,6 +509,9 @@ class FingerprintEvaluator:
         evaluations_to_run.append((None, 'downsample_16'))
         evaluations_to_run.append((None, 'downsample_224'))
         
+        # Add pixel manipulation evaluation
+        evaluations_to_run.append((None, 'set_pixels_minus_one'))
+        
         total_evals = len(evaluations_to_run)
         if self.rank == 0:
             logging.info(f"Running {total_evals} evaluations with extended distribution metrics...")
@@ -628,6 +631,8 @@ class FingerprintEvaluator:
                         elif transformation.startswith('downsample'):
                             downsample_size = int(transformation.split('_')[1])
                             x = downsample_and_upsample(x, downsample_size=downsample_size)
+                        elif transformation == 'set_pixels_minus_one':
+                            x = self._set_pixels_to_value(x, value=-1.0)
                     
                     # Store images and extract features
                     negative_images.append(x)
@@ -881,3 +886,27 @@ class FingerprintEvaluator:
             return [self.config.model.sd_prompt] * batch_size
         
         return random.sample(self.prompts, min(batch_size, len(self.prompts)))
+
+    # Add helper method for pixel manipulation
+    def _set_pixels_to_value(self, images: torch.Tensor, value: float = -1.0) -> torch.Tensor:
+        """
+        Set the selected pixel indices to a specific value.
+        
+        Args:
+            images (torch.Tensor): Input images tensor [B, C, H, W]
+            value (float): Value to set the selected pixels to
+            
+        Returns:
+            torch.Tensor: Modified images with selected pixels set to value
+        """
+        batch_size = images.shape[0]
+        modified_images = images.clone()
+        
+        # Reshape images to [batch_size, channels*height*width]
+        flattened = modified_images.view(batch_size, -1)
+        
+        # Set selected indices to value
+        flattened[:, self.image_pixel_indices] = value
+        
+        # Reshape back to original shape
+        return flattened.view_as(images)

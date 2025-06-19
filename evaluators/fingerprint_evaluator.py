@@ -512,6 +512,9 @@ class FingerprintEvaluator:
         # Add pixel manipulation evaluation
         evaluations_to_run.append((None, 'set_pixels_minus_one'))
         
+        # Add pixel manipulation evaluations
+        evaluations_to_run.append((None, 'set_random_pixels_minus_one'))
+        
         total_evals = len(evaluations_to_run)
         if self.rank == 0:
             logging.info(f"Running {total_evals} evaluations with extended distribution metrics...")
@@ -633,6 +636,11 @@ class FingerprintEvaluator:
                             x = downsample_and_upsample(x, downsample_size=downsample_size)
                         elif transformation == 'set_pixels_minus_one':
                             x = self._set_pixels_to_value(x, value=-1.0)
+                        elif transformation == 'set_random_pixels_minus_one':
+                            # Use a different random seed (e.g. original seed + 1000)
+                            random_seed = self.image_pixel_set_seed + 1000
+                            random_indices = self._generate_random_pixel_indices(random_seed)
+                            x = self._set_pixels_to_value(x, value=-1.0, pixel_indices=random_indices)
                     
                     # Store images and extract features
                     negative_images.append(x)
@@ -888,13 +896,14 @@ class FingerprintEvaluator:
         return random.sample(self.prompts, min(batch_size, len(self.prompts)))
 
     # Add helper method for pixel manipulation
-    def _set_pixels_to_value(self, images: torch.Tensor, value: float = -1.0) -> torch.Tensor:
+    def _set_pixels_to_value(self, images: torch.Tensor, value: float = -1.0, pixel_indices: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Set the selected pixel indices to a specific value.
         
         Args:
             images (torch.Tensor): Input images tensor [B, C, H, W]
             value (float): Value to set the selected pixels to
+            pixel_indices (Optional[torch.Tensor]): Custom pixel indices to set. If None, uses self.image_pixel_indices
             
         Returns:
             torch.Tensor: Modified images with selected pixels set to value
@@ -902,11 +911,40 @@ class FingerprintEvaluator:
         batch_size = images.shape[0]
         modified_images = images.clone()
         
+        # Use provided indices or default to self.image_pixel_indices
+        indices_to_use = pixel_indices if pixel_indices is not None else self.image_pixel_indices
+        
         # Reshape images to [batch_size, channels*height*width]
         flattened = modified_images.view(batch_size, -1)
         
         # Set selected indices to value
-        flattened[:, self.image_pixel_indices] = value
+        flattened[:, indices_to_use] = value
         
         # Reshape back to original shape
         return flattened.view_as(images)
+
+    def _generate_random_pixel_indices(self, seed: int) -> torch.Tensor:
+        """
+        Generate random pixel indices with a specific seed.
+        
+        Args:
+            seed (int): Random seed for pixel selection
+            
+        Returns:
+            torch.Tensor: Random pixel indices
+        """
+        # Set seed for reproducibility
+        torch.manual_seed(seed)
+        
+        # Calculate total number of pixels
+        img_size = self.config.model.img_size
+        channels = 3  # RGB image
+        total_pixels = channels * img_size * img_size
+        
+        # Generate random indices (without replacement)
+        if self.image_pixel_count > total_pixels:
+            indices = torch.arange(total_pixels)
+        else:
+            indices = torch.randperm(total_pixels)[:self.image_pixel_count]
+        
+        return indices.to(self.device)

@@ -197,12 +197,15 @@ class EvaluateConfig:
 
 
 @dataclass
-class QueryBasedAttackConfig:
-    """Configuration for query-based attack against the fingerprinting.
-    
-    This config matches the implementation in scripts/pgd_attack_authprint.py.
-    The attack uses a trained classifier and PGD to try to fool the fingerprint detector.
+class AttackConfig:
+    """Configuration for unified attack script supporting three variants:
+    1. baseline: Naive ResNet18 classifier (both target and gradient source)
+    2. yu_2019: Yu2019AttributionClassifier (both target and gradient source)
+    3. authprint: AuthPrint decoder (target) with ResNet18 classifier (gradient source)
     """
+    # Attack type selection
+    attack_type: str = "authprint"  # One of ["baseline", "yu_2019", "authprint"]
+    
     # Attack parameters
     num_samples: int = 1000  # Number of samples to attack
     batch_size: int = 32  # Batch size for classifier training and evaluation
@@ -212,7 +215,6 @@ class QueryBasedAttackConfig:
     # Classifier training parameters
     classifier_iterations: int = 10000  # Number of iterations for classifier training
     classifier_lr: float = 1e-4  # Learning rate for classifier training
-    classifier_batch_size: int = 32  # Batch size specifically for classifier training
     
     # PGD parameters
     pgd_step_size: float = 0.01  # Step size for PGD attack (default: epsilon/10)
@@ -230,19 +232,17 @@ class QueryBasedAttackConfig:
     
     def validate(self):
         """Validate configuration parameters."""
+        assert self.attack_type in ["baseline", "yu_2019", "authprint"], \
+            f"Invalid attack type: {self.attack_type}"
         assert self.num_samples > 0, "Number of samples must be positive"
         assert self.batch_size > 0, "Batch size must be positive"
         assert self.epsilon > 0, "Epsilon must be positive"
         assert self.detection_threshold > 0, "Detection threshold must be positive"
         assert self.classifier_iterations > 0, "Classifier iterations must be positive"
         assert self.classifier_lr > 0, "Classifier learning rate must be positive"
-        assert self.classifier_batch_size > 0, "Classifier batch size must be positive"
         assert self.pgd_steps > 0, "PGD steps must be positive"
         assert self.pgd_step_size <= self.epsilon, "PGD step size should not exceed epsilon"
         assert self.log_interval > 0, "Log interval must be positive"
-        # Validate interdependent parameters
-        assert self.batch_size == self.classifier_batch_size, \
-            "Classifier batch size should match main batch size for consistency"
 
 
 @dataclass
@@ -252,7 +252,7 @@ class Config:
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     evaluate: EvaluateConfig = field(default_factory=EvaluateConfig)
-    pgd_attack_authprint: QueryBasedAttackConfig = field(default_factory=QueryBasedAttackConfig)
+    attack: AttackConfig = field(default_factory=AttackConfig)
     distributed: DistributedConfig = field(default_factory=DistributedConfig)
     output_dir: str = "results"
     checkpoint_path: Optional[str] = None
@@ -366,30 +366,32 @@ class Config:
                         continue
                 self.evaluate.custom_pretrained_models = custom_models
                 
-        elif mode == 'pgd_attack_authprint':
-            # Update query-based attack parameters
+        elif mode == 'attack':
+            # Update attack parameters
+            if hasattr(args, 'attack_type'):
+                self.attack.attack_type = args.attack_type
             if hasattr(args, 'num_samples'):
-                self.pgd_attack_authprint.num_samples = args.num_samples
+                self.attack.num_samples = args.num_samples
             if hasattr(args, 'batch_size'):
-                self.pgd_attack_authprint.batch_size = args.batch_size
+                self.attack.batch_size = args.batch_size
             if hasattr(args, 'epsilon'):
-                self.pgd_attack_authprint.epsilon = args.epsilon
+                self.attack.epsilon = args.epsilon
             if hasattr(args, 'detection_threshold'):
-                self.pgd_attack_authprint.detection_threshold = args.detection_threshold
+                self.attack.detection_threshold = args.detection_threshold
             if hasattr(args, 'log_interval'):
-                self.pgd_attack_authprint.log_interval = args.log_interval
+                self.attack.log_interval = args.log_interval
             # Add classifier parameters
             if hasattr(args, 'classifier_iterations'):
-                self.pgd_attack_authprint.classifier_iterations = args.classifier_iterations
+                self.attack.classifier_iterations = args.classifier_iterations
             if hasattr(args, 'classifier_lr'):
-                self.pgd_attack_authprint.classifier_lr = args.classifier_lr
+                self.attack.classifier_lr = args.classifier_lr
             # Add PGD parameters
             if hasattr(args, 'pgd_step_size'):
-                self.pgd_attack_authprint.pgd_step_size = args.pgd_step_size
+                self.attack.pgd_step_size = args.pgd_step_size
             if hasattr(args, 'pgd_steps'):
-                self.pgd_attack_authprint.pgd_steps = args.pgd_steps
+                self.attack.pgd_steps = args.pgd_steps
             if hasattr(args, 'momentum'):
-                self.pgd_attack_authprint.momentum = args.momentum
+                self.attack.momentum = args.momentum
         
         # Common configuration
         if hasattr(args, 'output_dir'):

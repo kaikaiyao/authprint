@@ -200,7 +200,7 @@ class EvaluateConfig:
 class QueryBasedAttackConfig:
     """Configuration for query-based attack against the fingerprinting.
     
-    This config matches the implementation in scripts/query_based_attack.py.
+    This config matches the implementation in scripts/pgd_attack_authprint.py.
     The attack uses a trained classifier and PGD to try to fool the fingerprint detector.
     """
     # Attack parameters
@@ -252,7 +252,7 @@ class Config:
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     evaluate: EvaluateConfig = field(default_factory=EvaluateConfig)
-    query_based_attack: QueryBasedAttackConfig = field(default_factory=QueryBasedAttackConfig)
+    pgd_attack_authprint: QueryBasedAttackConfig = field(default_factory=QueryBasedAttackConfig)
     distributed: DistributedConfig = field(default_factory=DistributedConfig)
     output_dir: str = "results"
     checkpoint_path: Optional[str] = None
@@ -366,30 +366,30 @@ class Config:
                         continue
                 self.evaluate.custom_pretrained_models = custom_models
                 
-        elif mode == 'query_based_attack':
+        elif mode == 'pgd_attack_authprint':
             # Update query-based attack parameters
             if hasattr(args, 'num_samples'):
-                self.query_based_attack.num_samples = args.num_samples
+                self.pgd_attack_authprint.num_samples = args.num_samples
             if hasattr(args, 'batch_size'):
-                self.query_based_attack.batch_size = args.batch_size
+                self.pgd_attack_authprint.batch_size = args.batch_size
             if hasattr(args, 'epsilon'):
-                self.query_based_attack.epsilon = args.epsilon
+                self.pgd_attack_authprint.epsilon = args.epsilon
             if hasattr(args, 'detection_threshold'):
-                self.query_based_attack.detection_threshold = args.detection_threshold
+                self.pgd_attack_authprint.detection_threshold = args.detection_threshold
             if hasattr(args, 'log_interval'):
-                self.query_based_attack.log_interval = args.log_interval
+                self.pgd_attack_authprint.log_interval = args.log_interval
             # Add classifier parameters
             if hasattr(args, 'classifier_iterations'):
-                self.query_based_attack.classifier_iterations = args.classifier_iterations
+                self.pgd_attack_authprint.classifier_iterations = args.classifier_iterations
             if hasattr(args, 'classifier_lr'):
-                self.query_based_attack.classifier_lr = args.classifier_lr
+                self.pgd_attack_authprint.classifier_lr = args.classifier_lr
             # Add PGD parameters
             if hasattr(args, 'pgd_step_size'):
-                self.query_based_attack.pgd_step_size = args.pgd_step_size
+                self.pgd_attack_authprint.pgd_step_size = args.pgd_step_size
             if hasattr(args, 'pgd_steps'):
-                self.query_based_attack.pgd_steps = args.pgd_steps
+                self.pgd_attack_authprint.pgd_steps = args.pgd_steps
             if hasattr(args, 'momentum'):
-                self.query_based_attack.momentum = args.momentum
+                self.pgd_attack_authprint.momentum = args.momentum
         
         # Common configuration
         if hasattr(args, 'output_dir'):

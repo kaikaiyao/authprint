@@ -416,7 +416,7 @@ def parse_args():
                         help="Momentum coefficient for PGD attack")
     
     # Output configuration
-    parser.add_argument("--output_dir", type=str, default="query_based_attack_results",
+    parser.add_argument("--output_dir", type=str, default="pgd_attack_authprint_results",
                         help="Directory to save attack results")
     
     return parser.parse_args()
@@ -461,7 +461,7 @@ def main():
     
     # Load default configuration and update with args
     config = get_default_config()
-    config.update_from_args(args, mode='query_based_attack')
+    config.update_from_args(args, mode='pgd_attack_authprint')
     
     # Create output directory and setup logging
     if rank == 0:
@@ -535,7 +535,7 @@ def main():
         # Create decoder wrapper with threshold from config
         decoder_wrapper = DecoderWrapper(
             decoder=decoder,
-            threshold=config.query_based_attack.detection_threshold,
+            threshold=config.pgd_attack_authprint.detection_threshold,
             image_pixel_indices=image_pixel_indices
         )
         
@@ -545,8 +545,8 @@ def main():
             decoder=decoder_wrapper,
             device=device,
             rank=rank,
-            batch_size=config.query_based_attack.batch_size,
-            config=config.query_based_attack  # Pass the config to the attacker
+            batch_size=config.pgd_attack_authprint.batch_size,
+            config=config.pgd_attack_authprint  # Pass the config to the attacker
         )
         
         # Run attack on all cases
@@ -556,7 +556,7 @@ def main():
         all_results = attacker.attack_all_cases(
             pretrained_models=pretrained_models,
             quantized_models=quantized_models,
-            num_samples=config.query_based_attack.num_samples
+            num_samples=config.pgd_attack_authprint.num_samples
         )
         
         # Print results table

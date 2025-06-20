@@ -135,14 +135,12 @@ class UnifiedAttack:
         original_model,
         device=None,
         rank=0,
-        batch_size=32,
         config=None
     ):
         self.attack_type = attack_type
         self.original_model = original_model
         self.device = device
         self.rank = rank
-        self.batch_size = batch_size
         self.config = config
         
         # Initialize quality metrics for evaluation
@@ -187,13 +185,13 @@ class UnifiedAttack:
             if self.rank == 0:
                 logging.info(f"Training gradient source ({self.attack_type}) classifier...")
             
-            optimizer = torch.optim.Adam(self.gradient_source.parameters(), lr=self.config.classifier_lr)
+            optimizer = torch.optim.Adam(self.gradient_source.parameters(), lr=self.config.attack.classifier_lr)
             criterion = nn.BCELoss()
             
             self.gradient_source.train()
-            for iteration in range(self.config.classifier_iterations):
+            for iteration in range(self.config.attack.classifier_iterations):
                 # Generate batch of z vectors
-                z_batch = torch.randn(self.config.batch_size, self.original_model.z_dim, device=self.device)
+                z_batch = torch.randn(self.config.attack.batch_size, self.original_model.z_dim, device=self.device)
                 
                 # Generate original images
                 with torch.no_grad():
@@ -219,8 +217,8 @@ class UnifiedAttack:
                 # Combine into training batch
                 all_images = torch.cat([original_images, negative_images])
                 labels = torch.cat([
-                    torch.ones(self.config.batch_size, 1),
-                    torch.zeros(self.config.batch_size, 1)
+                    torch.ones(self.config.attack.batch_size, 1),
+                    torch.zeros(self.config.attack.batch_size, 1)
                 ]).to(self.device)
                 
                 # Train step
@@ -230,8 +228,8 @@ class UnifiedAttack:
                 loss.backward()
                 optimizer.step()
                 
-                if self.rank == 0 and iteration % self.config.log_interval == 0:
-                    logging.info(f"Gradient source training iteration {iteration}/{self.config.classifier_iterations}, Loss: {loss.item():.4f}")
+                if self.rank == 0 and iteration % self.config.attack.log_interval == 0:
+                    logging.info(f"Gradient source training iteration {iteration}/{self.config.attack.classifier_iterations}, Loss: {loss.item():.4f}")
             
             self.gradient_source.eval()
     
@@ -266,7 +264,7 @@ class UnifiedAttack:
         # Track best result for AuthPrint attacks
         best_info = initial_check_info
         
-        for step in range(self.config.pgd_steps):
+        for step in range(self.config.attack.pgd_steps):
             perturbed.requires_grad = True
             
             # Forward pass through gradient source
@@ -277,15 +275,15 @@ class UnifiedAttack:
             grad = torch.autograd.grad(loss, perturbed)[0]
             
             # Update momentum
-            momentum = self.config.momentum * momentum + (1 - self.config.momentum) * grad
+            momentum = self.config.attack.momentum * momentum + (1 - self.config.attack.momentum) * grad
             
             # PGD step with momentum
             with torch.no_grad():
-                perturbed = perturbed + self.config.pgd_step_size * momentum.sign()
+                perturbed = perturbed + self.config.attack.pgd_step_size * momentum.sign()
                 
                 # Project back to epsilon ball
                 delta = perturbed - image
-                delta = torch.clamp(delta, -self.config.epsilon, self.config.epsilon)
+                delta = torch.clamp(delta, -self.config.attack.epsilon, self.config.attack.epsilon)
                 perturbed = image + delta
                 perturbed = torch.clamp(perturbed, -1, 1)
                 
@@ -308,7 +306,7 @@ class UnifiedAttack:
         if self.rank == 0 and isinstance(self.evade_target, DecoderWrapper):
             logging.info(f"Best MSE achieved: {best_info:.6f}")
         
-        return perturbed, False, self.config.pgd_steps, best_info
+        return perturbed, False, self.config.attack.pgd_steps, best_info
     
     def attack_negative_case(self, negative_model, num_samples, negative_case_type=None):
         """Attack a specific negative case using PGD."""
@@ -395,7 +393,7 @@ class UnifiedAttack:
                 fid = calculate_fid(
                     (original_images + 1) / 2,  # Convert to [0, 1] range
                     (perturbed_images + 1) / 2,
-                    batch_size=self.config.batch_size,
+                    batch_size=self.config.attack.batch_size,
                     device=self.device
                 )
             except Exception as e:
@@ -687,8 +685,7 @@ def main():
             original_model=original_model,
             device=device,
             rank=rank,
-            batch_size=config.attack.batch_size,
-            config=config.attack
+            config=config  # Pass full config object
         )
         
         # Setup attack components

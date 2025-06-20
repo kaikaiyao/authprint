@@ -20,11 +20,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from config.default_config import get_default_config
 from models.model_utils import load_stylegan2_model
+from models.decoder import DecoderSD_L, DecoderSD_M, DecoderSD_S, StyleGAN2Decoder
 from utils.distributed import setup_distributed, cleanup_distributed
 from utils.logging_utils import setup_logging
 from utils.image_transforms import quantize_model_weights, downsample_and_upsample
 from utils.model_loading import load_pretrained_models
 from utils.metrics import calculate_fid, InceptionV3
+from utils.checkpoint import load_checkpoint
 
 
 class ClassifierModel(nn.Module):
@@ -507,21 +509,47 @@ def main():
                 logging.error(f"Error in quantization setup: {str(e)}")
         
         # Load decoder and create wrapper
-        from models.decoder import Decoder
-        from utils.checkpoint import load_checkpoint
+        if rank == 0:
+            logging.info("Loading decoder...")
         
-        decoder = Decoder(
-            image_size=config.model.img_size,
-            channels=3,
-            output_dim=config.model.image_pixel_count
-        ).to(device)
+        # Initialize decoder based on model type and size
+        decoder_output_dim = config.model.image_pixel_count
+        
+        if config.model.model_type == "stylegan2":
+            decoder = StyleGAN2Decoder(
+                image_size=config.model.img_size,
+                channels=3,
+                output_dim=decoder_output_dim
+            ).to(device)
+            if rank == 0:
+                logging.info(f"Initialized StyleGAN2Decoder with output_dim={decoder_output_dim}")
+        else:  # stable-diffusion
+            decoder_class = {
+                "S": DecoderSD_S,
+                "M": DecoderSD_M,
+                "L": DecoderSD_L
+            }[config.model.sd_decoder_size]
+            
+            decoder = decoder_class(
+                image_size=config.model.img_size,
+                channels=3,
+                output_dim=decoder_output_dim
+            ).to(device)
+            
+            if rank == 0:
+                logging.info(f"Initialized SD-Decoder-{config.model.sd_decoder_size} with output_dim={decoder_output_dim}")
+        
+        decoder.eval()
+        
+        # Load checkpoint
+        if rank == 0:
+            logging.info(f"Loading checkpoint from {config.checkpoint_path}...")
         
         load_checkpoint(
             checkpoint_path=config.checkpoint_path,
             decoder=decoder,
             device=device
         )
-        decoder.eval()
         
         # Generate pixel indices (same as in evaluator)
         torch.manual_seed(config.model.image_pixel_set_seed)

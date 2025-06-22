@@ -246,6 +246,44 @@ class UnifiedAttack:
     
     def pgd_attack(self, image, z, initial_check_info=None):
         """Perform PGD attack using trained gradient source."""
+        if self.config.attack.enable_step_size_sweep:
+            # Try each step size and return the best result
+            best_result = None
+            best_success = False
+            best_step_size = None
+            original_step_size = self.config.attack.pgd_step_size
+            
+            for step_size in self.config.attack.step_size_sweep_values:
+                if self.rank == 0:
+                    logging.info(f"\nTrying step size: {step_size}")
+                self.config.attack.pgd_step_size = step_size
+                result = self._single_pgd_attack(image, z, initial_check_info)
+                
+                # Update best result if this is more successful
+                if not best_success and result[1]:  # If we haven't succeeded yet and this one succeeds
+                    best_result = result
+                    best_success = True
+                    best_step_size = step_size
+                elif best_success and result[1]:  # If we've succeeded before and this one succeeds
+                    # Compare based on image quality metrics
+                    current_metrics = self.quality_metrics.compute_metrics(image, result[0])
+                    best_metrics = self.quality_metrics.compute_metrics(image, best_result[0])
+                    if current_metrics['lpips'] < best_metrics['lpips']:  # Lower LPIPS is better
+                        best_result = result
+                        best_step_size = step_size
+            
+            # Restore original step size
+            self.config.attack.pgd_step_size = original_step_size
+            
+            if self.rank == 0 and best_step_size is not None:
+                logging.info(f"Best step size was: {best_step_size}")
+            
+            return best_result if best_result is not None else (image, False, self.config.attack.pgd_steps, initial_check_info)
+        else:
+            return self._single_pgd_attack(image, z, initial_check_info)
+    
+    def _single_pgd_attack(self, image, z, initial_check_info=None):
+        """Perform a single PGD attack with current step size."""
         perturbed = image.clone()
         criterion = nn.BCELoss()
         
@@ -298,13 +336,15 @@ class UnifiedAttack:
             # Check if evade target is fooled
             if self.check_evade_target(perturbed):
                 if self.rank == 0:
-                    logging.info(f"Attack succeeded at step {step+1}")
+                    logging.info(f"Attack succeeded at step {step+1} with step size {self.config.attack.pgd_step_size:.6f}")
                     if isinstance(self.evade_target, DecoderWrapper):
                         logging.info(f"Best MSE achieved: {best_info:.6f}")
                 return perturbed, True, step + 1, best_info
         
-        if self.rank == 0 and isinstance(self.evade_target, DecoderWrapper):
-            logging.info(f"Best MSE achieved: {best_info:.6f}")
+        if self.rank == 0:
+            if isinstance(self.evade_target, DecoderWrapper):
+                logging.info(f"Best MSE achieved: {best_info:.6f}")
+            logging.info(f"Attack failed with step size {self.config.attack.pgd_step_size:.6f}")
         
         return perturbed, False, self.config.attack.pgd_steps, best_info
     
@@ -312,124 +352,264 @@ class UnifiedAttack:
         """Attack a specific negative case using PGD."""
         if self.rank == 0:
             logging.info(f"Attacking {negative_case_type or 'base'} case with {self.attack_type} attack...")
+            if self.config.attack.enable_step_size_sweep:
+                logging.info("Step size sweep enabled. Will try the following step sizes:")
+                logging.info(", ".join(f"{s:.6f}" for s in self.config.attack.step_size_sweep_values))
         
         # Train gradient source if needed
         self.train_gradient_source(negative_model, negative_case_type)
         
-        successful_attacks = 0
-        total_queries = 0
-        results = []
-        
-        # Lists to store images for FID calculation
-        original_images = []
-        perturbed_images = []
-        
-        # Lists to store initial check info (MSE for AuthPrint, prediction confidence for others)
-        initial_check_infos = []
-        best_infos = []
-        
-        for i in range(num_samples):
+        # If step size sweep is enabled, we'll store results for each step size
+        if self.config.attack.enable_step_size_sweep:
+            all_sweep_results = {}
+            original_step_size = self.config.attack.pgd_step_size
+            
+            for step_size in self.config.attack.step_size_sweep_values:
+                if self.rank == 0:
+                    logging.info(f"\nTrying step size: {step_size}")
+                self.config.attack.pgd_step_size = step_size
+                
+                successful_attacks = 0
+                total_queries = 0
+                results = []
+                
+                # Lists to store images for FID calculation
+                original_images = []
+                perturbed_images = []
+                
+                # Lists to store initial check info (MSE for AuthPrint, prediction confidence for others)
+                initial_check_infos = []
+                best_infos = []
+                
+                for i in range(num_samples):
+                    if self.rank == 0:
+                        logging.info(f"\nProcessing sample {i+1}/{num_samples} with step size {step_size}")
+                    
+                    # Generate z vector and image from negative model
+                    z = torch.randn(1, negative_model.z_dim, device=self.device)
+                    with torch.no_grad():
+                        if hasattr(negative_model, 'module'):
+                            w = negative_model.module.mapping(z, None)
+                            negative_img = negative_model.module.synthesis(w, noise_mode="const")
+                        else:
+                            w = negative_model.mapping(z, None)
+                            negative_img = negative_model.synthesis(w, noise_mode="const")
+                    
+                    # Apply transformations for special cases
+                    if negative_case_type and negative_case_type.startswith('downsample'):
+                        size = int(negative_case_type.split('_')[1])
+                        negative_img = downsample_and_upsample(negative_img, downsample_size=size)
+                    
+                    # Get initial check info
+                    initial_check_info = None
+                    if isinstance(self.evade_target, DecoderWrapper):
+                        features = self.evade_target.extract_features(negative_img)
+                        pred_values = self.evade_target.decoder(negative_img)
+                        initial_check_info = torch.mean(torch.pow(pred_values - features, 2), dim=1).item()
+                        if self.rank == 0:
+                            logging.info(f"Initial MSE: {initial_check_info:.6f}")
+                    
+                    # Perform PGD attack
+                    perturbed, success, queries_used, best_info = self.pgd_attack(negative_img, z, initial_check_info)
+                    total_queries += queries_used
+                    
+                    # Store check info
+                    initial_check_infos.append(initial_check_info)
+                    best_infos.append(best_info)
+                    
+                    if success:
+                        successful_attacks += 1
+                        metrics = self.quality_metrics.compute_metrics(negative_img, perturbed)
+                        
+                        # Store images for FID calculation
+                        original_images.append(negative_img)
+                        perturbed_images.append(perturbed)
+                        
+                        results.append({
+                            'metrics': metrics,
+                            'queries': queries_used
+                        })
+                        
+                        if self.rank == 0:
+                            logging.info(f"Attack successful - Queries: {queries_used}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
+                    else:
+                        if self.rank == 0:
+                            logging.info(f"Attack failed after {queries_used} steps")
+                
+                # Calculate FID score for successful attacks
+                fid = float('inf')
+                if successful_attacks > 0:
+                    original_images = torch.cat(original_images, dim=0)
+                    perturbed_images = torch.cat(perturbed_images, dim=0)
+                    
+                    try:
+                        fid = calculate_fid(
+                            (original_images + 1) / 2,  # Convert to [0, 1] range
+                            (perturbed_images + 1) / 2,
+                            batch_size=self.config.attack.batch_size,
+                            device=self.device
+                        )
+                    except Exception as e:
+                        if self.rank == 0:
+                            logging.error(f"Error computing FID score: {str(e)}")
+                
+                # Aggregate results for this step size
+                success_rate = successful_attacks / num_samples
+                avg_queries = total_queries / num_samples
+                
+                # Compute statistics for initial and best check info
+                avg_metrics = {
+                    'lpips': np.mean([r['metrics']['lpips'] for r in results]) if results else float('inf'),
+                    'psnr': np.mean([r['metrics']['psnr'] for r in results]) if results else 0,
+                    'ssim': np.mean([r['metrics']['ssim'] for r in results]) if results else 0,
+                    'fid': fid
+                }
+                
+                # Add MSE statistics for AuthPrint attacks
+                if isinstance(self.evade_target, DecoderWrapper):
+                    initial_check_infos = [x for x in initial_check_infos if x is not None]
+                    best_infos = [x for x in best_infos if x is not None]
+                    if initial_check_infos:
+                        avg_metrics.update({
+                            'initial_mse_mean': np.mean(initial_check_infos),
+                            'initial_mse_std': np.std(initial_check_infos),
+                            'best_mse_mean': np.mean(best_infos),
+                            'best_mse_std': np.std(best_infos)
+                        })
+                
+                all_sweep_results[step_size] = {
+                    'success_rate': success_rate,
+                    'avg_queries': avg_queries,
+                    'avg_metrics': avg_metrics,
+                    'results': results
+                }
+            
+            # Restore original step size
+            self.config.attack.pgd_step_size = original_step_size
+            
+            # Find best step size based on success rate
+            best_step_size = max(all_sweep_results.keys(), key=lambda k: all_sweep_results[k]['success_rate'])
             if self.rank == 0:
-                logging.info(f"\nProcessing sample {i+1}/{num_samples}")
+                logging.info(f"\nBest step size: {best_step_size} with success rate: {all_sweep_results[best_step_size]['success_rate']*100:.2f}%")
             
-            # Generate z vector and image from negative model
-            z = torch.randn(1, negative_model.z_dim, device=self.device)
-            with torch.no_grad():
-                if hasattr(negative_model, 'module'):
-                    w = negative_model.module.mapping(z, None)
-                    negative_img = negative_model.module.synthesis(w, noise_mode="const")
+            return all_sweep_results[best_step_size]
+        
+        else:
+            # Original non-sweep implementation
+            successful_attacks = 0
+            total_queries = 0
+            results = []
+            
+            # Lists to store images for FID calculation
+            original_images = []
+            perturbed_images = []
+            
+            # Lists to store initial check info (MSE for AuthPrint, prediction confidence for others)
+            initial_check_infos = []
+            best_infos = []
+            
+            for i in range(num_samples):
+                if self.rank == 0:
+                    logging.info(f"\nProcessing sample {i+1}/{num_samples}")
+                
+                # Generate z vector and image from negative model
+                z = torch.randn(1, negative_model.z_dim, device=self.device)
+                with torch.no_grad():
+                    if hasattr(negative_model, 'module'):
+                        w = negative_model.module.mapping(z, None)
+                        negative_img = negative_model.module.synthesis(w, noise_mode="const")
+                    else:
+                        w = negative_model.mapping(z, None)
+                        negative_img = negative_model.synthesis(w, noise_mode="const")
+                
+                # Apply transformations for special cases
+                if negative_case_type and negative_case_type.startswith('downsample'):
+                    size = int(negative_case_type.split('_')[1])
+                    negative_img = downsample_and_upsample(negative_img, downsample_size=size)
+                
+                # Get initial check info
+                initial_check_info = None
+                if isinstance(self.evade_target, DecoderWrapper):
+                    features = self.evade_target.extract_features(negative_img)
+                    pred_values = self.evade_target.decoder(negative_img)
+                    initial_check_info = torch.mean(torch.pow(pred_values - features, 2), dim=1).item()
+                    if self.rank == 0:
+                        logging.info(f"Initial MSE: {initial_check_info:.6f}")
+                
+                # Perform PGD attack
+                perturbed, success, queries_used, best_info = self.pgd_attack(negative_img, z, initial_check_info)
+                total_queries += queries_used
+                
+                # Store check info
+                initial_check_infos.append(initial_check_info)
+                best_infos.append(best_info)
+                
+                if success:
+                    successful_attacks += 1
+                    metrics = self.quality_metrics.compute_metrics(negative_img, perturbed)
+                    
+                    # Store images for FID calculation
+                    original_images.append(negative_img)
+                    perturbed_images.append(perturbed)
+                    
+                    results.append({
+                        'metrics': metrics,
+                        'queries': queries_used
+                    })
+                    
+                    if self.rank == 0:
+                        logging.info(f"Attack successful - Queries: {queries_used}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
                 else:
-                    w = negative_model.mapping(z, None)
-                    negative_img = negative_model.synthesis(w, noise_mode="const")
+                    if self.rank == 0:
+                        logging.info(f"Attack failed after {queries_used} steps")
             
-            # Apply transformations for special cases
-            if negative_case_type and negative_case_type.startswith('downsample'):
-                size = int(negative_case_type.split('_')[1])
-                negative_img = downsample_and_upsample(negative_img, downsample_size=size)
+            # Calculate FID score for successful attacks
+            fid = float('inf')
+            if successful_attacks > 0:
+                original_images = torch.cat(original_images, dim=0)
+                perturbed_images = torch.cat(perturbed_images, dim=0)
+                
+                try:
+                    fid = calculate_fid(
+                        (original_images + 1) / 2,  # Convert to [0, 1] range
+                        (perturbed_images + 1) / 2,
+                        batch_size=self.config.attack.batch_size,
+                        device=self.device
+                    )
+                except Exception as e:
+                    if self.rank == 0:
+                        logging.error(f"Error computing FID score: {str(e)}")
             
-            # Get initial check info
-            initial_check_info = None
+            # Aggregate results
+            success_rate = successful_attacks / num_samples
+            avg_queries = total_queries / num_samples
+            
+            # Compute statistics for initial and best check info
+            avg_metrics = {
+                'lpips': np.mean([r['metrics']['lpips'] for r in results]) if results else float('inf'),
+                'psnr': np.mean([r['metrics']['psnr'] for r in results]) if results else 0,
+                'ssim': np.mean([r['metrics']['ssim'] for r in results]) if results else 0,
+                'fid': fid
+            }
+            
+            # Add MSE statistics for AuthPrint attacks
             if isinstance(self.evade_target, DecoderWrapper):
-                features = self.evade_target.extract_features(negative_img)
-                pred_values = self.evade_target.decoder(negative_img)
-                initial_check_info = torch.mean(torch.pow(pred_values - features, 2), dim=1).item()
-                if self.rank == 0:
-                    logging.info(f"Initial MSE: {initial_check_info:.6f}")
+                initial_check_infos = [x for x in initial_check_infos if x is not None]
+                best_infos = [x for x in best_infos if x is not None]
+                if initial_check_infos:
+                    avg_metrics.update({
+                        'initial_mse_mean': np.mean(initial_check_infos),
+                        'initial_mse_std': np.std(initial_check_infos),
+                        'best_mse_mean': np.mean(best_infos),
+                        'best_mse_std': np.std(best_infos)
+                    })
             
-            # Perform PGD attack
-            perturbed, success, queries_used, best_info = self.pgd_attack(negative_img, z, initial_check_info)
-            total_queries += queries_used
-            
-            # Store check info
-            initial_check_infos.append(initial_check_info)
-            best_infos.append(best_info)
-            
-            if success:
-                successful_attacks += 1
-                metrics = self.quality_metrics.compute_metrics(negative_img, perturbed)
-                
-                # Store images for FID calculation
-                original_images.append(negative_img)
-                perturbed_images.append(perturbed)
-                
-                results.append({
-                    'metrics': metrics,
-                    'queries': queries_used
-                })
-                
-                if self.rank == 0:
-                    logging.info(f"Attack successful - Queries: {queries_used}, Metrics: LPIPS={metrics['lpips']:.4f}, PSNR={metrics['psnr']:.2f}, SSIM={metrics['ssim']:.4f}")
-            else:
-                if self.rank == 0:
-                    logging.info(f"Attack failed after {queries_used} steps")
-        
-        # Calculate FID score for successful attacks
-        fid = float('inf')
-        if successful_attacks > 0:
-            original_images = torch.cat(original_images, dim=0)
-            perturbed_images = torch.cat(perturbed_images, dim=0)
-            
-            try:
-                fid = calculate_fid(
-                    (original_images + 1) / 2,  # Convert to [0, 1] range
-                    (perturbed_images + 1) / 2,
-                    batch_size=self.config.attack.batch_size,
-                    device=self.device
-                )
-            except Exception as e:
-                if self.rank == 0:
-                    logging.error(f"Error computing FID score: {str(e)}")
-        
-        # Aggregate results
-        success_rate = successful_attacks / num_samples
-        avg_queries = total_queries / num_samples
-        
-        # Compute statistics for initial and best check info
-        avg_metrics = {
-            'lpips': np.mean([r['metrics']['lpips'] for r in results]) if results else float('inf'),
-            'psnr': np.mean([r['metrics']['psnr'] for r in results]) if results else 0,
-            'ssim': np.mean([r['metrics']['ssim'] for r in results]) if results else 0,
-            'fid': fid
-        }
-        
-        # Add MSE statistics for AuthPrint attacks
-        if isinstance(self.evade_target, DecoderWrapper):
-            initial_check_infos = [x for x in initial_check_infos if x is not None]
-            best_infos = [x for x in best_infos if x is not None]
-            if initial_check_infos:
-                avg_metrics.update({
-                    'initial_mse_mean': np.mean(initial_check_infos),
-                    'initial_mse_std': np.std(initial_check_infos),
-                    'best_mse_mean': np.mean(best_infos),
-                    'best_mse_std': np.std(best_infos)
-                })
-        
-        return {
-            'success_rate': success_rate,
-            'avg_queries': avg_queries,
-            'avg_metrics': avg_metrics,
-            'results': results
-        }
+            return {
+                'success_rate': success_rate,
+                'avg_queries': avg_queries,
+                'avg_metrics': avg_metrics,
+                'results': results
+            }
     
     def attack_all_cases(self, pretrained_models, quantized_models, num_samples):
         """Attack all negative cases and return combined results."""
@@ -507,11 +687,26 @@ def parse_args():
     parser.add_argument("--momentum", type=float, default=0.9,
                         help="Momentum coefficient for PGD attack")
     
+    # Step size sweep parameters
+    parser.add_argument("--enable_step_size_sweep", action="store_true",
+                        help="Enable step size sweep during attack")
+    parser.add_argument("--step_size_sweep_values", type=str, default=None,
+                        help="Comma-separated list of step sizes to try (e.g. '0.0001,0.0002,0.0005'). If not provided, uses default values.")
+    
     # Output configuration
     parser.add_argument("--output_dir", type=str, default="unified_attack_results",
                         help="Directory to save attack results")
     
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    # Parse step size sweep values if provided
+    if args.step_size_sweep_values:
+        try:
+            args.step_size_sweep_values = [float(x.strip()) for x in args.step_size_sweep_values.split(',')]
+        except ValueError:
+            raise ValueError("Invalid step size sweep values. Please provide comma-separated numbers.")
+    
+    return args
 
 
 def format_results_table(all_results, attack_type):
@@ -521,9 +716,9 @@ def format_results_table(all_results, attack_type):
     
     # Different header for AuthPrint attacks (includes MSE columns)
     if attack_type == "authprint":
-        table_str += f"{'Negative Case':<30}{'Initial MSE':<25}{'Best MSE':<25}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}{'SSIM':>15}{'FID':>15}\n"
+        table_str += f"{'Negative Case':<30}{'Step Size':<15}{'Initial MSE':<25}{'Best MSE':<25}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}{'SSIM':>15}{'FID':>15}\n"
     else:
-        table_str += f"{'Negative Case':<30}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}{'SSIM':>15}{'FID':>15}\n"
+        table_str += f"{'Negative Case':<30}{'Step Size':<15}{'Success Rate':>15}{'Avg Queries':>15}{'LPIPS':>15}{'PSNR':>15}{'SSIM':>15}{'FID':>15}\n"
     
     table_str += "-" * 200 + "\n"
     
@@ -532,6 +727,7 @@ def format_results_table(all_results, attack_type):
         metrics = results['avg_metrics']
         
         row = f"{case_name:<30}"
+        row += f"{results.get('step_size', '-'):<15}"  # Add step size if available
         
         # Add MSE columns for AuthPrint attacks
         if attack_type == "authprint" and 'initial_mse_mean' in metrics:
@@ -557,6 +753,12 @@ def format_results_table(all_results, attack_type):
         table_str += f"Detection Threshold: {0.002883:.6f}\n"
     
     table_str += f"Attack Type: {attack_type}\n"
+    
+    # Add step size sweep information if enabled
+    if hasattr(results, 'step_size_sweep_enabled') and results['step_size_sweep_enabled']:
+        table_str += f"Step Size Sweep: Enabled (tried {len(results['step_size_sweep_values'])} values)\n"
+        table_str += f"Step Size Values: {', '.join(f'{s:.6f}' for s in results['step_size_sweep_values'])}\n"
+    
     return table_str
 
 
@@ -575,6 +777,12 @@ def main():
     config = get_default_config()
     config.update_from_args(args, mode='attack')
     
+    # Handle step size sweep arguments
+    if args.enable_step_size_sweep:
+        config.attack.enable_step_size_sweep = True
+        if args.step_size_sweep_values:
+            config.attack.step_size_sweep_values = args.step_size_sweep_values
+    
     # Create output directory and setup logging
     if rank == 0:
         os.makedirs(config.output_dir, exist_ok=True)
@@ -584,6 +792,10 @@ def main():
         logging.info(f"Configuration:\n{config}")
         logging.info(f"Attack Type: {args.attack_type}")
         logging.info(f"Distributed setup: local_rank={local_rank}, rank={rank}, world_size={world_size}, device={device}")
+        
+        if config.attack.enable_step_size_sweep:
+            logging.info("Step size sweep enabled")
+            logging.info(f"Step size values: {config.attack.step_size_sweep_values}")
     
     try:
         # Load models
@@ -700,6 +912,12 @@ def main():
             quantized_models=quantized_models,
             num_samples=config.attack.num_samples
         )
+        
+        # Add step size sweep information to results
+        if config.attack.enable_step_size_sweep:
+            for case_results in all_results.values():
+                case_results['step_size_sweep_enabled'] = True
+                case_results['step_size_sweep_values'] = config.attack.step_size_sweep_values
         
         # Print results table
         if rank == 0:

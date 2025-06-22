@@ -212,6 +212,13 @@ class AttackConfig:
     epsilon: float = 0.1  # Maximum perturbation size (L∞ norm)
     detection_threshold: float = 0.002883  # MSE threshold for detection (95% TPR threshold)
     
+    # Step size sweep parameters
+    enable_step_size_sweep: bool = False  # Whether to perform step size sweep
+    step_size_sweep_values: List[float] = field(default_factory=lambda: [
+        0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 
+        0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0
+    ])  # List of step sizes to try when sweep is enabled
+    
     # Classifier training parameters
     classifier_iterations: int = 10000  # Number of iterations for classifier training
     classifier_lr: float = 1e-4  # Learning rate for classifier training
@@ -241,8 +248,10 @@ class AttackConfig:
         assert self.classifier_iterations > 0, "Classifier iterations must be positive"
         assert self.classifier_lr > 0, "Classifier learning rate must be positive"
         assert self.pgd_steps > 0, "PGD steps must be positive"
-        assert self.pgd_step_size <= self.epsilon, "PGD step size should not exceed epsilon"
+        assert self.pgd_step_size <= self.epsilon, "PGD step size should not exceed epsilon" if not self.enable_step_size_sweep else True
         assert self.log_interval > 0, "Log interval must be positive"
+        if self.enable_step_size_sweep:
+            assert len(self.step_size_sweep_values) > 0, "Step size sweep values list cannot be empty"
 
 
 @dataclass
@@ -392,6 +401,11 @@ class Config:
                 self.attack.pgd_steps = args.pgd_steps
             if hasattr(args, 'momentum'):
                 self.attack.momentum = args.momentum
+            # Add step size sweep parameters
+            if hasattr(args, 'enable_step_size_sweep'):
+                self.attack.enable_step_size_sweep = args.enable_step_size_sweep
+            if hasattr(args, 'step_size_sweep_values'):
+                self.attack.step_size_sweep_values = args.step_size_sweep_values
         
         # Common configuration
         if hasattr(args, 'output_dir'):

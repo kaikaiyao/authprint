@@ -14,8 +14,8 @@ from models.base_model import BaseGenerativeModel
 # Dictionary of pretrained StyleGAN2 model URLs and local paths
 STYLEGAN2_MODELS = {
     # FFHQ Models
-    'ffhq70k-ada': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
-               "ffhq70k-paper256-ada.pkl"), # this serves as a control test
+    # 'ffhq70k-ada': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
+    #            "ffhq70k-paper256-ada.pkl"), # this serves as a control test
     'ffhq1k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq1k-paper256-ada.pkl",
                "ffhq1k-paper256-ada.pkl"),
     'ffhq30k': ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq30k-paper256-ada.pkl",

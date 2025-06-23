@@ -186,10 +186,14 @@ class Yu2019AttributionClassifier(nn.Module):
                 if ((self.mode == 'predownscale' and res <= self.switching_res_log2) or 
                     (self.mode == 'postpool' and res > self.switching_res_log2)):
                     
+                    # First layer: input channels are either num_channels (for first block) or previous block's output channels
+                    in_channels = self.num_channels if res == self.resolution_log2 else self.nf(res)
+                    out_channels = self.nf(res)  # Output channels for this resolution
+                    
                     # Convolution blocks
                     conv0 = EqualizedConv2d(
-                        self.nf(res) if res < self.resolution_log2 else self.num_channels,
-                        self.nf(res-1), 
+                        in_channels,
+                        out_channels, 
                         kernel_size=3, 
                         padding=1,
                         use_wscale=self.use_wscale
@@ -198,8 +202,8 @@ class Yu2019AttributionClassifier(nn.Module):
                     if self.fused_scale:
                         # Fused conv + downscale (simplified as conv with stride 2)
                         conv1 = EqualizedConv2d(
-                            self.nf(res-1), 
-                            self.nf(res-2), 
+                            out_channels,  # Input is output from conv0
+                            self.nf(res),  # Keep same number of channels
                             kernel_size=3, 
                             stride=2,
                             padding=1,
@@ -209,8 +213,8 @@ class Yu2019AttributionClassifier(nn.Module):
                         self.blocks[f'{block_name}_conv1_down'] = conv1
                     else:
                         conv1 = EqualizedConv2d(
-                            self.nf(res-1), 
-                            self.nf(res-2), 
+                            out_channels,  # Input is output from conv0
+                            self.nf(res),  # Keep same number of channels
                             kernel_size=3, 
                             padding=1,
                             use_wscale=self.use_wscale
@@ -226,7 +230,7 @@ class Yu2019AttributionClassifier(nn.Module):
                 
                 conv0 = EqualizedConv2d(
                     in_channels,
-                    self.nf(res-1), 
+                    self.nf(res),  # Keep same number of channels
                     kernel_size=3, 
                     padding=1,
                     use_wscale=self.use_wscale
@@ -236,12 +240,12 @@ class Yu2019AttributionClassifier(nn.Module):
                 if self.latent_res == -1:
                     # Fully connected layers
                     dense1 = EqualizedLinear(
-                        self.nf(res-1) * (2**res) * (2**res),
-                        max(self.nf(res-1), self.label_size),
+                        self.nf(res) * (2**res) * (2**res),
+                        self.nf(res),  # Keep same number of channels
                         use_wscale=self.use_wscale
                     )
                     dense2 = EqualizedLinear(
-                        max(self.nf(res-1), self.label_size),
+                        self.nf(res),
                         self.label_size,
                         gain=1,
                         use_wscale=self.use_wscale
@@ -251,13 +255,13 @@ class Yu2019AttributionClassifier(nn.Module):
                 else:
                     # Fully convolutional layers
                     conv1 = EqualizedConv2d(
-                        self.nf(res-1),
-                        max(self.nf(res-1), self.label_size),
+                        self.nf(res),
+                        self.nf(res),  # Keep same number of channels
                         kernel_size=1,
                         use_wscale=self.use_wscale
                     )
                     conv2 = EqualizedConv2d(
-                        max(self.nf(res-1), self.label_size),
+                        self.nf(res),
                         self.label_size,
                         kernel_size=1,
                         gain=1,
@@ -271,6 +275,12 @@ class Yu2019AttributionClassifier(nn.Module):
         # Process through all resolution blocks
         for res in range(self.resolution_log2, self.latent_res_log2-1, -1):
             x = self._forward_block(x, res)
+        
+        # Ensure output is properly shaped for binary classification
+        if x.dim() > 2:
+            x = x.squeeze(-1).squeeze(-1)  # Remove spatial dimensions if present
+        if x.dim() == 2 and x.size(1) == 1:
+            x = x.squeeze(1)  # Remove singleton dimension for binary output
         
         return x
     

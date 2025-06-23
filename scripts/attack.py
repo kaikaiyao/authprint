@@ -62,15 +62,15 @@ class Yu2019Classifier(nn.Module):
             num_channels=3,
             resolution=img_size,
             label_size=1,  # Binary classification
-            fmap_base=128,  # Increased base to prevent zero channels
-            fmap_decay=0.5,  # Reduced decay rate for more gradual channel reduction
-            fmap_max=512,
+            fmap_base=32,  # Start with smaller base to control growth
+            fmap_decay=0.0,  # No decay to maintain constant channels
+            fmap_max=32,  # Match fmap_base to ensure consistent channels
             latent_res=4,  # Use 4x4 resolution for final layer
-            mode='postpool',
+            mode='postpool',  # Use postpool mode for better stability
             switching_res=4,
             use_wscale=True,
             mbstd_group_size=0,  # Disable for simplicity
-            fused_scale=False
+            fused_scale=True  # Use fused convolutions for better stability
         )
         self.sigmoid = nn.Sigmoid()
     

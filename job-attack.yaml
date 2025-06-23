@@ -91,7 +91,7 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--attack_type baseline \
+              SCRIPT_ARGS="--attack_type authprint \
                           --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
                           --num_samples 20 \
                           --detection_threshold 0.002883 \

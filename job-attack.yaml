@@ -95,7 +95,7 @@ spec:
                           --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
                           --num_samples 20 \
                           --detection_threshold 0.002883 \
-                          --classifier_iterations 200 \
+                          --classifier_iterations 2000 \
                           --epsilon 0.5 \
                           --pgd_step_size 0.02 \
                           --pgd_steps 250 \

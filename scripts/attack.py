@@ -62,9 +62,9 @@ class Yu2019Classifier(nn.Module):
             num_channels=3,
             resolution=img_size,
             label_size=1,  # Binary classification
-            fmap_base=1024,
+            fmap_base=64,  # Increased from 8 to maintain capacity
             fmap_max=512,
-            latent_res=-1,  # Use fully connected layers
+            latent_res=4,  # Use 4x4 resolution for final layer
             mode='postpool',
             switching_res=4,
             use_wscale=True,

@@ -99,7 +99,7 @@ spec:
                           --epsilon 0.5 \
                           --pgd_step_size 0.02 \
                           --pgd_steps 250 \
-                          --momentum 0.0 \
+                          --momentum 0.9 \
                           --output_dir unified_attack_results \
                           --img_size 256"
               

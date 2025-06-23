@@ -95,10 +95,11 @@ spec:
                           --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
                           --num_samples 20 \
                           --detection_threshold 0.002883 \
-                          --classifier_iterations 10000 \
+                          --classifier_iterations 2000 \
                           --epsilon 2.0 \
                           --pgd_step_size 2.0 \
-                          --pgd_steps 2000 \
+                          --pgd_steps 5000 \
+                          --enable_step_size_sweep \
                           --output_dir unified_attack_results \
                           --img_size 256"
               

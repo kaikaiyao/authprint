@@ -307,7 +307,7 @@ class UnifiedAttack:
             
             # Forward pass through gradient source
             pred = self.gradient_source(perturbed)
-            loss = criterion(pred, target)
+            loss = - criterion(pred, target)
             
             # Compute gradient
             grad = torch.autograd.grad(loss, perturbed)[0]
@@ -317,7 +317,7 @@ class UnifiedAttack:
             
             # PGD step with momentum
             with torch.no_grad():
-                perturbed = perturbed - self.config.attack.pgd_step_size * momentum.sign()
+                perturbed = perturbed + self.config.attack.pgd_step_size * momentum.sign()
                 
                 # Project back to epsilon ball
                 delta = perturbed - image

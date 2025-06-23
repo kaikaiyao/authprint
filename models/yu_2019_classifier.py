@@ -182,45 +182,42 @@ class Yu2019AttributionClassifier(nn.Module):
             block_name = f'{2**res}x{2**res}'
             
             if res > self.latent_res_log2:
-                # Intermediate blocks
-                if ((self.mode == 'predownscale' and res <= self.switching_res_log2) or 
-                    (self.mode == 'postpool' and res > self.switching_res_log2)):
-                    
-                    # First layer: input channels are either num_channels (for first block) or previous block's output channels
-                    in_channels = self.num_channels if res == self.resolution_log2 else self.nf(res)
-                    out_channels = self.nf(res)  # Output channels for this resolution
-                    
-                    # Convolution blocks
-                    conv0 = EqualizedConv2d(
-                        in_channels,
-                        out_channels, 
+                # Intermediate blocks - create all of them
+                # First layer: input channels are either num_channels (for first block) or previous block's output channels
+                in_channels = self.num_channels if res == self.resolution_log2 else self.nf(res)
+                out_channels = self.nf(res)  # Output channels for this resolution
+                
+                # Convolution blocks
+                conv0 = EqualizedConv2d(
+                    in_channels,
+                    out_channels, 
+                    kernel_size=3, 
+                    padding=1,
+                    use_wscale=self.use_wscale
+                )
+                
+                if self.fused_scale:
+                    # Fused conv + downscale (simplified as conv with stride 2)
+                    conv1 = EqualizedConv2d(
+                        out_channels,  # Input is output from conv0
+                        self.nf(res),  # Keep same number of channels
+                        kernel_size=3, 
+                        stride=2,
+                        padding=1,
+                        use_wscale=self.use_wscale
+                    )
+                    self.blocks[f'{block_name}_conv0'] = conv0
+                    self.blocks[f'{block_name}_conv1_down'] = conv1
+                else:
+                    conv1 = EqualizedConv2d(
+                        out_channels,  # Input is output from conv0
+                        self.nf(res),  # Keep same number of channels
                         kernel_size=3, 
                         padding=1,
                         use_wscale=self.use_wscale
                     )
-                    
-                    if self.fused_scale:
-                        # Fused conv + downscale (simplified as conv with stride 2)
-                        conv1 = EqualizedConv2d(
-                            out_channels,  # Input is output from conv0
-                            self.nf(res),  # Keep same number of channels
-                            kernel_size=3, 
-                            stride=2,
-                            padding=1,
-                            use_wscale=self.use_wscale
-                        )
-                        self.blocks[f'{block_name}_conv0'] = conv0
-                        self.blocks[f'{block_name}_conv1_down'] = conv1
-                    else:
-                        conv1 = EqualizedConv2d(
-                            out_channels,  # Input is output from conv0
-                            self.nf(res),  # Keep same number of channels
-                            kernel_size=3, 
-                            padding=1,
-                            use_wscale=self.use_wscale
-                        )
-                        self.blocks[f'{block_name}_conv0'] = conv0
-                        self.blocks[f'{block_name}_conv1'] = conv1
+                    self.blocks[f'{block_name}_conv0'] = conv0
+                    self.blocks[f'{block_name}_conv1'] = conv1
                 
             else:
                 # Final classification block
@@ -291,32 +288,20 @@ class Yu2019AttributionClassifier(nn.Module):
         block_name = f'{2**res}x{2**res}'
         
         if res > self.latent_res_log2:
-            # Intermediate blocks
-            if ((self.mode == 'predownscale' and res <= self.switching_res_log2) or 
-                (self.mode == 'postpool' and res > self.switching_res_log2)):
-                
-                # Convolution first
-                conv0 = self.blocks[f'{block_name}_conv0']
-                x = F.leaky_relu(conv0(x), negative_slope=0.2)
-                
-                if self.fused_scale:
-                    # Fused convolution + downscale
-                    conv1_down = self.blocks[f'{block_name}_conv1_down']
-                    x = F.leaky_relu(conv1_down(x), negative_slope=0.2)
-                else:
-                    # Separate convolution and downscale
-                    conv1 = self.blocks[f'{block_name}_conv1']
-                    x = F.leaky_relu(conv1(x), negative_slope=0.2)
-                    x = F.avg_pool2d(x, kernel_size=2, stride=2)
-                    
+            # Intermediate blocks - process all of them
+            # Convolution first
+            conv0 = self.blocks[f'{block_name}_conv0']
+            x = F.leaky_relu(conv0(x), negative_slope=0.2)
+            
+            if self.fused_scale:
+                # Fused convolution + downscale
+                conv1_down = self.blocks[f'{block_name}_conv1_down']
+                x = F.leaky_relu(conv1_down(x), negative_slope=0.2)
             else:
-                # Downscale first (predownscale mode or low resolution)
-                if self.mode == 'predownscale' and x.size(1) == 3:
-                    # Apply Gaussian blur for RGB images
-                    x = self.gaussian_blur(x)
-                    x = F.avg_pool2d(x, kernel_size=2, stride=2)
-                else:
-                    x = F.avg_pool2d(x, kernel_size=2, stride=2)
+                # Separate convolution and downscale
+                conv1 = self.blocks[f'{block_name}_conv1']
+                x = F.leaky_relu(conv1(x), negative_slope=0.2)
+                x = F.avg_pool2d(x, kernel_size=2, stride=2)
                     
         else:
             # Final classification block

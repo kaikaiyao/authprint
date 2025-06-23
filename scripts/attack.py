@@ -61,15 +61,15 @@ class Yu2019Classifier(nn.Module):
             num_channels=3,            # RGB input
             resolution=img_size,       # Will be 256
             label_size=1,             # Binary classification
-            fmap_base=32,             # Base feature maps
-            fmap_decay=0.0,           # No decay
-            fmap_max=32,              # Max feature maps
+            fmap_base=64,             # Increased base feature maps
+            fmap_decay=0.5,           # Allow gradual channel reduction
+            fmap_max=512,             # Higher max channels
             latent_res=4,             # 4x4 final resolution
             mode='postpool',          # Postpool mode
-            switching_res=4,          # Switch at 4x4
-            use_wscale=True,
+            switching_res=32,         # Switch later to allow more conv layers
+            use_wscale=False,         # Disable weight scaling for now
             mbstd_group_size=0,       # No minibatch stddev
-            fused_scale=True          # Use fused convolutions
+            fused_scale=False         # Disable fused convolutions for debugging
         )
         self.sigmoid = nn.Sigmoid()   # For binary output
     

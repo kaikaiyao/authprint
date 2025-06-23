@@ -96,11 +96,10 @@ spec:
                           --num_samples 20 \
                           --detection_threshold 0.002883 \
                           --classifier_iterations 2000 \
-                          --epsilon 2.0 \
-                          --pgd_step_size 2.0 \
-                          --pgd_steps 5000 \
-                          --enable_step_size_sweep \
-                          --momentum 0.9 \
+                          --epsilon 0.5 \
+                          --pgd_step_size 0.01 \
+                          --pgd_steps 200 \
+                          --momentum 0.0 \
                           --output_dir unified_attack_results \
                           --img_size 256"
               

@@ -312,8 +312,8 @@ class UnifiedAttack:
             # Compute gradient
             grad = torch.autograd.grad(loss, perturbed)[0]
             
-            # Update momentum
-            momentum = self.config.attack.momentum * momentum + (1 - self.config.attack.momentum) * grad
+            # Update momentum using MI-FGSM formula
+            momentum = self.config.attack.momentum * momentum + grad / torch.norm(grad, p=1)
             
             # PGD step with momentum
             with torch.no_grad():

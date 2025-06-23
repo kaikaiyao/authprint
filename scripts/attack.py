@@ -675,7 +675,7 @@ def parse_args():
     # Classifier training parameters
     parser.add_argument("--classifier_iterations", type=int, default=10000,
                         help="Number of iterations for classifier training")
-    parser.add_argument("--classifier_lr", type=float, default=1e-5,
+    parser.add_argument("--classifier_lr", type=float, default=1e-4,
                         help="Learning rate for classifier training")
     
     # PGD parameters

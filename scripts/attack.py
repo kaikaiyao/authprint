@@ -777,11 +777,7 @@ def main():
     config = get_default_config()
     config.update_from_args(args, mode='attack')
     
-    # Handle step size sweep arguments
-    if args.enable_step_size_sweep:
-        config.attack.enable_step_size_sweep = True
-        if args.step_size_sweep_values:
-            config.attack.step_size_sweep_values = args.step_size_sweep_values
+    # No need to handle step size sweep arguments here as they are already handled in update_from_args()
     
     # Create output directory and setup logging
     if rank == 0:

@@ -256,7 +256,7 @@ class AttackConfig:
 
 @dataclass
 class Config:
-    """Main configuration class."""
+    """Configuration class containing all settings."""
     model: ModelConfig = field(default_factory=ModelConfig)
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
@@ -268,16 +268,11 @@ class Config:
     seed: Optional[int] = None
     
     def validate(self):
-        """Validate all configuration parameters."""
-        # Validate each config section
-        for field_info in fields(self):
-            value = getattr(self, field_info.name)
-            if isinstance(value, Validatable):
-                value.validate()
-        
-        # Validate interdependent parameters
-        if self.checkpoint_path is not None:
-            assert os.path.exists(self.checkpoint_path), f"Checkpoint path does not exist: {self.checkpoint_path}"
+        """Validate configuration parameters."""
+        self.model.validate()
+        self.training.validate()
+        self.evaluate.validate()
+        self.attack.validate()
         assert os.path.exists(self.output_dir) or os.access(os.path.dirname(self.output_dir), os.W_OK), \
             f"Output directory {self.output_dir} does not exist and cannot be created"
     
@@ -341,7 +336,6 @@ class Config:
                 self.training.checkpoint_interval = args.checkpoint_interval
                 
         elif mode == 'evaluate':
-            # Update evaluation-specific parameters
             if hasattr(args, 'num_samples'):
                 self.evaluate.num_samples = args.num_samples
             if hasattr(args, 'batch_size'):
@@ -350,30 +344,8 @@ class Config:
                 self.evaluate.output_dir = args.output_dir
             if hasattr(args, 'seed'):
                 self.evaluate.seed = args.seed
-                
-            # Update pretrained model settings
-            if hasattr(args, 'pretrained_models'):
-                self.evaluate.selected_pretrained_models = args.pretrained_models
-            
-            # Process custom pretrained models
-            if hasattr(args, 'custom_pretrained_models'):
-                custom_models = {}
-                for model_spec in args.custom_pretrained_models:
-                    try:
-                        if self.model.model_type == "stylegan2":
-                            name, url, local_path = model_spec.split(':')
-                            custom_models[name] = (url, local_path)
-                        else:  # stable-diffusion
-                            name, model_name = model_spec.split(':')
-                            custom_models[name] = model_name
-                    except ValueError:
-                        logging.error(f"Invalid custom model specification: {model_spec}")
-                        if self.model.model_type == "stylegan2":
-                            logging.error("Format should be 'name:url:local_path'")
-                        else:
-                            logging.error("Format should be 'name:model_name'")
-                        continue
-                self.evaluate.custom_pretrained_models = custom_models
+            if hasattr(args, 'enable_timing_logs'):
+                self.evaluate.enable_timing_logs = args.enable_timing_logs
                 
         elif mode == 'attack':
             # Update attack parameters
@@ -404,8 +376,9 @@ class Config:
             # Add step size sweep parameters
             if hasattr(args, 'enable_step_size_sweep'):
                 self.attack.enable_step_size_sweep = args.enable_step_size_sweep
-            if hasattr(args, 'step_size_sweep_values'):
-                self.attack.step_size_sweep_values = args.step_size_sweep_values
+                # Only override step_size_sweep_values if explicitly provided
+                if hasattr(args, 'step_size_sweep_values') and args.step_size_sweep_values is not None:
+                    self.attack.step_size_sweep_values = args.step_size_sweep_values
         
         # Common configuration
         if hasattr(args, 'output_dir'):
@@ -414,13 +387,9 @@ class Config:
             self.checkpoint_path = args.checkpoint_path
         if hasattr(args, 'seed'):
             self.seed = args.seed
-
+        
         # Validate the updated configuration
-        try:
-            self.validate()
-        except AssertionError as e:
-            logging.error(f"Configuration validation failed: {str(e)}")
-            raise
+        self.validate()
 
 
 def get_default_config() -> Config:

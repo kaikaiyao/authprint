@@ -62,7 +62,8 @@ class Yu2019Classifier(nn.Module):
             num_channels=3,
             resolution=img_size,
             label_size=1,  # Binary classification
-            fmap_base=64,  # Increased from 8 to maintain capacity
+            fmap_base=128,  # Increased base to prevent zero channels
+            fmap_decay=0.5,  # Reduced decay rate for more gradual channel reduction
             fmap_max=512,
             latent_res=4,  # Use 4x4 resolution for final layer
             mode='postpool',

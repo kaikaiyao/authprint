@@ -61,8 +61,8 @@ class Yu2019Classifier(nn.Module):
             num_channels=3,            # RGB input
             resolution=img_size,       # Will be 256
             label_size=1,             # Binary classification
-            fmap_base=64,             # Increased base feature maps
-            fmap_decay=0.5,           # Allow gradual channel reduction
+            fmap_base=64,             # Base feature maps
+            fmap_decay=1.0,           # Standard decay (powers of 2)
             fmap_max=512,             # Higher max channels
             latent_res=4,             # 4x4 final resolution
             mode='postpool',          # Postpool mode

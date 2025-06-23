@@ -174,7 +174,10 @@ class Yu2019AttributionClassifier(nn.Module):
     
     def nf(self, stage):
         """Calculate number of feature maps for a given stage"""
-        return min(int(self.fmap_base / (2.0 ** (stage * self.fmap_decay))), self.fmap_max)
+        # For progressive networks, higher resolution stages should have fewer channels
+        # Stage 8 (256x256) should have base channels, stage 2 (4x4) should have max channels
+        channels = min(int(self.fmap_base * (2.0 ** ((self.resolution_log2 - stage) * self.fmap_decay))), self.fmap_max)
+        return max(channels, 1)  # Ensure at least 1 channel
     
     def _build_blocks(self):
         """Build all the network blocks"""
@@ -184,8 +187,14 @@ class Yu2019AttributionClassifier(nn.Module):
             if res > self.latent_res_log2:
                 # Intermediate blocks - create all of them
                 # First layer: input channels are either num_channels (for first block) or previous block's output channels
-                in_channels = self.num_channels if res == self.resolution_log2 else self.nf(res)
-                out_channels = self.nf(res)  # Output channels for this resolution
+                if res == self.resolution_log2:
+                    # First block: RGB input
+                    in_channels = self.num_channels
+                else:
+                    # Subsequent blocks: input comes from previous resolution's output
+                    in_channels = self.nf(res + 1)  # Previous resolution's channels
+                
+                out_channels = self.nf(res)  # Current resolution's channels
                 
                 # Convolution blocks
                 conv0 = EqualizedConv2d(
@@ -200,7 +209,7 @@ class Yu2019AttributionClassifier(nn.Module):
                     # Fused conv + downscale (simplified as conv with stride 2)
                     conv1 = EqualizedConv2d(
                         out_channels,  # Input is output from conv0
-                        self.nf(res),  # Keep same number of channels
+                        out_channels,  # Keep same number of channels
                         kernel_size=3, 
                         stride=2,
                         padding=1,
@@ -211,7 +220,7 @@ class Yu2019AttributionClassifier(nn.Module):
                 else:
                     conv1 = EqualizedConv2d(
                         out_channels,  # Input is output from conv0
-                        self.nf(res),  # Keep same number of channels
+                        out_channels,  # Keep same number of channels
                         kernel_size=3, 
                         padding=1,
                         use_wscale=self.use_wscale

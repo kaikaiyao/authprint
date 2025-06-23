@@ -276,11 +276,13 @@ class Yu2019AttributionClassifier(nn.Module):
         for res in range(self.resolution_log2, self.latent_res_log2-1, -1):
             x = self._forward_block(x, res)
         
-        # Ensure output is properly shaped for binary classification
+        # Ensure output is properly shaped to match NaiveClassifier [B, 1]
         if x.dim() > 2:
             x = x.squeeze(-1).squeeze(-1)  # Remove spatial dimensions if present
-        if x.dim() == 2 and x.size(1) == 1:
-            x = x.squeeze(1)  # Remove singleton dimension for binary output
+        
+        # Make sure output is [B, 1] not [B]
+        if x.dim() == 1:
+            x = x.unsqueeze(1)  # Add channel dimension to make [B, 1]
         
         return x
     

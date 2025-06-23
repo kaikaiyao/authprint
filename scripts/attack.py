@@ -57,29 +57,27 @@ class Yu2019Classifier(nn.Module):
     """Yu2019 Attribution Classifier wrapper for binary classification."""
     def __init__(self, img_size=256):
         super().__init__()
-        # Initialize Yu2019AttributionClassifier
         self.classifier = Yu2019AttributionClassifier(
-            num_channels=3,
-            resolution=img_size,
-            label_size=1,  # Binary classification
-            fmap_base=32,  # Start with smaller base to control growth
-            fmap_decay=0.0,  # No decay to maintain constant channels
-            fmap_max=32,  # Match fmap_base to ensure consistent channels
-            latent_res=4,  # Use 4x4 resolution for final layer
-            mode='postpool',  # Use postpool mode for better stability
-            switching_res=4,
+            num_channels=3,            # RGB input
+            resolution=img_size,       # Will be 256
+            label_size=1,             # Binary classification
+            fmap_base=32,             # Base feature maps
+            fmap_decay=0.0,           # No decay
+            fmap_max=32,              # Max feature maps
+            latent_res=4,             # 4x4 final resolution
+            mode='postpool',          # Postpool mode
+            switching_res=4,          # Switch at 4x4
             use_wscale=True,
-            mbstd_group_size=0,  # Disable for simplicity
-            fused_scale=True  # Use fused convolutions for better stability
+            mbstd_group_size=0,       # No minibatch stddev
+            fused_scale=True          # Use fused convolutions
         )
-        self.sigmoid = nn.Sigmoid()
+        self.sigmoid = nn.Sigmoid()   # For binary output
     
     def forward(self, x):
         # x is expected to be in [-1, 1]
-        # Convert to [0, 1] for the classifier
-        x = (x + 1) / 2
-        x = self.classifier(x)
-        return self.sigmoid(x)
+        x = (x + 1) / 2  # Convert to [0, 1]
+        x = self.classifier(x)  # Now guaranteed to be [B, 1]
+        return self.sigmoid(x)  # Returns [B, 1] to match NaiveClassifier
 
 
 class DecoderWrapper:

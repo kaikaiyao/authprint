@@ -97,8 +97,8 @@ spec:
                           --detection_threshold 0.002883 \
                           --classifier_iterations 2000 \
                           --epsilon 0.5 \
-                          --pgd_step_size 0.02 \
-                          --pgd_steps 250 \
+                          --pgd_step_size 0.001 \
+                          --pgd_steps 500 \
                           --momentum 0.9 \
                           --output_dir unified_attack_results \
                           --img_size 256"

@@ -212,6 +212,10 @@ class AttackConfig:
     epsilon: float = 0.1  # Maximum perturbation size (L∞ norm)
     detection_threshold: float = 0.002883  # MSE threshold for detection (95% TPR threshold)
     
+    # Evaluation cases
+    enable_quantization: bool = False  # Whether to evaluate quantized models
+    enable_downsampling: bool = False  # Whether to evaluate downsampling transformations
+    
     # Step size sweep parameters
     enable_step_size_sweep: bool = False  # Whether to perform step size sweep
     step_size_sweep_values: List[float] = field(default_factory=lambda: [
@@ -379,6 +383,12 @@ class Config:
                 # Only override step_size_sweep_values if explicitly provided
                 if hasattr(args, 'step_size_sweep_values') and args.step_size_sweep_values is not None:
                     self.attack.step_size_sweep_values = args.step_size_sweep_values
+            
+            # Add evaluation case parameters
+            if hasattr(args, 'enable_quantization'):
+                self.attack.enable_quantization = args.enable_quantization
+            if hasattr(args, 'enable_downsampling'):
+                self.attack.enable_downsampling = args.enable_downsampling
         
         # Common configuration
         if hasattr(args, 'output_dir'):

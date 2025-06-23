@@ -620,19 +620,21 @@ class UnifiedAttack:
                 logging.info(f"\nAttacking pretrained model: {model_name}")
             all_results[model_name] = self.attack_negative_case(model, num_samples)
         
-        # Attack quantized models
-        for precision, model in quantized_models.items():
-            case_name = f"quantization_{precision}"
-            if self.rank == 0:
-                logging.info(f"\nAttacking quantized model: {precision}")
-            all_results[case_name] = self.attack_negative_case(model, num_samples, case_name)
+        # Attack quantized models if enabled
+        if self.config.attack.enable_quantization:
+            for precision, model in quantized_models.items():
+                case_name = f"quantization_{precision}"
+                if self.rank == 0:
+                    logging.info(f"\nAttacking quantized model: {precision}")
+                all_results[case_name] = self.attack_negative_case(model, num_samples, case_name)
         
-        # Attack downsample cases
-        for size in [128, 224]:
-            case_name = f"downsample_{size}"
-            if self.rank == 0:
-                logging.info(f"\nAttacking downsample case: {size}")
-            all_results[case_name] = self.attack_negative_case(self.original_model, num_samples, case_name)
+        # Attack downsample cases if enabled
+        if self.config.attack.enable_downsampling:
+            for size in [128, 224]:
+                case_name = f"downsample_{size}"
+                if self.rank == 0:
+                    logging.info(f"\nAttacking downsample case: {size}")
+                all_results[case_name] = self.attack_negative_case(self.original_model, num_samples, case_name)
         
         return all_results
 
@@ -671,6 +673,12 @@ def parse_args():
                         help="Maximum perturbation size")
     parser.add_argument("--detection_threshold", type=float, default=0.002883,
                         help="MSE threshold for detection (authprint only)")
+    
+    # Evaluation cases
+    parser.add_argument("--enable_quantization", action="store_true",
+                        help="Enable evaluation on quantized models")
+    parser.add_argument("--enable_downsampling", action="store_true",
+                        help="Enable evaluation on downsampling transformations")
     
     # Classifier training parameters
     parser.add_argument("--classifier_iterations", type=int, default=10000,

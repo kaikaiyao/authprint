@@ -43,6 +43,67 @@ def apply_truncation(model, z, truncation_psi=2.0, return_w=False):
         return torch.zeros_like(z.reshape(z.size(0), 1, 1, 1).expand(-1, 3, 256, 256))
 
 
+def prune_model_weights(model, sparsity=0.5, method='magnitude'):
+    """Prune model weights to achieve target sparsity.
+    
+    Args:
+        model: The model to prune (StyleGAN2 or StableDiffusion)
+        sparsity (float): Target sparsity ratio (0.0 to 1.0)
+        method (str): Pruning method ('magnitude', 'random')
+        
+    Returns:
+        Pruned model copy
+    """
+    try:
+        pruned_model = copy.deepcopy(model)
+        
+        def prune_tensor(tensor, sparsity_ratio, prune_method):
+            # Handle empty or NaN tensors
+            if tensor.numel() == 0 or torch.isnan(tensor).any():
+                return tensor.clone()
+            
+            # Flatten tensor for easier processing
+            flat_tensor = tensor.view(-1)
+            num_params = flat_tensor.numel()
+            num_to_prune = int(num_params * sparsity_ratio)
+            
+            if prune_method == 'magnitude':
+                # Get indices of smallest magnitude values
+                _, indices = torch.sort(torch.abs(flat_tensor))
+                mask = torch.ones_like(flat_tensor, dtype=torch.bool)
+                mask[indices[:num_to_prune]] = False
+            else:  # random
+                # Generate random mask
+                mask = torch.rand_like(flat_tensor) > sparsity_ratio
+            
+            # Apply mask
+            pruned = flat_tensor * mask.float()
+            return pruned.view_as(tensor)
+        
+        # Prune all parameters
+        with torch.no_grad():
+            if hasattr(pruned_model, 'pipe'):  # Stable Diffusion
+                # Prune UNet parameters
+                for name, param in pruned_model.pipe.unet.named_parameters():
+                    if 'weight' in name:  # Only prune weight tensors
+                        param.copy_(prune_tensor(param, sparsity, method))
+                
+                # Prune VAE parameters
+                for name, param in pruned_model.pipe.vae.named_parameters():
+                    if 'weight' in name:  # Only prune weight tensors
+                        param.copy_(prune_tensor(param, sparsity, method))
+            else:  # StyleGAN2
+                for name, param in pruned_model.parameters():
+                    if 'weight' in name:  # Only prune weight tensors
+                        param.copy_(prune_tensor(param, sparsity, method))
+        
+        return pruned_model
+    except Exception as e:
+        logging.error(f"Error pruning model weights with sparsity {sparsity}: {str(e)}")
+        # Return original model as fallback
+        return model
+
+
 def quantize_model_weights(model, precision='int8'):
     """Quantize model weights to specified precision.
     

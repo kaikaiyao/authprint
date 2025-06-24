@@ -283,7 +283,10 @@ class FingerprintEvaluator:
             device=self.device
         )
         
-        # Setup quantized models if enabled in evaluation config
+        # Setup quantized and pruned models if enabled in evaluation config
+        self.quantized_models = {}
+        self.pruned_models = {}
+        
         if getattr(self.config.evaluate, 'enable_quantization', True):
             try:
                 if self.rank == 0:
@@ -333,6 +336,40 @@ class FingerprintEvaluator:
             if self.rank == 0:
                 logging.info("Quantization disabled in evaluation config")
             self.quantized_models = {}
+        
+        # Setup pruned models
+        if getattr(self.config.evaluate, 'enable_pruning', True):
+            try:
+                sparsity_levels = getattr(self.config.model, 'pruning_sparsity_levels', [0.25, 0.5, 0.75])
+                pruning_methods = getattr(self.config.model, 'pruning_methods', ['magnitude', 'random'])
+                
+                for sparsity in sparsity_levels:
+                    for method in pruning_methods:
+                        model_key = f'pruned_{method}_{int(sparsity*100)}'
+                        if self.rank == 0:
+                            logging.info(f"Setting up pruned model with {int(sparsity*100)}% sparsity using {method} pruning...")
+                        
+                        try:
+                            # Use model-specific pruning method
+                            pruned_model = self.generative_model.prune(sparsity=sparsity, method=method)
+                            pruned_model.eval()
+                            self.pruned_models[model_key] = pruned_model
+                            if self.rank == 0:
+                                logging.info(f"Successfully created pruned model: {model_key}")
+                        except Exception as e:
+                            if self.rank == 0:
+                                logging.error(f"Failed to create pruned model {model_key}: {str(e)}")
+                                logging.error(f"Pruning error for {model_key}:", exc_info=True)
+            except Exception as e:
+                if self.rank == 0:
+                    logging.error(f"Error in pruning setup: {str(e)}")
+                    logging.error("Pruning setup error:", exc_info=True)
+                    logging.error("Continuing without pruned models...")
+                self.pruned_models = {}
+        else:
+            if self.rank == 0:
+                logging.info("Pruning disabled in evaluation config")
+            self.pruned_models = {}
     
     def evaluate_batch(self) -> Dict[str, float]:
         """
@@ -505,6 +542,11 @@ class FingerprintEvaluator:
                 if 'int4' in self.quantized_models:
                     evaluations_to_run.append((None, 'quantization_int4'))
         
+        # Add pruning evaluations
+        if self.pruned_models:
+            for model_key in self.pruned_models.keys():
+                evaluations_to_run.append((None, model_key))
+        
         # Add downsample evaluations for both sizes
         evaluations_to_run.append((None, 'downsample_16'))
         evaluations_to_run.append((None, 'downsample_224'))
@@ -637,6 +679,25 @@ class FingerprintEvaluator:
                             else:
                                 if self.rank == 0 and i == 0:
                                     logging.warning(f"Quantized model for precision {precision} not found")
+                        elif transformation and transformation.startswith('pruned_'):
+                            if transformation in self.pruned_models:
+                                model = self.pruned_models[transformation]
+                                if self.config.model.model_type == "stylegan2":
+                                    x = model.generate_images(
+                                        batch_size=current_batch_size,
+                                        device=self.device,
+                                        z=z,
+                                        **gen_kwargs
+                                    )
+                                else:
+                                    x = model.generate_images(
+                                        batch_size=current_batch_size,
+                                        device=self.device,
+                                        **gen_kwargs
+                                    )
+                            else:
+                                if self.rank == 0 and i == 0:
+                                    logging.warning(f"Pruned model {transformation} not found")
                         elif transformation.startswith('downsample'):
                             downsample_size = int(transformation.split('_')[1])
                             x = downsample_and_upsample(x, downsample_size=downsample_size)

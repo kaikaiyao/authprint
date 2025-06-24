@@ -49,7 +49,7 @@ class ModelConfig:
     # Pretrained model configuration
     selected_pretrained_models: List[str] = field(default_factory=list)
     custom_pretrained_models: Dict[str, Any] = field(default_factory=dict)
-    
+
     def validate(self):
         """Validate configuration parameters."""
         assert self.model_type in ["stylegan2", "stable-diffusion"], f"Unknown model type: {self.model_type}"
@@ -182,8 +182,13 @@ class EvaluateConfig:
     selected_pretrained_models: List[str] = field(default_factory=list)
     custom_pretrained_models: Dict[str, Any] = field(default_factory=dict)
     
-    # Transformation settings
+    # Model transformation settings
     enable_quantization: bool = True  # Whether to evaluate quantized models
+    enable_pruning: bool = True  # Whether to evaluate pruned models
+    pruning_sparsity_levels: List[float] = field(default_factory=lambda: [0.25, 0.5, 0.75])  # List of sparsity ratios to evaluate
+    pruning_methods: List[str] = field(default_factory=lambda: ['magnitude', 'random'])  # List of pruning methods to evaluate
+    
+    # Downsampling settings
     enable_downsampling: bool = True  # Whether to evaluate downsampling transformations
     downsample_sizes: List[int] = field(default_factory=lambda: [16, 224])  # Sizes for downsampling evaluation
 
@@ -194,6 +199,8 @@ class EvaluateConfig:
         assert os.path.exists(self.output_dir) or os.access(os.path.dirname(self.output_dir), os.W_OK), \
             f"Output directory {self.output_dir} does not exist and cannot be created"
         assert all(size > 0 for size in self.downsample_sizes), "All downsample sizes must be positive"
+        assert all(0 < sparsity < 1 for sparsity in self.pruning_sparsity_levels), "Pruning sparsity levels must be between 0 and 1"
+        assert all(method in ['magnitude', 'random'] for method in self.pruning_methods), "Invalid pruning method"
 
 
 @dataclass
@@ -350,6 +357,15 @@ class Config:
                 self.evaluate.seed = args.seed
             if hasattr(args, 'enable_timing_logs'):
                 self.evaluate.enable_timing_logs = args.enable_timing_logs
+            # Model transformation settings
+            if hasattr(args, 'enable_quantization'):
+                self.evaluate.enable_quantization = args.enable_quantization
+            if hasattr(args, 'enable_pruning'):
+                self.evaluate.enable_pruning = args.enable_pruning
+            if hasattr(args, 'pruning_sparsity_levels'):
+                self.evaluate.pruning_sparsity_levels = args.pruning_sparsity_levels
+            if hasattr(args, 'pruning_methods'):
+                self.evaluate.pruning_methods = args.pruning_methods
                 
         elif mode == 'attack':
             # Update attack parameters

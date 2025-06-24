@@ -4,6 +4,7 @@ from diffusers import DiffusionPipeline, DPMSolverMultistepScheduler
 from diffusers.models import AutoencoderKL
 from .base_model import BaseGenerativeModel
 import numpy as np
+from utils.image_transforms import prune_model_weights
 
 class StableDiffusionModel(BaseGenerativeModel):
     """Stable Diffusion model implementation."""
@@ -196,3 +197,27 @@ class StableDiffusionModel(BaseGenerativeModel):
                 param.copy_(quantize_tensor(param, precision))
 
         return quantized_model 
+
+    def prune(self, sparsity=0.5, method='magnitude'):
+        """Prune model weights to achieve target sparsity.
+        
+        Args:
+            sparsity (float): Target sparsity ratio (0.0 to 1.0)
+            method (str): Pruning method ('magnitude' or 'random')
+            
+        Returns:
+            StableDiffusionModel: New model instance with pruned weights
+        """
+        # Create a new model instance
+        pruned_model = StableDiffusionModel(
+            model_name=self._model_name,
+            device=self._device,
+            img_size=self._img_size,
+            dtype=self.pipe.dtype,
+            enable_cpu_offload=False  # Disable CPU offload for pruned model
+        )
+        
+        # Use the utility function to prune weights
+        pruned_model = prune_model_weights(pruned_model, sparsity=sparsity, method=method)
+        
+        return pruned_model 

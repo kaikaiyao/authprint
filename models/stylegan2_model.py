@@ -3,6 +3,7 @@ import torch.nn as nn
 from typing import Optional
 from .base_model import BaseGenerativeModel
 from models.model_utils import load_stylegan2_model
+from utils.image_transforms import prune_model_weights
 
 class StyleGAN2Model(BaseGenerativeModel, nn.Module):
     """StyleGAN2 model implementation."""
@@ -25,6 +26,8 @@ class StyleGAN2Model(BaseGenerativeModel, nn.Module):
         super(StyleGAN2Model, self).__init__()
         self._device = device
         self._img_size = img_size
+        self.model_url = model_url
+        self.model_path = model_path
         self.model = load_stylegan2_model(model_url, model_path, device)
         self.model.eval()
         
@@ -131,4 +134,27 @@ class StyleGAN2Model(BaseGenerativeModel, nn.Module):
             self.model.train()
         else:
             self.model.eval()
-        return self 
+        return self
+
+    def prune(self, sparsity=0.5, method='magnitude'):
+        """Prune model weights to achieve target sparsity.
+        
+        Args:
+            sparsity (float): Target sparsity ratio (0.0 to 1.0)
+            method (str): Pruning method ('magnitude' or 'random')
+            
+        Returns:
+            StyleGAN2Model: New model instance with pruned weights
+        """
+        # Create a new model instance
+        pruned_model = StyleGAN2Model(
+            model_url=self.model_url,
+            model_path=self.model_path,
+            device=self._device,
+            img_size=self._img_size
+        )
+        
+        # Use the utility function to prune weights
+        pruned_model = prune_model_weights(pruned_model, sparsity=sparsity, method=method)
+        
+        return pruned_model 

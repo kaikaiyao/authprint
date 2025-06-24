@@ -92,6 +92,23 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=16, 
                         help="Batch size for evaluation")
     
+    # Model transformation configuration
+    parser.add_argument("--enable_quantization", action="store_true", default=True,
+                        help="Enable evaluation of quantized models")
+    parser.add_argument("--no_quantization", action="store_false", dest="enable_quantization",
+                        help="Disable evaluation of quantized models")
+    parser.add_argument("--enable_pruning", action="store_true", default=True,
+                        help="Enable evaluation of pruned models")
+    parser.add_argument("--no_pruning", action="store_false", dest="enable_pruning",
+                        help="Disable evaluation of pruned models")
+    parser.add_argument("--pruning_sparsity_levels", type=float, nargs='+',
+                        default=[0.25, 0.5, 0.75],
+                        help="List of sparsity ratios to evaluate for pruning")
+    parser.add_argument("--pruning_methods", type=str, nargs='+',
+                        default=['magnitude', 'random'],
+                        choices=['magnitude', 'random'],
+                        help="List of pruning methods to evaluate")
+    
     # Output configuration
     parser.add_argument("--output_dir", type=str, default="evaluation_results", 
                         help="Directory to save evaluation results")

@@ -102,7 +102,7 @@ def parse_args():
     parser.add_argument("--no_pruning", action="store_false", dest="enable_pruning",
                         help="Disable evaluation of pruned models")
     parser.add_argument("--pruning_sparsity_levels", type=float, nargs='+',
-                        default=[0.25, 0.5, 0.75],
+                        default=[0.25, 0.5, 0.75, 0.9, 0.99],
                         help="List of sparsity ratios to evaluate for pruning")
     parser.add_argument("--pruning_methods", type=str, nargs='+',
                         default=['magnitude', 'random'],

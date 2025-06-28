@@ -63,8 +63,8 @@ def parse_args():
     parser.add_argument("--enable_multi_prompt", action="store_true",
                         help="Enable multi-prompt training mode")
     parser.add_argument("--prompt_source", type=str, default="local",
-                        choices=["local", "diffusiondb"],
-                        help="Source of prompts: local file or DiffusionDB dataset")
+                        choices=["local", "diffusiondb", "parti-prompts"],
+                        help="Source of prompts: local file, DiffusionDB dataset, or Parti-Prompts dataset")
     parser.add_argument("--prompt_dataset_path", type=str, default="",
                         help="Path to local prompt dataset file (one prompt per line)")
     parser.add_argument("--prompt_dataset_size", type=int, default=10000,
@@ -72,6 +72,10 @@ def parse_args():
     parser.add_argument("--diffusiondb_subset", type=str, default="2m_random_10k",
                         choices=["2m_random_10k", "large_random_10k", "2m_random_5k"],
                         help="Which DiffusionDB subset to use (2m_random_10k, large_random_10k, 2m_random_5k)")
+    parser.add_argument("--parti_prompts_category", type=str, default="",
+                        help="Category to use from parti-prompts dataset (e.g., 'People', 'Animals', etc.)")
+    parser.add_argument("--train_eval_split_ratio", type=float, default=0.8,
+                        help="Ratio of prompts to use for training vs evaluation (default: 0.8)")
     
     # Common configuration
     parser.add_argument("--checkpoint_path", type=str, default=None,

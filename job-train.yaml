@@ -98,9 +98,9 @@ spec:
                       --lr 1e-5 \
                       --sd_enable_cpu_offload \
                       --enable_multi_prompt \
-                      --prompt_source "diffusiondb" \
-                      --diffusiondb_subset "2m_random_10k" \
-                      --checkpoint_path "/nfs-user-107/SD/1024px_5000iter_L_diffusiondb.pth"
+                      --prompt_source "parti-prompts" \
+                      --parti_prompts_category "People" \
+                      --train_eval_split_ratio 0.8
               
               exit_status=$?
               echo "Training finished with exit status $exit_status"

@@ -41,10 +41,12 @@ class ModelConfig:
     
     # Multi-prompt training configuration
     enable_multi_prompt: bool = False  # Whether to use multiple prompts during training
-    prompt_source: str = "local"  # One of ["local", "diffusiondb"]
+    prompt_source: str = "local"  # One of ["local", "diffusiondb", "parti-prompts"]
     prompt_dataset_path: str = ""  # Path to local prompt dataset file (one prompt per line)
     prompt_dataset_size: int = 10000  # Number of prompts to load from dataset
     diffusiondb_subset: str = "2m"  # One of ["2m", "large"] - which DiffusionDB subset to use
+    parti_prompts_category: str = ""  # Category to use from parti-prompts dataset (e.g., "People", "Animals", etc.)
+    train_eval_split_ratio: float = 0.8  # Ratio of prompts to use for training vs evaluation
     
     # Pretrained model configuration
     selected_pretrained_models: List[str] = field(default_factory=list)
@@ -62,13 +64,11 @@ class ModelConfig:
         
         # Validate multi-prompt configuration
         if self.enable_multi_prompt:
-            assert self.prompt_source in ["local", "diffusiondb"], f"Invalid prompt source: {self.prompt_source}"
+            assert self.prompt_source in ["local", "diffusiondb", "parti-prompts"], f"Invalid prompt source: {self.prompt_source}"
             if self.prompt_source == "local":
                 assert os.path.exists(self.prompt_dataset_path), f"Prompt dataset file not found: {self.prompt_dataset_path}"
-            else:  # diffusiondb
-                # Allow any diffusiondb subset to be used
-                # The subset will be mapped to {subset}_all format
-                pass
+            elif self.prompt_source == "parti-prompts":
+                assert 0 < self.train_eval_split_ratio < 1, "Train-eval split ratio must be between 0 and 1"
             assert self.prompt_dataset_size > 0, "Prompt dataset size must be positive"
     
     def get_model_class(self) -> Type:
@@ -332,6 +332,10 @@ class Config:
             self.model.prompt_dataset_size = args.prompt_dataset_size
         if hasattr(args, 'diffusiondb_subset'):
             self.model.diffusiondb_subset = args.diffusiondb_subset
+        if hasattr(args, 'parti_prompts_category'):
+            self.model.parti_prompts_category = args.parti_prompts_category
+        if hasattr(args, 'train_eval_split_ratio'):
+            self.model.train_eval_split_ratio = args.train_eval_split_ratio
         
         # Mode-specific configuration
         if mode == 'train':

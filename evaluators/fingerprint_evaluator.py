@@ -876,8 +876,10 @@ class FingerprintEvaluator:
         """
         if self.config.model.prompt_source == "local":
             self._load_prompt_dataset_local()
-        else:  # diffusiondb
+        elif self.config.model.prompt_source == "diffusiondb":
             self._load_prompt_dataset_diffusiondb()
+        else:  # parti-prompts
+            self._load_prompt_dataset_parti()
 
     def _load_prompt_dataset_local(self) -> None:
         """
@@ -963,6 +965,62 @@ class FingerprintEvaluator:
         except Exception as e:
             if self.rank == 0:
                 logging.error(f"Error loading DiffusionDB dataset: {str(e)}")
+            raise
+
+    def _load_prompt_dataset_parti(self) -> None:
+        """
+        Load prompts from the Parti-Prompts dataset for evaluation.
+        Uses the evaluation split (20% by default) of the specified category.
+        """
+        if self.rank == 0:
+            logging.info(f"Loading evaluation prompts from Parti-Prompts dataset for category: {self.config.model.parti_prompts_category}")
+        
+        try:
+            # Load the Parti-Prompts dataset
+            dataset = load_dataset("nateraw/parti-prompts", split="train", trust_remote_code=True)
+            
+            # Filter by category if specified
+            if self.config.model.parti_prompts_category:
+                dataset = dataset.filter(lambda x: x["Category"] == self.config.model.parti_prompts_category)
+                if self.rank == 0:
+                    logging.info(f"Found {len(dataset)} prompts in category '{self.config.model.parti_prompts_category}'")
+            
+            # Extract and clean all prompts
+            all_prompts = []
+            for item in dataset:
+                if not item["Prompt"]:  # Skip empty prompts
+                    continue
+                
+                cleaned_prompt = clean_prompt(item["Prompt"])
+                if cleaned_prompt:
+                    all_prompts.append(cleaned_prompt)
+            
+            if self.rank == 0:
+                logging.info(f"Retained {len(all_prompts)} prompts after cleaning")
+            
+            # Split into train and eval sets
+            random.shuffle(all_prompts)  # Shuffle before splitting
+            split_idx = int(len(all_prompts) * self.config.model.train_eval_split_ratio)
+            eval_prompts = all_prompts[split_idx:]  # Use the evaluation split
+            
+            # Sample the specified number of prompts for evaluation
+            if len(eval_prompts) > self.config.model.prompt_dataset_size:
+                self.prompts = random.sample(eval_prompts, self.config.model.prompt_dataset_size)
+            else:
+                self.prompts = eval_prompts
+                if self.rank == 0:
+                    logging.warning(f"Evaluation set contains fewer prompts ({len(eval_prompts)}) "
+                                  f"than requested ({self.config.model.prompt_dataset_size})")
+            
+            if self.rank == 0:
+                logging.info(f"Using {len(self.prompts)} prompts for evaluation")
+                logging.info("Sample evaluation prompts:")
+                for i, prompt in enumerate(self.prompts[:10]):  # Show first 10 prompts
+                    logging.info(f"  {i+1}. {prompt}")
+        
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error loading Parti-Prompts dataset: {str(e)}")
             raise
 
     def _sample_prompts(self, batch_size: int) -> List[str]:

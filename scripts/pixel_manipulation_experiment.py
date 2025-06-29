@@ -17,7 +17,8 @@ from config.default_config import get_default_config
 from utils.distributed import setup_distributed, cleanup_distributed
 from utils.logging_utils import setup_logging
 from models.stylegan2_model import StyleGAN2Model
-from models.decoder import Decoder
+from models.decoder import DecoderSD_L, DecoderSD_M, DecoderSD_S, StyleGAN2Decoder
+from utils.checkpoint import load_checkpoint
 
 
 def parse_args():
@@ -40,8 +41,15 @@ def parse_args():
     # Decoder configuration
     parser.add_argument("--checkpoint_path", type=str, required=True,
                         help="Path to decoder checkpoint")
+    parser.add_argument("--decoder_size", type=str, default="M",
+                        choices=["S", "M", "L"],
+                        help="Size of decoder to use (S=Small, M=Medium, L=Large)")
     parser.add_argument("--img_size", type=int, default=256,
                         help="Image resolution")
+    parser.add_argument("--image_pixel_count", type=int, default=32,
+                        help="Number of pixels to predict")
+    parser.add_argument("--image_pixel_set_seed", type=int, default=42,
+                        help="Random seed for selecting pixel indices")
     
     # Experiment configuration
     parser.add_argument("--num_images", type=int, default=10,
@@ -208,15 +216,49 @@ def main():
         # Initialize models
         generator = StyleGAN2Model(
             url=args.stylegan2_url,
-            local_path=args.stylegan2_local_path
+            local_path=args.stylegan2_local_path,
+            device=device,
+            img_size=args.img_size
         ).to(device)
         
-        decoder = Decoder.load_from_checkpoint(
-            args.checkpoint_path
-        ).to(device)
+        # Initialize decoder based on model type and size
+        decoder_output_dim = args.image_pixel_count  # For direct pixel prediction
+        
+        if args.model_type == "stylegan2":
+            decoder = StyleGAN2Decoder(
+                image_size=args.img_size,
+                channels=3,
+                output_dim=decoder_output_dim
+            ).to(device)
+            if rank == 0:
+                logging.info(f"Initialized StyleGAN2Decoder with output_dim={decoder_output_dim}")
+        else:  # stable-diffusion
+            decoder_class = {
+                "S": DecoderSD_S,
+                "M": DecoderSD_M,
+                "L": DecoderSD_L
+            }[args.decoder_size]
+            
+            decoder = decoder_class(
+                image_size=args.img_size,
+                channels=3,
+                output_dim=decoder_output_dim
+            ).to(device)
+            
+            if rank == 0:
+                logging.info(f"Initialized SD-Decoder-{args.decoder_size} with output_dim={decoder_output_dim}")
         
         decoder.eval()
-        generator.eval()
+        
+        # Load checkpoint using the utility function
+        if rank == 0:
+            logging.info(f"Loading checkpoint from {args.checkpoint_path}...")
+        
+        load_checkpoint(
+            checkpoint_path=args.checkpoint_path,
+            decoder=decoder,
+            device=device
+        )
         
         # Run experiment
         results = run_experiment(args, decoder, generator, device)

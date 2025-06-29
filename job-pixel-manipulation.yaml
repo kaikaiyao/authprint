@@ -119,7 +119,7 @@ spec:
                           --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth'"
               
               # Run experiment multiple times
-              for run in {1..5}; do
+              for run in {1..10}; do
                 echo "Starting pixel manipulation experiment run $run/5..."
                 log_file="/workspace/authprint/pixel_manipulation_results/logs/run_${run}.log"
                 results_dir="/workspace/authprint/pixel_manipulation_results/run_${run}"

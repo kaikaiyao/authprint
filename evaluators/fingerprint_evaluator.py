@@ -340,7 +340,7 @@ class FingerprintEvaluator:
         # Setup pruned models
         if getattr(self.config.evaluate, 'enable_pruning', True):
             try:
-                sparsity_levels = getattr(self.config.model, 'pruning_sparsity_levels', [0.25, 0.5, 0.75])
+                sparsity_levels = getattr(self.config.model, 'pruning_sparsity_levels', [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99])
                 pruning_methods = getattr(self.config.model, 'pruning_methods', ['magnitude', 'random'])
                 
                 for sparsity in sparsity_levels:

@@ -92,7 +92,6 @@ spec:
               BASE_ARGS="--img_size 256 \
                         --num_images 10 \
                         --num_repeats 5 \
-                        --batch_size 1 \
                         --max_pixels 65536 \
                         --base 2 \
                         --image_pixel_count 32"

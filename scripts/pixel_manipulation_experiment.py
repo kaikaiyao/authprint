@@ -153,10 +153,15 @@ class PixelManipulationExperiment:
         try:
             # Initialize generative model based on type
             if self.args.model_type == "stylegan2":
+                # First ensure the model file exists or download it
+                if not os.path.exists(self.args.stylegan2_local_path):
+                    if self.rank == 0:
+                        logging.info(f"Downloading StyleGAN2 model from {self.args.stylegan2_url}")
+                    import urllib.request
+                    urllib.request.urlretrieve(self.args.stylegan2_url, self.args.stylegan2_local_path)
+                
                 self.generative_model = StyleGAN2Model(
-                    model_path=self.args.stylegan2_local_path,
-                    download_url=self.args.stylegan2_url,
-                    img_size=self.args.img_size,
+                    path=self.args.stylegan2_local_path,
                     device=self.device
                 )
                 

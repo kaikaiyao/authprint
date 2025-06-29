@@ -90,8 +90,8 @@ spec:
               
               # Common arguments for both StyleGAN2 and SD
               BASE_ARGS="--img_size 256 \
-                        --num_images 10 \
-                        --num_repeats 5 \
+                        --num_images 100 \
+                        --num_repeats 10 \
                         --max_pixels 65536 \
                         --base 2 \
                         --image_pixel_count 32"

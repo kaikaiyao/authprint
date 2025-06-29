@@ -154,8 +154,8 @@ class PixelManipulationExperiment:
             # Initialize generative model based on type
             if self.args.model_type == "stylegan2":
                 self.generative_model = StyleGAN2Model(
-                    url=self.args.stylegan2_url,
-                    local_path=self.args.stylegan2_local_path,
+                    model_path=self.args.stylegan2_local_path,
+                    download_url=self.args.stylegan2_url,
                     img_size=self.args.img_size,
                     device=self.device
                 )
@@ -468,7 +468,7 @@ def main():
             logging.info(f"Experiment completed. Results saved to {args.output_dir}")
         
     except Exception as e:
-        if self.rank == 0:
+        if rank == 0:
             logging.error(f"Error in experiment: {str(e)}", exc_info=True)
         raise
     finally:

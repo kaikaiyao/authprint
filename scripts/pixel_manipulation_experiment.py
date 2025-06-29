@@ -161,8 +161,10 @@ class PixelManipulationExperiment:
                     urllib.request.urlretrieve(self.args.stylegan2_url, self.args.stylegan2_local_path)
                 
                 self.generative_model = StyleGAN2Model(
-                    path=self.args.stylegan2_local_path,
-                    device=self.device
+                    model_url=self.args.stylegan2_url,
+                    model_path=self.args.stylegan2_local_path,
+                    device=self.device,
+                    img_size=self.args.img_size
                 )
                 
                 # Initialize StyleGAN2 decoder

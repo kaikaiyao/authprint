@@ -1,0 +1,141 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: ${USER}-job-pixel-manipulation-${JOB_SUFFIX}
+  labels:
+    eidf/user: ${USER}
+    kueue.x-k8s.io/queue-name: ${QUEUE_NAME}
+    kueue.x-k8s.io/priority-class: batch-workload-priority
+spec:
+  completions: 1
+  parallelism: 1
+  completionMode: Indexed
+  backoffLimit: 2147483647
+  activeDeadlineSeconds: 864000
+  template:
+    metadata:
+      labels:
+        eidf/user: ${USER}
+    spec:
+      restartPolicy: OnFailure
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-H200
+      tolerations:
+        - key: "eidf098"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+        - key: "eidf107"
+          operator: "Equal"
+          value: "True"
+          effect: "NoSchedule"
+      containers:
+        - name: pixel-manipulation-experiment
+          image: kaiyaoed/my_app:latest
+          workingDir: "/workspace/authprint"
+          env:
+            - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+              value: "1"
+            - name: NCCL_DEBUG
+              value: "INFO"
+            - name: NCCL_IB_DISABLE
+              value: "1"
+            - name: NCCL_IB_HCA
+              value: "^mlx5"
+            - name: PYTHONPATH
+              value: "/workspace/authprint"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "Setting up environment..."
+              # Copy code from NFS to workspace
+              echo "Copying code from NFS to workspace..."
+              mkdir -p /workspace
+              cp -r /nfs-user-107/authprint /workspace/
+              
+              # Create necessary directories in workspace
+              mkdir -p /workspace/authprint/results
+              mkdir -p /workspace/authprint/pixel_manipulation_results
+              mkdir -p /workspace/authprint/pixel_manipulation_results/logs
+              
+              # Create symlinks to the expected locations
+              mkdir -p /root/.cache/torch/hub/checkpoints
+              ln -sf /nfs-user-107/authprint/pretrained_models/vgg16-397923af.pth /root/.cache/torch/hub/checkpoints/
+              ln -sf /nfs-user-107/authprint/pretrained_models/weights-inception-2015-12-05-6726825d.pth /root/.cache/torch/hub/checkpoints/
+              
+              # Set Python path
+              export PYTHONPATH=$PYTHONPATH:/workspace/authprint
+              
+              # Download pretrained models
+              echo "Downloading pretrained models..."
+              curl -o ffhq70k-paper256-ada.pkl "https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl"
+              
+              # Define common parameters for all runs
+              TORCHRUN_CMD="torchrun --nproc_per_node=1 \
+                          --nnodes=1 \
+                          --node_rank=0 \
+                          --master_addr=127.0.0.1 \
+                          --master_port=12345"
+              
+              SCRIPT_ARGS="--stylegan2_url 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl' \
+                          --stylegan2_local_path 'ffhq70k-paper256-ada.pkl' \
+                          --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
+                          --num_images 10 \
+                          --num_repeats 5 \
+                          --pixel_steps '1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536' \
+                          --output_dir '/workspace/authprint/pixel_manipulation_results'"
+              
+              # Run the experiment
+              echo "Starting pixel manipulation experiment..."
+              log_file="/workspace/authprint/pixel_manipulation_results/logs/experiment.log"
+              
+              (
+                echo "=== Pixel Manipulation Experiment ===" 
+                echo "Started at: $(date)"
+                echo ""
+                
+                eval "$TORCHRUN_CMD scripts/pixel_manipulation_experiment.py $SCRIPT_ARGS"
+                
+                echo ""
+                echo "Finished at: $(date)"
+                echo "Exit status: $?"
+              ) 2>&1 | tee "$log_file"
+              
+              # Copy results back to NFS
+              echo "Copying results back to NFS..."
+              mkdir -p /nfs-user-107/authprint/pixel_manipulation_results
+              cp -r /workspace/authprint/pixel_manipulation_results/* /nfs-user-107/authprint/pixel_manipulation_results/
+              
+              echo "Experiment completed. Results are available in /nfs-user-107/authprint/pixel_manipulation_results/"
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              cpu: "16"
+              memory: "64Gi"
+          volumeMounts:
+            - name: nfs-user-107
+              mountPath: /nfs-user-107
+            - name: nfs-user-029
+              mountPath: /nfs-user-029
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: nfs-user-107
+          nfs:
+            server: 10.24.6.77
+            path: /user/s2470447-eidf107
+        - name: nfs-user-029
+          nfs:
+            server: 10.24.1.255
+            path: /user/s2470447-infk8s
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Gi 

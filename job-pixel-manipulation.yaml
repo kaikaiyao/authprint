@@ -87,10 +87,6 @@ spec:
               SCRIPT_ARGS="--stylegan2_url 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl' \
                           --stylegan2_local_path 'ffhq70k-paper256-ada.pkl' \
                           --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
-                          --decoder_size 'M' \
-                          --img_size 256 \
-                          --image_pixel_count 32 \
-                          --image_pixel_set_seed 42 \
                           --num_images 10 \
                           --num_repeats 5 \
                           --pixel_steps '1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536' \

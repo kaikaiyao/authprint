@@ -18,6 +18,7 @@ spec:
         eidf/user: ${USER}
     spec:
       restartPolicy: OnFailure
+      # Replace nodeSelector with affinity to allow multiple GPU types.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -27,6 +28,7 @@ spec:
                     operator: In
                     values:
                       - NVIDIA-H200
+      # Add tolerations to allow scheduling on nodes with specific taints.
       tolerations:
         - key: "eidf098"
           operator: "Equal"
@@ -37,8 +39,8 @@ spec:
           value: "True"
           effect: "NoSchedule"
       containers:
-        - name: pixel-manipulation-experiment
-          image: kaiyaoed/my_app:latest
+        - name: stylegan-fingerprint-pixel-manipulation
+          image: kaiyaoed/my_app:latest  # Ensure CUDA version matches host drivers
           workingDir: "/workspace/authprint"
           env:
             - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
@@ -47,6 +49,8 @@ spec:
               value: "INFO"
             - name: NCCL_IB_DISABLE
               value: "1"
+            - name: MAX_DELTA
+              value: "${MAX_DELTA}"
             - name: NCCL_IB_HCA
               value: "^mlx5"
             - name: PYTHONPATH
@@ -84,36 +88,81 @@ spec:
                           --master_addr=127.0.0.1 \
                           --master_port=12345"
               
-              SCRIPT_ARGS="--stylegan2_url 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl' \
-                          --stylegan2_local_path 'ffhq70k-paper256-ada.pkl' \
-                          --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth' \
-                          --num_images 10 \
-                          --num_repeats 5 \
-                          --pixel_steps '1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536' \
-                          --output_dir '/workspace/authprint/pixel_manipulation_results'"
+              # Common arguments for both StyleGAN2 and SD
+              BASE_ARGS="--img_size 256 \
+                        --num_images 10 \
+                        --num_repeats 5 \
+                        --batch_size 1 \
+                        --max_pixels 65536 \
+                        --base 2 \
+                        --image_pixel_count 32"
               
-              # Run the experiment
-              echo "Starting pixel manipulation experiment..."
-              log_file="/workspace/authprint/pixel_manipulation_results/logs/experiment.log"
+              # StyleGAN2-specific arguments
+              STYLEGAN2_ARGS="--model_type stylegan2 \
+                             --stylegan2_url 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl' \
+                             --stylegan2_local_path 'ffhq70k-paper256-ada.pkl'"
               
-              (
-                echo "=== Pixel Manipulation Experiment ===" 
-                echo "Started at: $(date)"
-                echo ""
+              # Stable Diffusion-specific arguments (commented out but available if needed)
+              # SD_ARGS="--model_type stable-diffusion \
+              #          --sd_model_name 'stabilityai/stable-diffusion-xl-base-1.0' \
+              #          --sd_prompt 'a photo of a cat' \
+              #          --sd_num_inference_steps 30 \
+              #          --sd_guidance_scale 7.5 \
+              #          --sd_dtype float16 \
+              #          --decoder_size M"
+              
+              # Choose which model type to use (StyleGAN2 or SD)
+              MODEL_ARGS="$STYLEGAN2_ARGS"  # or "$SD_ARGS" for Stable Diffusion
+              
+              # Combine all arguments
+              SCRIPT_ARGS="$BASE_ARGS \
+                          $MODEL_ARGS \
+                          --checkpoint_path '/nfs-user-107/num_pixel_32/checkpoint_iter740000.pth'"
+              
+              # Run experiment multiple times
+              for run in {1..5}; do
+                echo "Starting pixel manipulation experiment run $run/5..."
+                log_file="/workspace/authprint/pixel_manipulation_results/logs/run_${run}.log"
+                results_dir="/workspace/authprint/pixel_manipulation_results/run_${run}"
+                mkdir -p "$results_dir"
                 
-                eval "$TORCHRUN_CMD scripts/pixel_manipulation_experiment.py $SCRIPT_ARGS"
+                # Update output directory for this run
+                RUN_ARGS="$SCRIPT_ARGS --output_dir $results_dir"
                 
-                echo ""
-                echo "Finished at: $(date)"
-                echo "Exit status: $?"
-              ) 2>&1 | tee "$log_file"
+                # Run experiment using torchrun
+                (
+                  echo "=== Pixel Manipulation Experiment Run $run/5 ===" 
+                  echo "Started at: $(date)"
+                  echo ""
+                  
+                  if [ $run -eq 1 ]; then
+                    # Show full logs only for first run
+                    eval "$TORCHRUN_CMD scripts/pixel_manipulation_experiment.py $RUN_ARGS"
+                  else
+                    # Suppress torchrun logs for subsequent runs
+                    eval "$TORCHRUN_CMD scripts/pixel_manipulation_experiment.py $RUN_ARGS" > /dev/null 2>&1
+                  fi
+                  
+                  echo ""
+                  echo "Finished at: $(date)"
+                  echo "Exit status: $?"
+                ) 2>&1 | tee "$log_file"
+                
+                # Also append to a combined log file
+                cat "$log_file" >> "/workspace/authprint/pixel_manipulation_results/logs/combined.log"
+                echo -e "\n\n" >> "/workspace/authprint/pixel_manipulation_results/logs/combined.log"
+                
+                echo "Completed run $run/5. Logs saved to $log_file"
+                echo "Results saved to $results_dir"
+                echo "-------------------------------------------"
+              done
+              
+              echo "All experiment runs completed. Results are available in /workspace/authprint/pixel_manipulation_results/"
               
               # Copy results back to NFS
               echo "Copying results back to NFS..."
-              mkdir -p /nfs-user-107/authprint/pixel_manipulation_results
-              cp -r /workspace/authprint/pixel_manipulation_results/* /nfs-user-107/authprint/pixel_manipulation_results/
+              cp -r /workspace/authprint/pixel_manipulation_results /nfs-user-107/authprint/
               
-              echo "Experiment completed. Results are available in /nfs-user-107/authprint/pixel_manipulation_results/"
           resources:
             limits:
               nvidia.com/gpu: "1"

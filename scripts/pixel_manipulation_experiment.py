@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 """
-Experiment script to analyze how decoder predictions shift when pixels are manipulated.
+Script to analyze how decoder predictions shift when pixels are manipulated.
 """
 import argparse
 import logging
 import os
 import sys
+from typing import List, Dict, Tuple
+import json
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -13,263 +15,460 @@ from tqdm import tqdm
 # Add the parent directory (project root) to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from config.default_config import get_default_config
 from utils.distributed import setup_distributed, cleanup_distributed
 from utils.logging_utils import setup_logging
-from models.stylegan2_model import StyleGAN2Model
-from models.decoder import DecoderSD_L, DecoderSD_M, DecoderSD_S, StyleGAN2Decoder
 from utils.checkpoint import load_checkpoint
+from models.decoder import DecoderSD_L, DecoderSD_M, DecoderSD_S, StyleGAN2Decoder
+from models.stylegan2_model import StyleGAN2Model
+from models.stable_diffusion_model import StableDiffusionModel
+
+
+def validate_args(args):
+    """Validate command line arguments."""
+    # Check if checkpoint exists
+    if not os.path.exists(args.checkpoint_path):
+        raise ValueError(f"Checkpoint not found at: {args.checkpoint_path}")
+    
+    # Validate image_pixel_count
+    total_pixels = 3 * args.img_size * args.img_size  # 3 channels
+    if args.image_pixel_count > total_pixels:
+        raise ValueError(
+            f"image_pixel_count ({args.image_pixel_count}) cannot be larger than "
+            f"total pixels in image ({total_pixels})"
+        )
+    
+    # Validate max_pixels
+    if args.max_pixels > total_pixels:
+        raise ValueError(
+            f"max_pixels ({args.max_pixels}) cannot be larger than "
+            f"total pixels in image ({total_pixels})"
+        )
+    
+    # Validate StyleGAN2 local path if using StyleGAN2
+    if args.model_type == "stylegan2" and not os.path.exists(args.stylegan2_local_path):
+        if args.rank == 0:
+            logging.warning(f"StyleGAN2 model not found at {args.stylegan2_local_path}, "
+                          f"will attempt to download from {args.stylegan2_url}")
 
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Pixel Manipulation Experiment")
+    parser = argparse.ArgumentParser(description="Pixel Manipulation Analysis for Decoder Predictions")
     
-    # Model configuration
+    # Model type selection
     parser.add_argument("--model_type", type=str, default="stylegan2",
-                       choices=["stylegan2"],
+                       choices=["stylegan2", "stable-diffusion"],
                        help="Type of generative model to use")
     
-    # StyleGAN2 configuration
-    parser.add_argument("--stylegan2_url", type=str,
-                        default="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
-                        help="URL for the pretrained StyleGAN2 model")
-    parser.add_argument("--stylegan2_local_path", type=str,
-                        default="ffhq70k-paper256-ada.pkl",
-                        help="Local path to store/load the StyleGAN2 model")
+    # Common configuration
+    parser.add_argument("--checkpoint_path", type=str, required=True,
+                       help="Path to decoder checkpoint to evaluate")
+    parser.add_argument("--img_size", type=int, default=256,
+                       help="Image resolution")
     
     # Decoder configuration
-    parser.add_argument("--checkpoint_path", type=str, required=True,
-                        help="Path to decoder checkpoint")
     parser.add_argument("--decoder_size", type=str, default="M",
-                        choices=["S", "M", "L"],
-                        help="Size of decoder to use (S=Small, M=Medium, L=Large)")
-    parser.add_argument("--img_size", type=int, default=256,
-                        help="Image resolution")
+                       choices=["S", "M", "L"],
+                       help="Size of decoder model (for Stable Diffusion)")
     parser.add_argument("--image_pixel_count", type=int, default=32,
-                        help="Number of pixels to predict")
-    parser.add_argument("--image_pixel_set_seed", type=int, default=42,
-                        help="Random seed for selecting pixel indices")
+                       help="Number of pixels to predict (output dimension of decoder)")
     
     # Experiment configuration
     parser.add_argument("--num_images", type=int, default=10,
-                        help="Number of different images to test")
+                       help="Number of different images to test")
     parser.add_argument("--num_repeats", type=int, default=5,
-                        help="Number of repeats for each pixel count")
+                       help="Number of random repeats for each manipulation level")
     parser.add_argument("--max_pixels", type=int, default=65536,
-                        help="Maximum number of pixels to manipulate")
-    parser.add_argument("--pixel_steps", type=str, default="1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536",
-                        help="Comma-separated list of number of pixels to manipulate")
+                       help="Maximum number of pixels to manipulate")
+    parser.add_argument("--base", type=int, default=2,
+                       help="Base for exponential increase in pixel count (default: 2 for 1,2,4,8,...)")
     
     # Output configuration
     parser.add_argument("--output_dir", type=str, default="pixel_manipulation_results",
-                        help="Directory to save experiment results")
+                       help="Directory to save results")
     
-    return parser.parse_args()
+    # StyleGAN2 specific args
+    parser.add_argument("--stylegan2_url", type=str,
+                       default="https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/paper-fig7c-training-set-sweeps/ffhq70k-paper256-ada.pkl",
+                       help="URL for the pretrained StyleGAN2 model")
+    parser.add_argument("--stylegan2_local_path", type=str,
+                       default="ffhq70k-paper256-ada.pkl",
+                       help="Local path to store/load the StyleGAN2 model")
+    
+    # Stable Diffusion specific args
+    parser.add_argument("--sd_model_name", type=str,
+                       default="stabilityai/stable-diffusion-xl-base-1.0",
+                       help="Name of the Stable Diffusion model to use")
+    parser.add_argument("--sd_prompt", type=str, default="a photo of a cat",
+                       help="Text prompt for Stable Diffusion")
+    parser.add_argument("--sd_num_inference_steps", type=int, default=30,
+                       help="Number of inference steps for Stable Diffusion")
+    parser.add_argument("--sd_guidance_scale", type=float, default=7.5,
+                       help="Guidance scale for Stable Diffusion")
+    parser.add_argument("--sd_enable_cpu_offload", action="store_true",
+                       help="Enable CPU offloading for Stable Diffusion")
+    parser.add_argument("--sd_dtype", type=str, default="float16",
+                       choices=["float16", "float32"],
+                       help="Data type for Stable Diffusion model")
+    
+    # Add rank argument for validation
+    parser.add_argument("--rank", type=int, default=0,
+                       help="Process rank for distributed training")
+    
+    args = parser.parse_args()
+    validate_args(args)
+    return args
 
 
-def compute_prediction_distance(pred1, pred2):
-    """
-    Compute distance between two decoder predictions.
-    You can modify this function to use different distance metrics.
-    """
-    return torch.nn.functional.mse_loss(pred1, pred2).item()
-
-
-def manipulate_pixels(image, num_pixels, manipulation_value=-1.0):
-    """
-    Randomly manipulate a specified number of pixels in the image.
-    
-    Args:
-        image (torch.Tensor): Input image tensor (C x H x W)
-        num_pixels (int): Number of pixels to manipulate
-        manipulation_value (float): Value to set for manipulated pixels
-    
-    Returns:
-        torch.Tensor: Manipulated image
-        list: Indices of manipulated pixels (for logging/visualization)
-    """
-    manipulated_image = image.clone()
-    
-    # Get image dimensions
-    C, H, W = image.shape
-    total_pixels = H * W
-    
-    # Randomly select pixels to manipulate
-    flat_indices = np.random.choice(total_pixels, size=num_pixels, replace=False)
-    y_indices = flat_indices // W
-    x_indices = flat_indices % W
-    
-    # Manipulate selected pixels across all channels
-    for c in range(C):
-        manipulated_image[c, y_indices, x_indices] = manipulation_value
-    
-    return manipulated_image, list(zip(y_indices, x_indices))
-
-
-def run_experiment(args, decoder, generator, device):
-    """Run the pixel manipulation experiment."""
-    # Parse pixel steps
-    pixel_steps = [int(x) for x in args.pixel_steps.split(',')]
-    
-    # Initialize results dictionary
-    results = {
-        'pixel_counts': pixel_steps,
-        'distances': [],
-        'std_devs': []
-    }
-    
-    # For each test image
-    for img_idx in tqdm(range(args.num_images), desc="Processing images"):
-        # Generate a random image
-        with torch.no_grad():
-            z = torch.randn(1, generator.z_dim, device=device)
-            original_image = generator(z)[0]  # Take first image
+class PixelManipulationExperiment:
+    def __init__(self, args, device, rank=0):
+        """
+        Initialize the experiment.
         
-        # Get original decoder prediction
-        original_pred = decoder(original_image.unsqueeze(0))
+        Args:
+            args: Parsed command line arguments
+            device: PyTorch device
+            rank: Process rank for distributed training
+        """
+        self.args = args
+        self.device = device
+        self.rank = rank
         
-        # For each pixel count
-        img_distances = []
-        for num_pixels in pixel_steps:
-            step_distances = []
-            
-            # Repeat multiple times for each pixel count
-            for _ in range(args.num_repeats):
-                # Manipulate pixels
-                manipulated_image, _ = manipulate_pixels(
-                    original_image.clone(),
-                    num_pixels
+        # Initialize models
+        self._setup_models()
+        
+        # Calculate manipulation levels
+        self.manipulation_levels = self._get_manipulation_levels()
+        if self.rank == 0:
+            logging.info(f"Testing pixel manipulation levels: {self.manipulation_levels}")
+    
+    def _setup_models(self):
+        """
+        Set up the generative model and decoder.
+        """
+        if self.rank == 0:
+            logging.info("Setting up models...")
+            logging.info(f"Loading decoder from checkpoint: {self.args.checkpoint_path}")
+        
+        try:
+            # Initialize generative model based on type
+            if self.args.model_type == "stylegan2":
+                self.generative_model = StyleGAN2Model(
+                    url=self.args.stylegan2_url,
+                    local_path=self.args.stylegan2_local_path,
+                    img_size=self.args.img_size,
+                    device=self.device
                 )
                 
-                # Get new prediction
-                with torch.no_grad():
-                    new_pred = decoder(manipulated_image.unsqueeze(0))
+                # Initialize StyleGAN2 decoder
+                self.decoder = StyleGAN2Decoder(
+                    image_size=self.args.img_size,
+                    channels=3,
+                    output_dim=self.args.image_pixel_count
+                ).to(self.device)
                 
-                # Compute and store distance
-                distance = compute_prediction_distance(original_pred, new_pred)
-                step_distances.append(distance)
+            else:  # stable-diffusion
+                self.generative_model = StableDiffusionModel(
+                    model_name=self.args.sd_model_name,
+                    img_size=self.args.img_size,
+                    device=self.device,
+                    enable_cpu_offload=self.args.sd_enable_cpu_offload,
+                    dtype=getattr(torch, self.args.sd_dtype)
+                )
+                
+                # Initialize SD decoder based on size
+                decoder_class = {
+                    "S": DecoderSD_S,
+                    "M": DecoderSD_M,
+                    "L": DecoderSD_L
+                }[self.args.decoder_size]
+                
+                self.decoder = decoder_class(
+                    image_size=self.args.img_size,
+                    channels=3,
+                    output_dim=self.args.image_pixel_count
+                ).to(self.device)
             
-            img_distances.append(step_distances)
+            # Load decoder checkpoint
+            if self.rank == 0:
+                logging.info(f"Loading decoder checkpoint from {self.args.checkpoint_path}")
+            
+            load_checkpoint(
+                checkpoint_path=self.args.checkpoint_path,
+                decoder=self.decoder,
+                device=self.device
+            )
+            
+            # Set models to eval mode
+            self.generative_model.eval()
+            self.decoder.eval()
+            
+            if self.rank == 0:
+                logging.info("Models setup completed")
+                
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error setting up models: {str(e)}")
+            raise
+    
+    def _get_manipulation_levels(self) -> List[int]:
+        """
+        Generate list of pixel counts to test.
+        """
+        levels = []
+        current = 1
+        total_pixels = 3 * self.args.img_size * self.args.img_size
         
-        # Convert to numpy for easier computation
-        img_distances = np.array(img_distances)
+        while current <= min(self.args.max_pixels, total_pixels):
+            levels.append(current)
+            current *= self.args.base
         
-        # Store results for this image
-        if len(results['distances']) == 0:
-            results['distances'] = img_distances
-        else:
-            results['distances'] += img_distances
+        return levels
     
-    # Average results across all images
-    results['distances'] = results['distances'] / args.num_images
+    def _manipulate_pixels(
+        self,
+        image: torch.Tensor,
+        num_pixels: int,
+        seed: int
+    ) -> torch.Tensor:
+        """
+        Manipulate specified number of random pixels in the image.
+        
+        Args:
+            image: Input image tensor [B, C, H, W]
+            num_pixels: Number of pixels to manipulate
+            seed: Random seed for reproducibility
+            
+        Returns:
+            Manipulated image tensor
+        """
+        # Set seed on both CPU and GPU
+        torch.manual_seed(seed)
+        if self.device.type == 'cuda':
+            torch.cuda.manual_seed(seed)
+        
+        # Calculate total number of pixels
+        batch_size = image.shape[0]
+        channels = image.shape[1]
+        total_pixels = channels * self.args.img_size * self.args.img_size
+        
+        # Generate random indices directly on device
+        indices = torch.randperm(total_pixels, device=self.device)[:num_pixels]
+        
+        # Create manipulated copy
+        manipulated = image.clone()
+        flattened = manipulated.view(batch_size, -1)
+        flattened[:, indices] = -1.0  # Set to -1 for StyleGAN range
+        
+        return flattened.view_as(image)
     
-    # Compute standard deviations
-    results['std_devs'] = np.std(results['distances'], axis=1)
-    results['distances'] = np.mean(results['distances'], axis=1)
+    def _compute_prediction_shift(
+        self,
+        pred_original: torch.Tensor,
+        pred_manipulated: torch.Tensor
+    ) -> Dict[str, float]:
+        """
+        Compute various metrics for prediction shift.
+        
+        Args:
+            pred_original: Original decoder prediction
+            pred_manipulated: Manipulated decoder prediction
+            
+        Returns:
+            Dictionary of metrics
+        """
+        with torch.no_grad():
+            # L2 distance
+            l2_dist = torch.norm(pred_manipulated - pred_original, p=2, dim=1).mean().item()
+            
+            # L1 distance
+            l1_dist = torch.norm(pred_manipulated - pred_original, p=1, dim=1).mean().item()
+            
+            # Cosine similarity
+            cos_sim = torch.nn.functional.cosine_similarity(
+                pred_manipulated,
+                pred_original,
+                dim=1
+            ).mean().item()
+        
+        return {
+            'l2_distance': l2_dist,
+            'l1_distance': l1_dist,
+            'cosine_similarity': cos_sim
+        }
     
-    return results
+    def run_experiment(self) -> Dict[str, Dict[str, List[float]]]:
+        """
+        Run the pixel manipulation experiment.
+        
+        Returns:
+            Dictionary containing results for each metric and manipulation level
+        """
+        results = {
+            'l2_distance': [],
+            'l1_distance': [],
+            'cosine_similarity': [],
+            'std_l2': [],
+            'std_l1': [],
+            'std_cos': []
+        }
+        
+        if self.rank == 0:
+            logging.info(f"Running experiment with {self.args.num_images} images, "
+                        f"{self.args.num_repeats} repeats per level")
+        
+        try:
+            # Generate images and get predictions
+            for level in tqdm(self.manipulation_levels, desc="Manipulation levels", disable=self.rank != 0):
+                level_metrics = {
+                    'l2_distance': [],
+                    'l1_distance': [],
+                    'cosine_similarity': []
+                }
+                
+                # Test multiple images
+                for img_idx in range(self.args.num_images):
+                    try:
+                        # Generate image
+                        with torch.no_grad():
+                            if self.args.model_type == "stylegan2":
+                                z = torch.randn(1, self.generative_model.z_dim, device=self.device)
+                                image = self.generative_model.generate_images(
+                                    batch_size=1,
+                                    device=self.device,
+                                    z=z,
+                                    noise_mode="const"
+                                )
+                            else:  # stable-diffusion
+                                image = self.generative_model.generate_images(
+                                    batch_size=1,
+                                    device=self.device,
+                                    prompt=self.args.sd_prompt,
+                                    num_inference_steps=self.args.sd_num_inference_steps,
+                                    guidance_scale=self.args.sd_guidance_scale
+                                )
+                        
+                        # Get original prediction
+                        with torch.no_grad():
+                            pred_original = self.decoder(image)
+                        
+                        # Test multiple random manipulations
+                        for repeat in range(self.args.num_repeats):
+                            # Set different seed for each repeat
+                            seed = img_idx * 1000 + repeat
+                            
+                            # Manipulate pixels
+                            manipulated = self._manipulate_pixels(image, level, seed)
+                            
+                            # Get prediction for manipulated image
+                            with torch.no_grad():
+                                pred_manipulated = self.decoder(manipulated)
+                            
+                            # Compute metrics
+                            metrics = self._compute_prediction_shift(pred_original, pred_manipulated)
+                            
+                            # Store results
+                            for metric_name, value in metrics.items():
+                                level_metrics[metric_name].append(value)
+                        
+                        # Clear CUDA cache after processing each image
+                        if self.device.type == 'cuda':
+                            torch.cuda.empty_cache()
+                            
+                    except Exception as e:
+                        if self.rank == 0:
+                            logging.error(f"Error processing image {img_idx} at level {level}: {str(e)}")
+                            logging.error("Skipping this image and continuing...")
+                        continue
+                
+                # Average results for this level
+                results['l2_distance'].append(np.mean(level_metrics['l2_distance']))
+                results['l1_distance'].append(np.mean(level_metrics['l1_distance']))
+                results['cosine_similarity'].append(np.mean(level_metrics['cosine_similarity']))
+                
+                # Store standard deviations
+                results['std_l2'].append(np.std(level_metrics['l2_distance']))
+                results['std_l1'].append(np.std(level_metrics['l1_distance']))
+                results['std_cos'].append(np.std(level_metrics['cosine_similarity']))
+                
+                if self.rank == 0:
+                    logging.info(f"Level {level} pixels - "
+                               f"L2: {results['l2_distance'][-1]:.4f} ± {results['std_l2'][-1]:.4f}, "
+                               f"L1: {results['l1_distance'][-1]:.4f} ± {results['std_l1'][-1]:.4f}, "
+                               f"Cos: {results['cosine_similarity'][-1]:.4f} ± {results['std_cos'][-1]:.4f}")
+            
+        except Exception as e:
+            if self.rank == 0:
+                logging.error(f"Error in experiment: {str(e)}")
+            raise
+        
+        return results
 
-
-def save_results(results, output_dir):
-    """Save experiment results."""
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Save raw results
-    np.savez(
-        os.path.join(output_dir, 'pixel_manipulation_results.npz'),
-        pixel_counts=results['pixel_counts'],
-        distances=results['distances'],
-        std_devs=results['std_devs']
-    )
-    
-    # Create a simple text summary
-    with open(os.path.join(output_dir, 'summary.txt'), 'w') as f:
-        f.write("Pixel Manipulation Experiment Results\n")
-        f.write("===================================\n\n")
-        f.write("Pixels Manipulated | Mean Distance | Std Dev\n")
-        f.write("-----------------------------------------\n")
-        for px, dist, std in zip(results['pixel_counts'], 
-                               results['distances'],
-                               results['std_devs']):
-            f.write(f"{px:16d} | {dist:12.6f} | {std:7.6f}\n")
+    def print_results(self, results: Dict[str, List[float]]):
+        """
+        Print the experimental results in a table format.
+        
+        Args:
+            results: Dictionary of results
+        """
+        if self.rank == 0:
+            # Print header
+            logging.info("\nPixel Manipulation Results:")
+            logging.info("-" * 120)
+            logging.info(
+                f"{'Pixels':>10} | "
+                f"{'L2 Distance':>20} | "
+                f"{'L1 Distance':>20} | "
+                f"{'Cosine Sim':>20}"
+            )
+            logging.info("-" * 120)
+            
+            # Print results for each manipulation level
+            for i, level in enumerate(self.manipulation_levels):
+                logging.info(
+                    f"{level:>10} | "
+                    f"{results['l2_distance'][i]:>10.4f} ± {results['std_l2'][i]:>7.4f} | "
+                    f"{results['l1_distance'][i]:>10.4f} ± {results['std_l1'][i]:>7.4f} | "
+                    f"{results['cosine_similarity'][i]:>10.4f} ± {results['std_cos'][i]:>7.4f}"
+                )
+            
+            logging.info("-" * 120)
 
 
 def main():
-    """Main entry point for the experiment."""
+    """Main entry point for pixel manipulation experiment."""
     args = parse_args()
     
-    # Setup distributed training first
+    # Setup distributed environment
     local_rank, rank, world_size, device = setup_distributed()
-    
-    # Load default configuration and update with args
-    config = get_default_config()
-    config.update_from_args(args, mode='evaluate')
+    args.rank = rank  # Add rank to args for validation
     
     # Create output directory and setup logging
     if rank == 0:
-        os.makedirs(config.output_dir, exist_ok=True)
-        setup_logging(config.output_dir, rank)
-        logging.info(f"Configuration:\n{config}")
+        os.makedirs(args.output_dir, exist_ok=True)
+        setup_logging(args.output_dir, rank)
+        logging.info(f"Arguments:\n{args}")
     
     try:
-        # Initialize models
-        generator = StyleGAN2Model(
-            url=args.stylegan2_url,
-            local_path=args.stylegan2_local_path,
-            device=device,
-            img_size=args.img_size
-        ).to(device)
+        # Initialize and run experiment
+        experiment = PixelManipulationExperiment(args, device, rank)
+        results = experiment.run_experiment()
         
-        # Initialize decoder based on model type and size
-        decoder_output_dim = args.image_pixel_count  # For direct pixel prediction
-        
-        if args.model_type == "stylegan2":
-            decoder = StyleGAN2Decoder(
-                image_size=args.img_size,
-                channels=3,
-                output_dim=decoder_output_dim
-            ).to(device)
-            if rank == 0:
-                logging.info(f"Initialized StyleGAN2Decoder with output_dim={decoder_output_dim}")
-        else:  # stable-diffusion
-            decoder_class = {
-                "S": DecoderSD_S,
-                "M": DecoderSD_M,
-                "L": DecoderSD_L
-            }[args.decoder_size]
-            
-            decoder = decoder_class(
-                image_size=args.img_size,
-                channels=3,
-                output_dim=decoder_output_dim
-            ).to(device)
-            
-            if rank == 0:
-                logging.info(f"Initialized SD-Decoder-{args.decoder_size} with output_dim={decoder_output_dim}")
-        
-        decoder.eval()
-        
-        # Load checkpoint using the utility function
         if rank == 0:
-            logging.info(f"Loading checkpoint from {args.checkpoint_path}...")
-        
-        load_checkpoint(
-            checkpoint_path=args.checkpoint_path,
-            decoder=decoder,
-            device=device
-        )
-        
-        # Run experiment
-        results = run_experiment(args, decoder, generator, device)
-        
-        # Save results
-        if rank == 0:
-            save_results(results, args.output_dir)
+            # Save results
+            results_path = os.path.join(args.output_dir, 'results.json')
+            with open(results_path, 'w') as f:
+                json.dump({
+                    'manipulation_levels': experiment.manipulation_levels,
+                    'metrics': results
+                }, f, indent=2)
+            
+            # Print results in table format
+            experiment.print_results(results)
             logging.info(f"Experiment completed. Results saved to {args.output_dir}")
         
     except Exception as e:
-        if rank == 0:
+        if self.rank == 0:
             logging.error(f"Error in experiment: {str(e)}", exc_info=True)
         raise
     finally:
@@ -278,4 +477,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
